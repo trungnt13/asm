@@ -13,7 +13,7 @@ jobs:
   build:
     name: Release build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ matrix.timeout }}
+    timeout-minutes: ${{ matrix.job_timeout }}
     permissions:
       contents: read
     defaults:
@@ -28,18 +28,21 @@ jobs:
       matrix:
         include:
           - runner: macos-15
-            timeout: 180
+            build_timeout: 180
+            job_timeout: 195
             target: aarch64-apple-darwin
           - runner: ubuntu-22.04
-            timeout: 90
+            build_timeout: 330
+            job_timeout: 345
             target: x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
         with:
           targets: ${{ matrix.target }}
+          components: llvm-tools-preview
       - name: Install Python for package assembly and verification
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -61,7 +64,15 @@ jobs:
         with:
           target: ${{ matrix.target }}
           repository: trungnt13/asm
+      - name: Prepare standard Linux runner for PGO
+        if: ${{ contains(matrix.target, 'linux-gnu') }}
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/prepare-linux-release-runner.sh"
+      - name: Fetch and validate release PGO profile
+        if: ${{ contains(matrix.target, 'linux-gnu') }}
+        run: python3 "${GITHUB_WORKSPACE}/scripts/pgo/setup.py" --target "${{ matrix.target }}" --output "${GITHUB_WORKSPACE}/diagnostics/pgo" --env-file "$GITHUB_ENV"
+
       - name: Build ASM with resource sampling
+        timeout-minutes: ${{ matrix.build_timeout }}
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
@@ -85,11 +96,11 @@ jobs:
           sampler_pid=$!
           trap 'kill "$sampler_pid" 2>/dev/null || true' EXIT
           if [[ "$TARGET" == *-linux-gnu ]]; then
-            cargo build --locked --release --target "$TARGET" --bin bwrap
+            env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 cargo build --locked --release --target "$TARGET" --bin bwrap
             CODEX_BWRAP_SHA256="$(shasum -a 256 "target/${TARGET}/release/bwrap" | awk '{print $1}')"
             export CODEX_BWRAP_SHA256
           fi
-          cargo build --release --target "$TARGET" --bin codex --bin codex-code-mode-host --bin codex-exec-server --timings
+          cargo build --locked --release --target "$TARGET" --bin codex --bin codex-code-mode-host --bin codex-exec-server --timings 2>&1 | tee "${GITHUB_WORKSPACE}/diagnostics/build-${TARGET}.log"
 
       - name: Create archive
         env:
@@ -140,6 +151,8 @@ jobs:
         with:
           name: diagnostics-${{ matrix.target }}
           path: |
+            diagnostics/build-*.log
+            diagnostics/pgo/validation.json
             diagnostics/resources-${{ matrix.target }}.log
             diagnostics/smoke-${{ matrix.target }}.log
             diagnostics/smoke-ubuntu-${{ matrix.target }}.log

@@ -70,7 +70,7 @@ jobs:
     needs: prepare
     name: Build ${{ matrix.target }} (jobs ${{ matrix.jobs }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ needs.prepare.outputs.publish == 'true' && (needs.prepare.outputs.candidate_ref == '' && 360 || matrix.publish_timeout) || matrix.timeout }}
+    timeout-minutes: ${{ needs.prepare.outputs.publish == 'true' && needs.prepare.outputs.candidate_ref == '' && 360 || matrix.job_timeout }}
     permissions:
       actions: read
       contents: write
@@ -84,7 +84,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.macos_concurrency_experiment == true && '[{"runner":"macos-15","timeout":180,"publish_timeout":195,"target":"aarch64-apple-darwin","jobs":2},{"runner":"macos-15","timeout":180,"publish_timeout":195,"target":"aarch64-apple-darwin","jobs":3}]' || '[{"runner":"macos-15","timeout":300,"publish_timeout":315,"target":"aarch64-apple-darwin","jobs":0},{"runner":"ubuntu-22.04","timeout":90,"publish_timeout":105,"target":"x86_64-unknown-linux-gnu","jobs":0}]') }}
+        include: ${{ fromJSON(inputs.macos_concurrency_experiment == true && '[{"runner":"macos-15","build_timeout":180,"job_timeout":195,"target":"aarch64-apple-darwin","jobs":2},{"runner":"macos-15","build_timeout":180,"job_timeout":195,"target":"aarch64-apple-darwin","jobs":3}]' || '[{"runner":"macos-15","build_timeout":300,"job_timeout":315,"target":"aarch64-apple-darwin","jobs":0},{"runner":"ubuntu-22.04","build_timeout":330,"job_timeout":345,"target":"x86_64-unknown-linux-gnu","jobs":0}]') }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -136,6 +136,7 @@ jobs:
         uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
         with:
           targets: ${{ matrix.target }}
+          components: llvm-tools-preview
 
       - if: ${{ contains(matrix.target, 'linux-gnu') && steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && steps.find.outputs.reuse != 'true' }}
         name: Install GNU build tools
@@ -158,8 +159,15 @@ jobs:
           target: ${{ matrix.target }}
           repository: trungnt13/asm
 
+      - name: Prepare standard Linux runner for PGO
+        if: ${{ contains(matrix.target, 'linux-gnu') && hashFiles('scripts/pgo/setup.py') != '' && steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && steps.find.outputs.reuse != 'true' }}
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/prepare-linux-release-runner.sh"
+      - name: Fetch and validate release PGO profile
+        if: ${{ contains(matrix.target, 'linux-gnu') && hashFiles('scripts/pgo/setup.py') != '' && steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && steps.find.outputs.reuse != 'true' }}
+        run: python3 "${GITHUB_WORKSPACE}/scripts/pgo/setup.py" --target "${{ matrix.target }}" --output "${GITHUB_WORKSPACE}/diagnostics/pgo" --env-file "$GITHUB_ENV"
+
       - name: Build ASM with resource sampling
-        timeout-minutes: ${{ matrix.timeout }}
+        timeout-minutes: ${{ matrix.build_timeout }}
         if: ${{ steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && steps.find.outputs.reuse != 'true' }}
         shell: bash
         env:
@@ -175,7 +183,7 @@ jobs:
             logical_cpus=$(nproc)
             ram_bytes=$(awk '/MemTotal:/ { print $2 * 1024 }' /proc/meminfo)
           fi
-          printf 'build_jobs=%s logical_cpus=%s ram_bytes=%s\n' "$BUILD_JOBS" "$logical_cpus" "$ram_bytes" > "${GITHUB_WORKSPACE}/diagnostics/resources-${TARGET}.log"
+          printf 'build_jobs=%s logical_cpus=%s ram_bytes=%s\n' "${CARGO_BUILD_JOBS:-$BUILD_JOBS}" "$logical_cpus" "$ram_bytes" > "${GITHUB_WORKSPACE}/diagnostics/resources-${TARGET}.log"
           (while true; do
             echo "Resource sample $(date -u)"
             df -h "${GITHUB_WORKSPACE}" || echo 'Filesystem sample unavailable'
@@ -194,7 +202,7 @@ jobs:
           trap 'kill "$sampler_pid" 2>/dev/null || true' EXIT
           # A resumed immutable candidate retains its original package contract.
           if [[ "$TARGET" == *-linux-gnu ]] && grep -Fq 'codex-package.json' "${GITHUB_WORKSPACE}/.github/scripts/smoke-codex-archive.py"; then
-            cargo build --locked --release --target "$TARGET" --bin bwrap
+            env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 cargo build --locked --release --target "$TARGET" --bin bwrap
             CODEX_BWRAP_SHA256="$(shasum -a 256 "target/${TARGET}/release/bwrap" | awk '{print $1}')"
             export CODEX_BWRAP_SHA256
           fi
@@ -203,7 +211,7 @@ jobs:
             build_args+=(--bin codex-exec-server)
           fi
           if [[ "$BUILD_JOBS" != 0 ]]; then build_args+=(--jobs "$BUILD_JOBS"); fi
-          cargo build "${build_args[@]}"
+          cargo build "${build_args[@]}" 2>&1 | tee "${GITHUB_WORKSPACE}/diagnostics/build-${TARGET}.log"
 
       - name: Create archive
         if: ${{ steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && steps.find.outputs.reuse != 'true' }}
@@ -259,7 +267,7 @@ jobs:
         if: ${{ steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && (steps.find.outputs.reuse != 'true' || steps.find.outputs.run_id != github.run_id) }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: ${{ matrix.jobs == 0 && format('codex-{0}', matrix.target) || format('experiment-codex-{0}-jobs-{1}', matrix.target, matrix.jobs) }}
+          name: ${{ inputs.macos_concurrency_experiment == true && format('experiment-codex-{0}-jobs-{1}', matrix.target, matrix.jobs) || format('codex-{0}', matrix.target) }}
           path: dist/codex-${{ matrix.target }}.tar.gz
           if-no-files-found: error
 
@@ -279,6 +287,8 @@ jobs:
         with:
           name: diagnostics-${{ matrix.target }}-jobs-${{ matrix.jobs }}
           path: |
+            diagnostics/build-*.log
+            diagnostics/pgo/validation.json
             diagnostics/resources-${{ matrix.target }}.log
             diagnostics/smoke-${{ matrix.target }}.log
             diagnostics/smoke-ubuntu-${{ matrix.target }}.log
