@@ -726,7 +726,10 @@ pub(crate) async fn run_turn(
                 .await;
 
             sess.report_reasoning_effort(step_context.as_ref()).await;
-            sess.record_system1_model_step(&turn_context);
+            sess.record_system1_model_step(
+                &turn_context,
+                step_context.settings.effective_reasoning_effort(),
+            );
 
             run_sampling_request(
                 Arc::clone(&sess),

@@ -649,28 +649,25 @@ The endpoint receives bounded conversation evidence and the `api_key_env` creden
 
 **Choices.** Adapt ordinary roots and spawned subagents, not internal workers. Use the selected backend to choose supported effort within bounds. Keep Ultra/Persistent, models, service tiers, execution modes, permissions, and saved defaults unchanged. With fewer than two efforts, skip Decisions and warmup; retain current effort.
 
-Generate selection guidance from the supported model default before applying bounds. Use that default as the normal-work reference. For a `max` default, use the preceding catalog-supported ordinary effort instead. Do not change the task baseline. Model meaning remains catalog-owned.
-
-Use low/medium/high/xhigh descriptions for one-below-reference/at-reference/one-above-reference/further-above-reference choices. Use fixed mechanical-execution guidance further below reference. Always use `max_effort_description` for max and fixed direct-execution descriptions for `none`/`minimal`. Without a supported default, keep effort-labeled guidance.
+Match each allowed effort to its named selection guidance without shifting descriptions by model default. Keep catalog meanings and supported choices model-specific; retain fixed direct-execution descriptions for `none` and `minimal`.
 
 Keep choice descriptions separate from the selection/safety rubric. Send only allowed main choices; warmup retains its synthetic low/medium pair. A replacement rubric must not remove or duplicate descriptions. Default description text:
 
 ```toml
 [system1]
 low_effort_description = "Straightforward coding, focused searches, and bounded analysis."
-medium_effort_description = "Ordinary substantive work, including moderately complex coding."
-high_effort_description = "Difficult debugging, multiple interacting constraints, conflicting evidence, or substantial uncertainty. Use max only for exceptionally difficult problems."
-xhigh_effort_description = "Extensive reasoning for exceptionally difficult problems, deep investigations, and demanding long-horizon planning."
+medium_effort_description = "Settled work: execute a known command, make a scoped edit, or verify a result."
+high_effort_description = "Substantive work within the model’s normal range, including implementation or interpretation that requires care."
+xhigh_effort_description = "Distinguishing plausible causes, reconciling interacting constraints, or catching subtle, consequential errors."
 max_effort_description = "Exceptionally difficult problems requiring the maximum supported reasoning budget."
 ```
 
 If configured, replace the built-in rubric with unchanged `rubric_instructions`. In both backends, prefix decision instructions with trusted baseline context, separate from evidence:
 
-- Report separate `model_default_effort`, `task_baseline_effort`, and `current_effort`; use unspecified for absent values. Do not infer baseline provenance.
-- Use the turn's configured effort as baseline. Refresh it on accepted manual effort/model changes, never adaptive selections. The model default is its normal operating point; the baseline indicates task difficulty. Weigh both with next-step evidence. Neither is a floor or ceiling. Current effort is state, not independent difficulty evidence.
+- Use the trusted task baseline as the anchor. Refresh it on accepted manual changes to the baseline, never adaptive selections. Supply `task_baseline_effort` and `last_effort`; the latter is the effective effort captured for the previous ordinary model step in this turn. Report absent values as `unspecified`; do not substitute the model default.
 - Add the next step's canonical model name and catalog description as JSON-quoted metadata. Trim descriptions to 1024 UTF-8 bytes at character boundaries. Use `unavailable` for missing, blank, or fallback metadata. Keep the decision-service model and warmup unchanged.
 - For each allowed choice, send labeled `Model meaning` and `Selection guidance` sections. Trim catalog meaning to 1024 UTF-8 bytes; use `unavailable` for missing, blank, or fallback metadata. Preserve full configured guidance, capped at 4096 bytes. The API caps each combined description at 8192 UTF-8 bytes.
-- The built-in rubric reassesses each next step. For equal reasoning demands, favor lower effort for more capable models and higher effort for less capable models. Treat baseline as guidance, not a ceiling. Enforce choices and runtime limits in code. Keep instructions/results outside the main conversation.
+- Reassess the whole next response against the task baseline. Use the nearest offered level if the anchor is out of range; when absent, select the lowest sufficient offered effort. Use the model’s capabilities for this work, without a fixed adjustment by name. Enforce allowed choices and runtime limits in code. Keep classifier instructions/results outside the main conversation.
 
 **Evidence.** Collect genuine user, assistant, and tool evidence, newest first. Exclude injected user instructions, compaction output, and encrypted reasoning. Never borrow another turn’s prompt as the current task. By default Decisions receives no images. To send a current-turn user attachment to a named endpoint, set `include_images = true` in that profile. This permission belongs to the session-fixed connection; the legacy top-level flag does not opt in any named profile. Scale scan limits with the budget: at least 128 history/input items and 32 content parts, up to 512 items and 128 parts at 32768 bytes. Older history can remain omitted; do not promise a complete transcript.
 
