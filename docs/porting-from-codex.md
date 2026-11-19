@@ -217,13 +217,20 @@ Keep fork/upstream release workflows separate. Use GitHub-hosted runners:
 | macOS ARM64 | `aarch64-apple-darwin` | `macos-15` | 300 minutes |
 | Linux x86_64 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` | 330 minutes |
 
-- Candidate, non-publishing, and postmerge jobs allow 15 minutes beyond the build step for setup, packaging, smoke, and uploads. Ordinary release jobs allow 315 minutes on macOS and 345 on Linux; postmerge and concurrency experiments retain a 180-minute macOS build step (195-minute job). Preserve optimization, flags, runner, and candidate; allow needed time rather than weakening builds. Resume candidates; never replace ready platform assets.
+- Except for legacy tag jobs, allow 15 minutes beyond the build for setup,
+  packaging, smoke checks, and uploads. Normal job limits are 315 minutes on
+  macOS and 345 on Linux. For macOS postmerge and concurrency experiments, allow
+  180 minutes to build and 195 minutes per job. Preserve optimization, flags,
+  runner, and candidate on retries. Do not replace ready assets.
 - Legacy lookup allows 190 minutes; wait guards are macOS 150/Linux 185. Timeout fails; do not duplicate builds. Only legacy tag jobs allow 360 total minutes. Actual builds retain table limits; fresh candidates do not wait for postmerge.
 - Keep Ubuntu 22.04 / glibc 2.35 as the Linux minimum and build/native-smoke baseline. A GNU triple on newer runners is insufficient. Before April 2027 retirement, use an Ubuntu 22.04 container on supported runners. Never raise the minimum.
 - Use optimized `--release` and `CARGO_PROFILE_RELEASE_STRIP=debuginfo`, not `dev-small`. Retain function symbols/optimization. Fix timeouts without weakening profiles. Upstream tests do not justify more symbol/dependency removal. Keep shell commands compatible with macOS Bash 3.2, including `set -u` array expansion.
 - Build `codex`, `codex-code-mode-host`, and `codex-exec-server` from one commit/target/profile. Pass all three prebuilt executables to canonical packaging. `codex-<target>.tar.gz` contains `bin/codex`, `bin/codex-code-mode-host`, `bin/codex-exec-server`, `codex-package.json`, and `codex-path/rg`. Linux also contains `codex-resources/bwrap`, built from matching source/release profile; embed its final SHA-256 in the CLI before packaging.
 - Keep canonical layout/pinned ripgrep manifest. Include only required resources as regular executables with matching version/target metadata, including `execServer: "bin/codex-exec-server"`. Shared-server startup must recognize/validate the package without host helpers.
-- Publish six required assets: two archives, two `SHA256SUMS-<target>`, aggregate `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh). Each platform manifest covers its archive and pinned installer. An optional local Linux v3 archive and its own checksum manifest may supplement a completed release; they do not change base assets or Latest. No source trees/diagnostics.
+- Publish six required assets: two archives, two `SHA256SUMS-<target>` files,
+  aggregate `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh).
+  Each platform checksum file covers its archive and pinned installer. Do not
+  publish source trees or logs.
 - Detect candidate contract from pinned smoke's required `codex-package.json`, not optional resource flags. Pass `--no-zsh` only if supported. Preserve older candidates' original contracts.
 - Pin builds, packaging, installer bytes, checks, and reuse to candidate SHA. Pin orchestration to dispatch SHA; save controls before checkout. Never fetch newer controls mid-run. Legacy uses verified exact tagged SHA. Candidate packaging may precede tagging.
 - Before upload, run [native smoke](../.github/scripts/smoke-codex-archive.py). CLI/exec-server versions match Cargo; all three help commands succeed with usage; manifest/resources and bundled ripgrep/Bubblewrap pass. Code-mode-host `--version` is not required. Record binary/archive sizes.
@@ -232,6 +239,98 @@ Keep fork/upstream release workflows separate. Use GitHub-hosted runners:
 - Fork Linux uses native GNU and [`install-gnu-build-tools.sh`](../.github/scripts/install-gnu-build-tools.sh), not Zig/MUSL wrappers. Preserve inherited MUSL tooling. Retain `AWS_LC_SYS_NO_JITTER_ENTROPY` and verified V8 through [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml). Install Python 3.11+ explicitly on Ubuntu 22.04.
 - Preserve upstream GNU system allocator, locale, and PTY choices; do not mimic MUSL in Rust conditions. Use system OpenSSL 3; system liblzma is permitted. Match [`smoke-ubuntu-archive.sh`](../.github/scripts/smoke-ubuntu-archive.sh) libraries to ELF dependencies. Do not add ALSA/GStreamer requirements for GNU migration.
 - Agree intent before adding platforms, DMGs, optional resources, npm, R2, WinGet, or website/OpenAI-only publishing.
+
+#### Release PGO
+
+Profile-guided optimization (PGO) uses execution data to guide the compiler.
+LTO means link-time optimization.
+
+| Build | CPU | LTO | Codegen units | PGO |
+| --- | --- | --- | --- | --- |
+| Linux CI | Portable x86-64 | Thin | 4 | Yes |
+| Linux local, optional | x86-64-v3 | Fat | 1 | Yes |
+| macOS CI | Apple Silicon | Upstream | Upstream | No |
+
+Leave Cargo profiles unchanged. Use one Cargo job for Linux PGO. Build Bubblewrap
+separately without PGO. CI does not need training credentials or histories. Publish the indexed
+profile as a dependency, not as a CLI release.
+
+[`setup.py`](../scripts/pgo/setup.py) fetches the profile pinned in
+[`agent-linux.json`](../scripts/pgo/agent-linux.json). Use Python 3.11+ and
+`llvm-tools-preview` from the consuming compiler. Fail if the selected profile
+is missing or incompatible. Training versions record provenance; they do not
+gate reuse. Keep compiler matching logs and verify the package and real-provider
+behavior. Recheck after compiler or source changes. Refresh the profile if
+matching or performance declines. A readable profile does not prove a speedup.
+
+For local use, run from `codex-rs`. Omit `--env-file` to validate only:
+
+```bash
+pgo_dir=$(mktemp -d)
+python3 ../scripts/pgo/setup.py --target x86_64-unknown-linux-gnu \
+  --output "$pgo_dir" --env-file "$pgo_dir/cargo.env" &&
+  while IFS= read -r setting; do export "$setting"; done < "$pgo_dir/cargo.env"
+```
+
+Load assignments without evaluating shell code. Pass the same target to Cargo.
+Keep the profile until the build ends.
+
+#### Optional Linux v3 package
+
+Build from the exact release tag in a clean checkout. Use a v3-capable machine
+and an Ubuntu 22.04 environment. Install the candidate toolchain, CI build tools,
+`llvm-tools-preview`, and Python 3.11+ (set `PYTHON` if needed). Use absolute
+paths. For `v8_dir`, supply the archive, bindings, checksum file, and
+`release.json` from the release used by
+[`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml).
+
+```bash
+just build-release-v3 "$tag" "$output" "$v8_dir"
+```
+
+Keep the archive and its `.provenance` file together. Run the release-source
+live check before uploading. Before the first v3 upload, update and validate
+`tngo-workflow`: its verification and rollback assume the portable directory.
+
+After the base release is complete, get approval to upload. Use Docker and an
+authorized `GH_TOKEN`. Run this from the same tagged checkout:
+
+```bash
+GITHUB_REPOSITORY=trungnt13/asm RELEASE_TAG="$tag" RELEASE_SHA="$(git rev-parse HEAD)" \
+  python3 .github/scripts/publish-fork-release.py publish-v3 \
+    --archive "$output/codex-x86_64-unknown-linux-gnu-v3.tar.gz"
+```
+
+Upload the archive first and its verified checksum file last. Do not replace
+base assets or change Latest. The installer selects v3 only if glibc reports
+full support and the selected release has the uploaded v3 checksum file.
+Otherwise use the portable package. If an advertised v3 package fails
+verification, stop. Install the variants in separate directories.
+
+#### Train the PGO profile
+
+Use Python 3.11+, authorized Codex sign-in, and an instrumented CLI with its
+matching helper. Set `CODEX_HOME` to the source home and `PGO_INSTRUMENTED_BIN`
+to the CLI. Set `PGO_TRAINING_DIR` to a new private directory outside tracked
+sources. Run `python3 scripts/pgo/train.py`. Do not run it in release CI.
+
+The harness copies feature settings to private homes and disables System1. It
+uses full-access mode in disposable directories, not OS-enforced isolation.
+The monitor checks these limits: 890 completions, 19.9M input
+tokens, 245K output tokens, 60 minutes, or $4.90 API-equivalent. Actual charges
+are unknown. Never publish training homes, histories, or credentials.
+
+Verify 10/15/20 root turns and parallel child peaks of 4/3/2. Check the cheap
+model, fixture results, and streaming. Merge only that run's
+`profiles/*.profraw` with matching `llvm-profdata`. Publish the indexed result
+and update both hashes and provenance. Keep failed runs separate.
+
+The selected run peaked at eight simultaneous children. It does not cover all
+production paths. The local Fat LTO build reached about 30 GiB of proportional
+resident memory. The CI trial timed out at 330 minutes with about 22 GiB swap
+in use. Keep runner
+disk and swap checks. Require a successful full build before claiming runner
+feasibility.
 
 #### V8 dependency release
 
@@ -889,118 +988,3 @@ On Linux, cap Tokio workers at `min(CPUs, 8)` unless `TOKIO_WORKER_THREADS` is s
 On the thread host, app-server handles recognized `codex_app.create_worktree`/`attach_worktree` dynamic tools. Create/attach durable managed worktrees without changing chat cwd, workspace roots, or skills. Return paths for explicit execution; do not call the Desktop handler that changes workspace. Preserve explicit navigation.
 
 Reject explicitly untrusted chat/source projects; allow unset trust, like TUI. Require non-ephemeral chats, local execution, and durable attachments. Immediate completion is allowed with `allowAsync: true`. Preserve partial-registration recovery without duplicate checkouts. Verify attachment rendering and subsequent-turn skill retention in actual Desktop; backend checks are insufficient.
-
-### Agent-trained release PGO
-
-`scripts/pgo/setup.py` fetches and validates the profile pinned in
-`scripts/pgo/agent-linux.json`. Both local builds and CI can use it. Fork
-release workflows enable it only for Linux GNU. Ordinary Cargo profiles remain
-unchanged. The PGO build uses Thin LTO, four codegen units and one Cargo job;
-Bubblewrap is built separately without PGO. The indexed profile is a
-checksum-pinned release dependency, not a CLI release. CI never needs model auth
-or training conversations. Never publish private training homes or credentials.
-
-Training compiler versions are provenance, not an exact-version gate. Validate
-indexed format with the consuming toolchain's `llvm-profdata`, retain compiler
-missing/mismatched-profile diagnostics, and validate the actual candidate's
-packaged and real-provider behavior. Successful parsing alone does not establish
-optimization coverage or performance. Revalidate after compiler/source changes;
-refresh the profile when matching coverage or measured optimization deteriorates.
-Do not silently fall back when a selected profile is missing or incompatible.
-
-For local use, run from `codex-rs` so the script uses the same Rust toolchain as
-Cargo. Use Python 3.11+ and the consuming toolchain's `llvm-tools-preview`
-component. To validate without setting build flags, omit `--env-file`. To apply
-the flags to subsequent Cargo commands in a Bash shell:
-
-```bash
-pgo_dir=$(mktemp -d)
-python3 ../scripts/pgo/setup.py --target x86_64-unknown-linux-gnu \
-  --output "$pgo_dir" --env-file "$pgo_dir/cargo.env" &&
-  while IFS= read -r setting; do export "$setting"; done < "$pgo_dir/cargo.env"
-```
-
-Load the file as assignments, not as shell code. Pass the same explicit
-`--target` to Cargo, and keep the profile directory until the build is done.
-Actions passes its environment file to the same tool; runner-specific disk and
-swap setup stays in the workflows.
-
-#### Optional local Linux x86-64-v3 release package
-
-CI keeps portable Linux on Thin LTO, four codegen units, and PGO. macOS keeps
-upstream code generation, with no PGO. Both remain required. The optional Linux
-v3 package uses `target-cpu=x86-64-v3`, Fat LTO, one codegen unit, and the
-checksum-pinned Linux PGO profile. It uses the same tag, Cargo version, GNU ABI,
-and package layout as CI. The v3 requirement is a CPU feature level, not a
-different target triple.
-
-Build from a clean checkout of the exact release tag on a v3-capable local
-machine in an Ubuntu 22.04 environment (native or a local container). Use the
-candidate toolchain, Python 3.11+ (`PYTHON` can select it), the GNU build tools
-used by CI, and `llvm-tools-preview`. Supply an absolute local output directory
-and a directory containing the matching fork V8 archive, bindings, checksum
-manifest, and `release.json`, using the same inputs as
-[`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml). The recipe
-verifies the V8 pair, keeps its build cache and logs under the output directory,
-and leaves the installed CLI untouched:
-
-```bash
-just build-release-v3 "$tag" "$output" "$v8_dir"
-```
-
-Keep the archive and its adjacent `.provenance` file together. Run the bounded
-release-source live check on the resulting CLI before uploading. Before the
-first v3 publication, update and validate the companion `tngo-workflow` setup:
-its install verification and rollback currently require the portable path.
-Once the ordinary release is complete and publication is authorized, run this
-from the same tagged checkout with authorized `GH_TOKEN` and Docker available:
-
-```bash
-GITHUB_REPOSITORY=trungnt13/asm RELEASE_TAG="$tag" RELEASE_SHA="$(git rev-parse HEAD)" \
-  python3 .github/scripts/publish-fork-release.py publish-v3 \
-    --archive "$output/codex-x86_64-unknown-linux-gnu-v3.tar.gz"
-```
-
-The upload verifies the exact tag, package, and Ubuntu 22.04 smoke. It appends
-the v3 archive and then `SHA256SUMS-x86_64-unknown-linux-gnu-v3` as its readiness
-marker. It does not create a release, promote it, or replace existing assets.
-The installer resolves the version first and selects v3 only if that release has
-the readiness marker and glibc reports the complete v3 level. Otherwise it uses
-the portable package. An invalid or missing asset for an advertised v3 package
-fails verification; it does not trigger a fallback. The variants use distinct
-installation directories.
-
-#### Training and performance evidence
-
-The selected profile used three overlapping 10/15/20-turn sessions, parallel
-child batches of 4/3/2 on first/middle/final turns, Luna with System1 disabled,
-and real tools/streaming. Per-session peaks were 4/3/2; global child peak was 8.
-It is a bounded coding fixture, not exhaustive production coverage. Its original
-fat-LTO build used about 30 GiB sampled PSS. Standard Linux runners therefore
-use explicit swap and disk checks; only an actual successful Actions run proves
-runner feasibility. The first fat-LTO/1 free-runner build timed out after 330
-minutes with sustained memory pressure and about 22 GiB swap in use. Linux
-therefore keeps Thin-LTO/4 while consuming the selected profile; training
-settings remain provenance, not the consuming build configuration. Validate
-profile matching and the actual candidate after this change. Keep diagnostics
-and do not infer a latency win from PGO.
-
-`scripts/pgo/train.py` preserves the source home's feature configuration in
-private copies, selects a cheap model, disables System1 and runs the bounded
-workload. It requires Python 3.11+, authorized existing Codex auth and a matching
-instrumented CLI/helper pair. It uses full-access sandbox mode in disposable
-fixture directories; this is not OS-enforced fixture isolation. It makes live
-model calls; never invoke it from profile-consuming CI. Its conservative guards
-are 900 reported completions, 20M input/250K output tokens, 60 minutes and $5
-API-equivalent. Actual account charges are unknown. Inspect failures and retain
-private diagnostics; never merge failed-attempt profiles with accepted training.
-
-Set `CODEX_HOME` to the authorized source home, `PGO_INSTRUMENTED_BIN` to the
-copied instrumented CLI (with its sibling helper), and `PGO_TRAINING_DIR` to a
-new private directory outside tracked sources. Run `python3 scripts/pgo/train.py`.
-Independently verify 10/15/20 successful root turns, per-session parallel child
-peaks 4/3/2, cheap-model selection, fixture checks and streaming events before
-merging only that run's `profiles/*.profraw` with matching `llvm-profdata`.
-Publish the indexed result and update both archive/profile hashes and provenance
-in the manifest. The workload is reproducible; exact profile bytes are not,
-because model responses and scheduling vary.
