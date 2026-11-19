@@ -31,6 +31,7 @@ use codex_core::config::deserialize_config_toml_with_base;
 use codex_core::config::edit::ConfigEdit;
 use codex_core::config::edit::ConfigEditsBuilder;
 use codex_core::config::validate_feature_requirements_for_config_toml;
+use codex_core::config::validate_system1_for_config_toml;
 use codex_core::path_utils;
 use codex_core::path_utils::SymlinkWritePaths;
 use codex_core::path_utils::resolve_symlink_write_paths;
@@ -522,15 +523,11 @@ impl ConfigManager {
             })?;
         let effective = updated_layers.effective_config();
         validate_config(&effective)
-            .and_then(|()| {
-                let config = ConfigToml::try_from(effective.clone())?;
-                config
-                    .system1
-                    .unwrap_or_default()
-                    .validate()
-                    .map_err(anyhow::Error::msg)
-            })
-            .and_then(|()| {
+            .and_then(|config| {
+                validate_system1_for_config_toml(
+                    &config,
+                    updated_layers.requirements().feature_requirements.as_ref(),
+                )?;
                 credential_provider_edits.validate_remapping(
                     &user_layer.config,
                     &user_config,
@@ -895,14 +892,14 @@ fn toml_value_to_value(value: &TomlValue) -> anyhow::Result<toml_edit::Value> {
     }
 }
 
-fn validate_config(value: &TomlValue) -> anyhow::Result<()> {
+fn validate_config(value: &TomlValue) -> anyhow::Result<ConfigToml> {
     let config = ConfigToml::try_from(value.clone())?;
     if config.approval_policy == Some(AskForApproval::UnlessTrusted) {
         anyhow::bail!(
             "approval_policy = \"untrusted\" is no longer supported; remove this setting"
         );
     }
-    Ok(())
+    Ok(config)
 }
 
 fn paths_match(expected: impl AsRef<Path>, provided: impl AsRef<Path>) -> bool {
