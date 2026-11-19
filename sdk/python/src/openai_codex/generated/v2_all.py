@@ -263,14 +263,6 @@ class AppToolApproval(Enum):
     approve = "approve"
 
 
-class AppToolConfig(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    approval_mode: AppToolApproval | None = None
-    enabled: bool | None = None
-
-
 class AppToolSummary(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -580,6 +572,9 @@ class CodexErrorInfoValue(str, Enum):
     context_window_exceeded = "contextWindowExceeded"
     session_budget_exceeded = "sessionBudgetExceeded"
     usage_limit_exceeded = "usageLimitExceeded"
+    api_key_spend_limit_exceeded = "apiKeySpendLimitExceeded"
+    project_spend_limit_exceeded = "projectSpendLimitExceeded"
+    organization_spend_limit_exceeded = "organizationSpendLimitExceeded"
     rate_limit_exceeded = "rateLimitExceeded"
     flex_unavailable = "flexUnavailable"
     server_overloaded = "serverOverloaded"
@@ -6564,27 +6559,6 @@ class TurnInputAcceptedThreadRealtimeItem(BaseModel):
     ]
 
 
-class SessionEndInputSavedThreadRealtimeItem(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: str
-    observed_at_ms: Annotated[
-        int | None,
-        Field(
-            alias="observedAtMs",
-            description="Canonical observation time in Unix milliseconds for eligible voice calls.",
-        ),
-    ] = None
-    realtime_session_id: Annotated[str, Field(alias="realtimeSessionId")]
-    input: str
-    input_item_id: str
-    source_event_ids: list[str]
-    type: Annotated[
-        Literal["sessionEndInputSaved"], Field(title="SessionEndInputSavedThreadRealtimeItemType")
-    ]
-
-
 class ThreadRealtimeItemAddedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -6621,6 +6595,11 @@ class ThreadRealtimeSdpNotification(BaseModel):
     )
     sdp: str
     thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadRealtimeSessionInputReason(Enum):
+    chunk = "chunk"
+    session_end = "sessionEnd"
 
 
 class ThreadRealtimeSessionOutcome(Enum):
@@ -7656,6 +7635,15 @@ class AppTemplateSummary(BaseModel):
     name: str
     reason: AppTemplateUnavailableReason | None = None
     template_id: Annotated[str, Field(alias="templateId")]
+
+
+class AppToolConfig(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    approval_mode: AppToolApproval | None = None
+    approvals_reviewer: ApprovalsReviewer | None = None
+    enabled: bool | None = None
 
 
 class ApplicationNetworkRequirements(BaseModel):
@@ -11409,6 +11397,28 @@ class RealtimeSessionClosedThreadRealtimeItem(BaseModel):
     ]
 
 
+class SessionInputSavedThreadRealtimeItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str
+    observed_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="observedAtMs",
+            description="Canonical observation time in Unix milliseconds for eligible voice calls.",
+        ),
+    ] = None
+    realtime_session_id: Annotated[str, Field(alias="realtimeSessionId")]
+    input: str
+    input_item_id: str
+    reason: ThreadRealtimeSessionInputReason
+    source_event_ids: list[str]
+    type: Annotated[
+        Literal["sessionInputSaved"], Field(title="SessionInputSavedThreadRealtimeItemType")
+    ]
+
+
 class ThreadRealtimeItem(
     RootModel[
         RealtimeSessionStartedThreadRealtimeItem
@@ -11417,7 +11427,7 @@ class ThreadRealtimeItem(
         | BemItemPromotedThreadRealtimeItem
         | RealtimeSessionClosedThreadRealtimeItem
         | TurnInputAcceptedThreadRealtimeItem
-        | SessionEndInputSavedThreadRealtimeItem
+        | SessionInputSavedThreadRealtimeItem
     ]
 ):
     root: Annotated[
@@ -11427,7 +11437,7 @@ class ThreadRealtimeItem(
         | BemItemPromotedThreadRealtimeItem
         | RealtimeSessionClosedThreadRealtimeItem
         | TurnInputAcceptedThreadRealtimeItem
-        | SessionEndInputSavedThreadRealtimeItem,
+        | SessionInputSavedThreadRealtimeItem,
         Field(
             description="EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline."
         ),

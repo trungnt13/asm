@@ -56,7 +56,7 @@ use crate::terminal_hyperlinks::markdown_destination;
 use crate::terminal_hyperlinks::remap_wrapped_line;
 use crate::terminal_hyperlinks::source_span_width;
 use crate::terminal_hyperlinks::visible_lines;
-use crate::terminal_hyperlinks::web_destination;
+use crate::terminal_hyperlinks::web_or_thread_destination;
 use crate::width::display_width;
 use crate::wrapping::RtOptions;
 use crate::wrapping::word_wrap_line;
@@ -512,7 +512,7 @@ struct LinkState {
     show_destination: bool,
     style_label: bool,
     has_visible_label: bool,
-    has_terminal_destination: bool,
+    has_link_destination: bool,
     /// Pre-rendered display text for local file links.
     ///
     /// When this is present, label spans are buffered until the link closes so path-like labels
@@ -2273,7 +2273,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
 
     fn style_link_label(&mut self, mut span: Span<'static>) -> Span<'static> {
         if let Some(link) = self.link.as_mut()
-            && link.has_terminal_destination
+            && link.has_link_destination
         {
             link.has_visible_label |=
                 !span.content.trim().is_empty() && display_width(&span.content) > 0;
@@ -2284,13 +2284,13 @@ impl<'a, 'policy> Writer<'a, 'policy> {
 
     fn push_link(&mut self, dest_url: String, source: usize) {
         let compact = (self.is_hidden_link_destination)(&dest_url);
-        let web = web_destination(&dest_url);
+        let interactive = web_or_thread_destination(&dest_url).is_some();
         let local_destination =
-            (compact && web.is_none() && local_links::is_markdown_file_link(&dest_url))
+            (compact && !interactive && local_links::is_markdown_file_link(&dest_url))
                 .then(|| local_links::local_link_destination(&dest_url, self.cwd.as_deref()))
                 .flatten();
-        let style_label = compact && (web.is_some() || local_destination.is_some());
-        let has_terminal_destination = web.is_some()
+        let style_label = compact && (interactive || local_destination.is_some());
+        let has_link_destination = interactive
             || markdown_destination(local_destination.as_deref().unwrap_or(&dest_url)).is_some();
         if style_label {
             self.push_inline_style(self.styles.link);
@@ -2301,7 +2301,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
             show_destination,
             style_label,
             has_visible_label: false,
-            has_terminal_destination,
+            has_link_destination,
             local_target_display: if !style_label && is_local_path_like_link(&dest_url) {
                 Some(
                     render_local_link_target(&dest_url, self.cwd.as_deref())
@@ -2363,7 +2363,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
             } else if link.show_destination
                 || (!link.has_visible_label
                     && link.local_target_display.is_none()
-                    && link.has_terminal_destination)
+                    && link.has_link_destination)
             {
                 // Link destinations are rendered as " (url)" suffixes. When parsing table cells,
                 // append the suffix into the active cell buffer rather than the outer paragraph
@@ -2662,7 +2662,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
             if let Some(destination) = self
                 .link
                 .as_ref()
-                .and_then(|link| web_destination(&link.destination))
+                .and_then(|link| web_or_thread_destination(&link.destination))
             {
                 // Inline code and HTML retain source columns until the transcript expands tabs.
                 let start = self.source_columns.measure(line, source_span_width);
@@ -2674,6 +2674,9 @@ impl<'a, 'policy> Writer<'a, 'policy> {
             } else if let Some(link) = self.link.as_ref() {
                 let mut annotated = HyperlinkLine::new(Line::default());
                 annotated.push_markdown_span(span, Some(&link.destination));
+                if let Some(hyperlink) = annotated.hyperlinks.last_mut() {
+                    hyperlink.markdown_source = Some(link.source);
+                }
                 self.display_columns.append_annotated(line, annotated);
             } else {
                 line.line.push_span(span);
@@ -2709,7 +2712,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
         let destination = self
             .link
             .as_ref()
-            .filter(|link| link.has_terminal_destination)
+            .filter(|link| link.has_link_destination)
             .map(|link| link.destination.as_str());
         if let Some(path) = self.label_document_path() {
             self.document_label_span(span, path)

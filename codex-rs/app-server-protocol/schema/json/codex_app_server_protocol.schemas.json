@@ -8148,6 +8148,16 @@
               }
             ]
           },
+          "approvals_reviewer": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/ApprovalsReviewer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "enabled": {
             "type": [
               "boolean",
@@ -9056,6 +9066,9 @@
               "contextWindowExceeded",
               "sessionBudgetExceeded",
               "usageLimitExceeded",
+              "apiKeySpendLimitExceeded",
+              "projectSpendLimitExceeded",
+              "organizationSpendLimitExceeded",
               "rateLimitExceeded",
               "flexUnavailable",
               "serverOverloaded",
@@ -25369,7 +25382,7 @@
         "type": "object"
       },
       "ThreadRealtimeFrameChannels": {
-        "description": "A frame holds one or more payloads, at most one per channel. They share one ID, observation time, and seal. V1 requires its only channel, `voice_transcript`.",
+        "description": "A frame holds one or more payloads, at most one per channel. They share one ID, observation time, and seal. Currently, `voice_transcript` is required.",
         "properties": {
           "voice_transcript": {
             "$ref": "#/definitions/v2/ThreadRealtimeVoiceTranscript"
@@ -25565,6 +25578,9 @@
               "input_item_id": {
                 "type": "string"
               },
+              "reason": {
+                "$ref": "#/definitions/v2/ThreadRealtimeSessionInputReason"
+              },
               "source_event_ids": {
                 "items": {
                   "type": "string"
@@ -25573,19 +25589,20 @@
               },
               "type": {
                 "enum": [
-                  "sessionEndInputSaved"
+                  "sessionInputSaved"
                 ],
-                "title": "SessionEndInputSavedThreadRealtimeItemType",
+                "title": "SessionInputSavedThreadRealtimeItemType",
                 "type": "string"
               }
             },
             "required": [
               "input",
               "input_item_id",
+              "reason",
               "source_event_ids",
               "type"
             ],
-            "title": "SessionEndInputSavedThreadRealtimeItem",
+            "title": "SessionInputSavedThreadRealtimeItem",
             "type": "object"
           }
         ],
@@ -25738,6 +25755,13 @@
         ],
         "title": "ThreadRealtimeSdpNotification",
         "type": "object"
+      },
+      "ThreadRealtimeSessionInputReason": {
+        "enum": [
+          "chunk",
+          "sessionEnd"
+        ],
+        "type": "string"
       },
       "ThreadRealtimeSessionOutcome": {
         "enum": [

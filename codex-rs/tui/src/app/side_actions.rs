@@ -109,6 +109,7 @@ impl App {
                     .sidebar_fork(
                         self.local_settings.clone(),
                         config,
+                        Some(self.chat_widget.session_workspace_roots().to_vec()),
                         state.parent_thread_id,
                         selected_profile,
                         state.storage,
@@ -242,6 +243,7 @@ impl App {
                     .fork_thread_at(
                         &self.local_settings,
                         config,
+                        Some(self.chat_widget.session_workspace_roots()),
                         thread_id,
                         /*last_turn_id*/ None,
                         /*before_turn_id*/ None,

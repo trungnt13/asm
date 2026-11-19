@@ -267,6 +267,15 @@ impl TerminalHyperlink {
         }
     }
 
+    pub(crate) fn interaction_destination(&self) -> Option<String> {
+        if self.destination_kind == DestinationKind::Web
+            && crate::thread_links::thread_id(&self.destination).is_some()
+        {
+            return Some(self.destination.clone());
+        }
+        self.terminal_destination()
+    }
+
     pub(crate) fn terminal_destination(&self) -> Option<String> {
         match self.destination_kind {
             DestinationKind::Document(_) | DestinationKind::Agent(_) => None,
@@ -343,7 +352,7 @@ impl HyperlinkLine {
     }
 
     pub(crate) fn push_span(&mut self, span: Span<'static>, destination: Option<&str>) {
-        if let Some(destination) = destination.and_then(web_destination) {
+        if let Some(destination) = destination.and_then(web_or_thread_destination) {
             self.push_linked_span(span, self.source_width(), destination);
         } else {
             self.source = None;
@@ -829,6 +838,13 @@ fn trailing_url_end(candidate: &str) -> usize {
     end
 }
 
+pub(crate) fn web_or_thread_destination(destination: &str) -> Option<String> {
+    if crate::thread_links::thread_id(destination).is_some() {
+        return Some(destination.to_string());
+    }
+    web_destination(destination)
+}
+
 pub(crate) fn web_destination(destination: &str) -> Option<String> {
     let safe_destination = sanitized_destination(destination)?;
     let parsed = Url::parse(&safe_destination).ok()?;
@@ -839,7 +855,7 @@ pub(crate) fn web_destination(destination: &str) -> Option<String> {
 }
 
 pub(crate) fn markdown_destination(destination: &str) -> Option<String> {
-    web_destination(destination).or_else(|| markdown_file_destination(destination))
+    web_or_thread_destination(destination).or_else(|| markdown_file_destination(destination))
 }
 
 fn markdown_file_destination(destination: &str) -> Option<String> {

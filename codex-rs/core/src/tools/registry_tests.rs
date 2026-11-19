@@ -624,6 +624,7 @@ fn post_tool_use_feedback_output_preserves_fallback_token_limit_override(
                 },
                 tool_input: serde_json::json!({}),
                 result_metadata_capture_allowed: false,
+                result_capture: Default::default(),
                 wall_time: Duration::ZERO,
                 original_image_detail_supported: false,
                 truncation_policy,
@@ -673,6 +674,7 @@ fn mcp_audio_producer_limit_is_transient_until_history_admission(file_backed_too
             },
             tool_input: serde_json::json!({}),
             result_metadata_capture_allowed: false,
+            result_capture: Default::default(),
             wall_time: Duration::ZERO,
             original_image_detail_supported: false,
             truncation_policy: TruncationPolicy::Tokens(100),
@@ -766,6 +768,7 @@ fn post_tool_use_feedback_output_preserves_mcp_result_metadata(tool_error: bool)
             },
             tool_input: serde_json::json!({ "query": "rewritten query" }),
             result_metadata_capture_allowed: true,
+            result_capture: Default::default(),
             wall_time: std::time::Duration::ZERO,
             original_image_detail_supported: false,
             truncation_policy: codex_utils_output_truncation::TruncationPolicy::Bytes(64),
@@ -779,7 +782,10 @@ fn post_tool_use_feedback_output_preserves_mcp_result_metadata(tool_error: bool)
         arguments: "{}".to_string(),
     };
     let original_result = result.original.code_mode_result(&payload);
-    assert_eq!(result.tool_result_metadata(), Some(&metadata));
+    assert_eq!(
+        result.tool_result_metadata(),
+        ToolResultMetadata::new(&metadata)
+    );
     assert_eq!(result.code_mode_result(&payload), original_result);
 }
 
