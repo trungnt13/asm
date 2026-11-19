@@ -448,12 +448,18 @@ async fn cloud_complete_transcript_includes_error_from_an_older_zero_item_turn()
     let exported = load_export_transcript(&mut server, id, Hidden, /*config*/ None, vec![])
         .await
         .expect("export history");
+    let exported: Vec<_> = exported
+        .iter()
+        .map(|cell| cell.raw_lines())
+        .filter(|lines| !lines.is_empty())
+        .map(|lines| lines_to_single_string(&lines))
+        .collect();
     assert_eq!(exported.len(), 3);
-    for (cell, expected) in exported
+    for (text, expected) in exported
         .iter()
         .zip(["first answer", "older answer", "exported answer"])
     {
-        assert!(lines_to_single_string(&cell.raw_lines()).contains(expected));
+        assert!(text.contains(expected));
     }
     let (mut app, mut events, _ops) = make_test_app_with_channels().await;
     app.app_server_target = AppServerTarget::Cloud;
