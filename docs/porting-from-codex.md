@@ -117,6 +117,12 @@ The PR owner must complete cleanup after an authorized merge, before reporting i
 
 Before syncs or targeted ports, use [asm-upstream-sync](../.agents/skills/asm-upstream-sync/SKILL.md). Follow its conflict-reuse and evidence procedure.
 
+### Built-in instruction changes
+
+Review the full incoming diff and the fork's resolution for repository-owned instructions, prompts, and rubrics. Include inline strings, bundled prompt or skill files, model-facing tool descriptions, and specialized prompts such as Guardian reviews. Check not just wording, but also which text is selected, when it is sent, and how it is assembled.
+
+In every rebase report and sync PR, include a **Built-in instructions, prompts, and rubrics** section. List additions, edits, removals, and changes to delivery. For each, link the source and summarize what changed, who receives it, when it applies (default, opt-in, or model-specific), and what ASM kept or changed. Say explicitly if none changed. Distinguish built-in source from user overrides and provider-injected text; do not infer what the provider received from source alone. Flag any new model-visible item that can exceed 1,000 tokens for P0 manual review.
+
 ### Shared compatibility gate
 
 For syncs or saved-cache/wire-format changes, apply this gate even after conflict-free rebases. Follow narrow validation and real-session rules; this gate grants no new provider, paid-matrix, broader-check, or test-authoring authority.
