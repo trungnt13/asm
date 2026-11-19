@@ -640,7 +640,8 @@ impl ChatWidget {
                 }
             });
         }
-        if item.phase.is_none() {
+        // Native streamed messages can declare their final phase only on completion.
+        if matches!(item.phase, None | Some(MessagePhase::FinalAnswer)) {
             self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
                 history_cell::TurnActivityBoundary::LegacyAnswer {
                     turn_id: Some(turn_id.to_owned()),

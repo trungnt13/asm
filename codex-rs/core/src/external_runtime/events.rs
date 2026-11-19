@@ -3,6 +3,7 @@ use crate::session::turn_context::TurnContext;
 use codex_protocol::items::AgentMessageContent;
 use codex_protocol::items::AgentMessageItem;
 use codex_protocol::items::TurnItem;
+use codex_protocol::models::MessagePhase;
 use codex_protocol::protocol::AgentMessageContentDeltaEvent;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::TokenUsage;
@@ -18,6 +19,7 @@ pub(super) struct MessageStream {
     pub(super) id: Option<String>,
     pub(super) text: String,
     pub(super) started: bool,
+    phase: Option<MessagePhase>,
     generation_started_at: Option<Instant>,
     non_reasoning_tokens: Option<i64>,
     pub(super) output_tps: Option<f64>,
@@ -44,6 +46,7 @@ pub(super) async fn record_assistant_frame(
             Some("message_start") => {
                 stream.generation_started_at = None;
                 stream.non_reasoning_tokens = None;
+                stream.phase = None;
             }
             Some("content_block_delta") => {
                 let delta = &event["delta"];
@@ -59,12 +62,12 @@ pub(super) async fn record_assistant_frame(
                 }
             }
             Some("message_delta") => {
+                let stop_reason = event["delta"]["stop_reason"].as_str();
+                stream.phase = matches!(stop_reason, Some("end_turn" | "stop_sequence"))
+                    .then_some(MessagePhase::FinalAnswer);
                 let usage = &event["usage"];
                 stream.non_reasoning_tokens = (|| {
-                    if !matches!(
-                        event["delta"]["stop_reason"].as_str(),
-                        Some("end_turn" | "tool_use")
-                    ) {
+                    if !matches!(stop_reason, Some("end_turn" | "tool_use")) {
                         return None;
                     }
                     let output = usage["output_tokens"].as_i64()?;
@@ -162,6 +165,11 @@ pub(super) async fn record_assistant_frame(
     } else if frame["type"] == "assistant" && stream.id.is_none() {
         // Without streaming, each assistant frame supplies its complete text block.
         stream.id = frame["uuid"].as_str().map(str::to_owned);
+        stream.phase = matches!(
+            frame["message"]["stop_reason"].as_str(),
+            Some("end_turn" | "stop_sequence")
+        )
+        .then_some(MessagePhase::FinalAnswer);
         stream.text = frame["message"]["content"]
             .as_array()
             .into_iter()
@@ -188,12 +196,15 @@ pub(super) async fn complete_message(
         .take()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let text = std::mem::take(&mut stream.text);
+    let phase = stream.phase.take();
     if text.is_empty() {
         stream.started = false;
         return Ok(None);
     }
-    let item = serde_json::from_value(json!({"type":"message","id":id,"role":"assistant",
-        "content":[{"type":"output_text","text":text}]}))?;
+    let item = serde_json::from_value(
+        json!({"type":"message","id":id,"role":"assistant","phase":phase,
+        "content":[{"type":"output_text","text":text}]}),
+    )?;
     session
         .record_conversation_items(turn, &turn.capture_current_model_info(), &[item])
         .await;
@@ -207,7 +218,7 @@ pub(super) async fn complete_message(
             TurnItem::AgentMessage(AgentMessageItem {
                 id,
                 content: vec![AgentMessageContent::Text { text: text.clone() }],
-                phase: None,
+                phase,
                 memory_citation: None,
                 moderation: None,
                 delivery: None,
