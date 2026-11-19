@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,11 @@ ASSET_NAMES = (
 )
 TARGETS = ("aarch64-apple-darwin", "x86_64-unknown-linux-gnu")
 PLATFORM_MANIFESTS = tuple(f"SHA256SUMS-{target}" for target in TARGETS)
+STAGED_ASSETS = frozenset(ASSET_NAMES + PLATFORM_MANIFESTS)
+V3_TARGET = "x86_64-unknown-linux-gnu-v3"
+V3_ARCHIVE = f"codex-{V3_TARGET}.tar.gz"
+V3_MANIFEST = f"SHA256SUMS-{V3_TARGET}"
+V3_ASSETS = {V3_ARCHIVE, V3_MANIFEST}
 ROOT = Path(os.environ.get("GITHUB_WORKSPACE", Path(__file__).resolve().parents[2]))
 
 
@@ -80,16 +86,23 @@ def verify_tag(repository, tag, sha, *, create=False):
 def asset_metadata(release, *, complete):
     assets = release.get("assets", [])
     by_name = {asset["name"]: asset for asset in assets}
-    if (
-        len(by_name) != len(assets)
-        or not set(by_name) <= set(ASSET_NAMES + PLATFORM_MANIFESTS)
-    ):
+    names = set(by_name)
+    if len(by_name) != len(assets) or not names <= STAGED_ASSETS | V3_ASSETS:
         raise ValueError("release has duplicate or unexpected assets")
-    if complete and set(by_name) not in (
-        set(ASSET_NAMES), set(ASSET_NAMES + PLATFORM_MANIFESTS)
-    ):
-        raise ValueError("release must contain exactly four legacy or six staged assets")
+    base = names - V3_ASSETS
+    if names & V3_ASSETS and base != STAGED_ASSETS:
+        raise ValueError("optional Linux v3 assets require a complete staged release")
+    if v3_is_ready(by_name) and V3_ARCHIVE not in names:
+        raise ValueError("optional Linux v3 readiness manifest has no archive")
+    if complete and base not in (set(ASSET_NAMES), STAGED_ASSETS):
+        raise ValueError(
+            "release must contain all four legacy or six staged base assets"
+        )
     return by_name
+
+
+def v3_is_ready(assets):
+    return assets.get(V3_MANIFEST, {}).get("state") == "uploaded"
 
 
 def file_digest(path):
@@ -112,7 +125,7 @@ def verify_asset(path, asset):
 
 def verify_files(directory, installer):
     names = {entry.name for entry in directory.iterdir()}
-    payloads = names - {"SHA256SUMS", *PLATFORM_MANIFESTS}
+    payloads = names - {"SHA256SUMS", *PLATFORM_MANIFESTS, V3_MANIFEST}
     digests = {
         name: file_digest(directory / name)
         for name in payloads
@@ -124,8 +137,10 @@ def verify_files(directory, installer):
             if not match or match.group(2) in checksums:
                 raise ValueError(f"invalid or duplicate {manifest} entry")
             checksums[match.group(2)] = match.group(1)
-        expected = digests
-        if manifest != "SHA256SUMS":
+        if manifest == "SHA256SUMS":
+            # The base manifest is unchanged when the optional v3 pair is added.
+            expected = {name: digest for name, digest in digests.items() if name != V3_ARCHIVE}
+        else:
             archive = f"codex-{manifest.removeprefix('SHA256SUMS-')}.tar.gz"
             expected = {name: digests[name] for name in (archive, "install.sh")}
         if checksums != expected:
@@ -152,19 +167,37 @@ def verify_remote(repository, tag, sha, release, installer, *, published,
     elif published is False and release.get("draft") is not True:
         raise ValueError("expected a draft before publication")
     assets = asset_metadata(release, complete=target is None)
-    names = tuple(assets) if target is None else (
-        f"codex-{target}.tar.gz", "install.sh", f"SHA256SUMS-{target}",
-    )
+    v3_ready = v3_is_ready(assets)
+    if v3_ready and V3_MANIFEST.encode() not in installer:
+        raise ValueError("pinned installer does not support Linux v3 assets")
+    if target is None:
+        names = tuple(
+            name for name in assets if name not in V3_ASSETS or v3_ready
+        )
+    else:
+        names = (f"codex-{target}.tar.gz", "install.sh", f"SHA256SUMS-{target}")
     with tempfile.TemporaryDirectory(prefix="asm-release-verify-") as temporary_dir:
         directory = Path(temporary_dir)
-        for name in names:
-            with (directory / name).open("wb") as output:
-                subprocess.run(
-                    ["gh", "api", f"repos/{repository}/releases/assets/{assets[name]['id']}",
-                     "-H", "Accept: application/octet-stream"], stdout=output, check=True,
-                )
-            verify_asset(directory / name, assets[name])
+        download_verified_assets(repository, assets, directory, names)
         verify_files(directory, installer)
+
+
+def download_verified_assets(repository, assets, directory, names):
+    for name in names:
+        asset = assets[name]
+        with (directory / name).open("wb") as output:
+            subprocess.run(
+                [
+                    "gh",
+                    "api",
+                    f"repos/{repository}/releases/assets/{asset['id']}",
+                    "-H",
+                    "Accept: application/octet-stream",
+                ],
+                stdout=output,
+                check=True,
+            )
+        verify_asset(directory / name, asset)
 
 
 def upload_missing(repository, tag, release, directory, names):
@@ -227,13 +260,10 @@ def publish_target(repository, tag, sha, release, installer, target):
         # Download and smoke the uploaded bytes before appending the readiness marker.
         with tempfile.TemporaryDirectory(prefix="asm-uploaded-") as temporary_dir:
             downloaded = Path(temporary_dir)
+            assets = asset_metadata(release, complete=False)
+            download_verified_assets(repository, assets, downloaded, (archive, "install.sh"))
             for name in (archive, "install.sh"):
-                asset = asset_metadata(release, complete=False)[name]
-                with (downloaded / name).open("wb") as output:
-                    subprocess.run(["gh", "api", f"repos/{repository}/releases/assets/{asset['id']}",
-                                    "-H", "Accept: application/octet-stream"], stdout=output, check=True)
-                verify_asset(downloaded / name, asset)
-                verify_asset(directory / name, asset)
+                verify_asset(directory / name, assets[name])
             subprocess.run([sys.executable, ROOT / ".github/scripts/smoke-codex-archive.py",
                             downloaded / archive], cwd=ROOT / "codex-rs", check=True)
             if target == "x86_64-unknown-linux-gnu":
@@ -268,6 +298,127 @@ def publish_target(repository, tag, sha, release, installer, target):
         ):
             raise ValueError(f"verified asset {name} changed during publication")
     print(f"Published verified {target} for {tag}; existing assets preserved")
+
+
+def publish_v3(repository, tag, sha, release, installer, archive, base_run_id):
+    if (
+        release is None
+        or release.get("draft") is not False
+        or release.get("prerelease") is not False
+    ):
+        raise ValueError("Linux v3 supplements a completed normal release")
+    assets = asset_metadata(release, complete=True)
+    if not STAGED_ASSETS <= assets.keys():
+        raise ValueError("Linux v3 requires the completed staged base release")
+    if V3_MANIFEST.encode() not in installer:
+        raise ValueError("pinned installer does not support Linux v3 assets")
+    if archive.name != V3_ARCHIVE:
+        raise ValueError(f"expected archive named {V3_ARCHIVE}")
+    if (
+        subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip()
+        != sha
+    ):
+        raise ValueError(
+            "check out the exact release commit before publishing Linux v3"
+        )
+    if subprocess.check_output(
+        ["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT
+    ):
+        raise ValueError(
+            "tracked checkout changes must not affect release verification"
+        )
+    subprocess.run(
+        [
+            sys.executable,
+            ROOT / ".github/scripts/prepare-fork-release.py",
+            "verify-base",
+            base_run_id,
+            tag,
+            sha,
+        ],
+        cwd=ROOT,
+        check=True,
+    )
+
+    if V3_MANIFEST not in assets and release.get("immutable"):
+        raise ValueError("cannot append Linux v3 assets to an immutable GitHub release")
+    for name in V3_ASSETS & assets.keys():
+        if assets[name].get("state") != "uploaded":
+            raise ValueError(f"asset {name} has not finished uploading; never replacing it")
+    receipt = archive.with_name(f"{archive.name}.provenance").read_bytes()
+
+    with tempfile.TemporaryDirectory(prefix="asm-publish-v3-") as temporary_dir:
+        directory = Path(temporary_dir)
+        staged = directory / V3_ARCHIVE
+        shutil.copyfile(archive, staged)
+        digest = file_digest(staged)
+        if receipt != f"{sha}\n{digest}\n".encode():
+            raise ValueError(
+                "Linux v3 provenance does not match the release commit and archive"
+            )
+        if V3_MANIFEST in assets:
+            verify_asset(staged, assets[V3_ARCHIVE])
+            verify_remote(
+                repository,
+                tag,
+                sha,
+                release,
+                installer,
+                published=True,
+                target=V3_TARGET,
+                require_latest=False,
+            )
+            print(
+                f"Already published and verified Linux v3 for {tag}; no release edits"
+            )
+            return
+        verify_remote(
+            repository,
+            tag,
+            sha,
+            release,
+            installer,
+            published=True,
+            require_latest=False,
+        )
+        subprocess.run(
+            [sys.executable, ROOT / ".github/scripts/smoke-codex-archive.py", staged],
+            cwd=ROOT / "codex-rs",
+            check=True,
+        )
+        subprocess.run(
+            [
+                "bash",
+                ROOT / ".github/scripts/smoke-ubuntu-archive.sh",
+                staged,
+                tag.removeprefix("v"),
+            ],
+            cwd=ROOT,
+            check=True,
+        )
+        (directory / "install.sh").write_bytes(installer)
+        (directory / V3_MANIFEST).write_text(
+            f"{digest}  {V3_ARCHIVE}\n"
+            f"{file_digest(directory / 'install.sh')}  install.sh\n"
+        )
+        release = upload_missing(repository, tag, release, directory, (V3_ARCHIVE,))
+        assets = asset_metadata(release, complete=True)
+        downloaded = directory / "uploaded"
+        downloaded.mkdir()
+        download_verified_assets(
+            repository, assets, downloaded, (V3_ARCHIVE, "install.sh")
+        )
+        for name in (V3_ARCHIVE, "install.sh"):
+            verify_asset(directory / name, assets[name])
+        release = upload_missing(repository, tag, release, directory, (V3_MANIFEST,))
+        current = asset_metadata(release, complete=True)
+        verify_asset(directory / V3_MANIFEST, current[V3_MANIFEST])
+        for name in (V3_ARCHIVE, "install.sh"):
+            verify_asset(downloaded / name, current[name])
+    verify_tag(repository, tag, sha)
+    print(f"Published verified Linux v3 for {tag}; base release assets preserved")
 
 
 def finalize(repository, tag, sha, release, installer):
@@ -308,10 +459,24 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command", choices=(
-            "initialize", "restore-target", "publish-target", "finalize", "publish", "verify",
+            "initialize", "restore-target", "publish-target", "publish-v3",
+            "finalize", "publish", "verify",
         )
     )
+    parser.add_argument(
+        "--archive", type=Path, help="Archive for publish-v3 (with neighboring .provenance)"
+    )
+    parser.add_argument(
+        "--base-run-id", help="Successful release workflow run for the exact tag and commit"
+    )
     arguments = parser.parse_args()
+    if arguments.command == "publish-v3":
+        if arguments.archive is None or not re.fullmatch(
+            r"[1-9][0-9]*", arguments.base_run_id or ""
+        ):
+            parser.error("publish-v3 requires --archive and a positive --base-run-id")
+    elif arguments.archive is not None or arguments.base_run_id is not None:
+        parser.error("--archive and --base-run-id are only for publish-v3")
     if not os.environ.get("GH_TOKEN"):
         raise ValueError("GH_TOKEN is required")
     repository = os.environ["GITHUB_REPOSITORY"]
@@ -337,6 +502,17 @@ def main():
         ["git", "show", f"{sha}:scripts/install/install.sh"], cwd=ROOT
     )
     release = release_for_tag(repository, tag)
+    if arguments.command == "publish-v3":
+        publish_v3(
+            repository,
+            tag,
+            sha,
+            release,
+            installer,
+            arguments.archive,
+            arguments.base_run_id,
+        )
+        return
     if arguments.command == "initialize":
         initialize(repository, tag, sha, release, installer)
         return

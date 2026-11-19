@@ -69,6 +69,7 @@ use chrono::Utc;
 use codex_analytics::AnalyticsEventsClient;
 use codex_analytics::ImagePreparationFact;
 use codex_analytics::ImagePreparationMetadata;
+use codex_analytics::IncompleteReason;
 use codex_analytics::SubAgentThreadStartedInput;
 use codex_analytics::ThreadInitializationMode;
 use codex_analytics::TurnCodexErrorFact;
@@ -187,6 +188,7 @@ use codex_rollout_trace::CompactionTraceContext;
 use codex_rollout_trace::ThreadStartedTraceMetadata;
 use codex_rollout_trace::ThreadTraceContext;
 use codex_sandboxing::SandboxType;
+use codex_sandboxing::managed_proxy_routing_for_windows_sandbox;
 use codex_sandboxing::policy_transforms::intersect_permission_profiles_with_context;
 use codex_shell_command::parse_command::parse_command;
 use codex_terminal_detection::user_agent;
@@ -280,6 +282,7 @@ mod model_catalog_settings;
 mod model_ids;
 pub(crate) mod multi_agents;
 mod plugin_selection;
+mod realtime_handoff;
 mod realtime_history;
 mod retained_context;
 mod review;
@@ -370,7 +373,6 @@ use crate::turn_timing::record_turn_ttfm_metric;
 use crate::unified_exec::UnifiedExecProcessManager;
 use crate::windows_sandbox::WindowsSandboxLevelExt;
 use crate::windows_sandbox::local_binding_policy_for_sandbox;
-use crate::windows_sandbox::managed_proxy_routing_for_windows_sandbox;
 use codex_core_plugins::PluginCommandAttribution;
 use codex_core_plugins::PluginsManager;
 use codex_git_utils::get_git_repo_root;
@@ -457,6 +459,11 @@ pub(crate) enum TokenUsageContext {
 pub(crate) enum NetworkApprovalTurn {
     Originating,
     AnyActive,
+}
+
+enum RealtimeRecord<'a> {
+    Handoff(&'a crate::realtime_history::handoff::PreparedRealtimeInput),
+    Chunk,
 }
 
 /// Queue and lifecycle endpoints for a running [`Session`].
@@ -2168,11 +2175,9 @@ impl Session {
         rollout_items: &[RolloutItem],
     ) -> Option<PreviousTurnSettings> {
         if let Some(history) = &self.realtime_history {
-            history
-                .lock()
-                .await
-                .observation_clock
-                .restore(rollout_items);
+            let mut history = history.lock().await;
+            history.observation_clock.restore(rollout_items);
+            history.restore_handoffs(rollout_items);
         }
         let rollout_reconstruction::RolloutReconstruction {
             mut history,
@@ -3241,7 +3246,7 @@ impl Session {
         self.deliver_event_raw(event).await;
     }
 
-    async fn deliver_event_raw(&self, event: Event) {
+    pub(crate) async fn deliver_event_raw(&self, event: Event) {
         if let Some(parent_tx) = self.parent_observer_event_tx.get() {
             let forwarded = match &event.msg {
                 EventMsg::RawResponseItem(item) => {
@@ -3508,7 +3513,9 @@ impl Session {
                 .features
                 .enabled(Feature::CriticalPathTiming)
         {
-            turn_context.turn_timing_state.invalidate_critical_path();
+            turn_context
+                .turn_timing_state
+                .invalidate_critical_path(&[IncompleteReason::UnattributedUserWait]);
         }
         timing
     }
@@ -4224,12 +4231,10 @@ impl Session {
         &self,
         input: &[ResolvedUserInput],
     ) -> ResponseItem {
-        self.response_item_from_user_input_with_image_positions(input)
-            .0
+        Self::response_item_from_user_input_with_image_positions(input).0
     }
 
     fn response_item_from_user_input_with_image_positions(
-        &self,
         input: &[ResolvedUserInput],
     ) -> (ResponseItem, HashMap<usize, usize>) {
         let (message, image_positions) =
@@ -4290,9 +4295,33 @@ impl Session {
         &self,
         turn_context: &TurnContext,
         model_info: &ModelInfo,
-        mut items: Vec<ResponseItemEnvelope>,
+        items: Vec<ResponseItemEnvelope>,
         image_preparations: Vec<ImagePreparationMetadata>,
     ) {
+        // Ordinary history persistence retains its existing best-effort behavior.
+        let _ = self
+            .record_prepared_items(
+                turn_context,
+                model_info,
+                items,
+                image_preparations,
+                /*realtime*/ None,
+            )
+            .await;
+    }
+
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "a durable realtime admission must publish history atomically with respect to other history writers"
+    )]
+    async fn record_prepared_items(
+        &self,
+        turn_context: &TurnContext,
+        model_info: &ModelInfo,
+        mut items: Vec<ResponseItemEnvelope>,
+        image_preparations: Vec<ImagePreparationMetadata>,
+        realtime: Option<RealtimeRecord<'_>>,
+    ) -> std::io::Result<()> {
         // Save the originating history budget for replay.
         // Preserve any existing tool-specific override.
         let policy: codex_utils_output_truncation::TruncationPolicy =
@@ -4319,10 +4348,14 @@ impl Session {
         let force_mcp_checkpoint = items
             .iter()
             .any(|envelope| crate::context_manager::is_user_turn_boundary(&envelope.item));
-        let mcp_revision = self
-            .services
-            .executed_tool_calls
-            .mcp_attribution_checkpoint(force_mcp_checkpoint)
+        let cached_retry = matches!(&realtime, Some(RealtimeRecord::Handoff(input)) if input.cached_envelope.is_some());
+        let mcp_revision = (!cached_retry)
+            .then(|| {
+                self.services
+                    .executed_tool_calls
+                    .mcp_attribution_checkpoint(force_mcp_checkpoint)
+            })
+            .flatten()
             .and_then(|(attribution, revision)| {
                 let first_persisted = items
                     .iter()
@@ -4339,15 +4372,30 @@ impl Session {
                 }
                 Some(revision)
             });
-        let response_items = items
+        // Thread settings precede the first accepted input. Keep the persistence lock
+        // through its seal, and clear the pending flag only after the seal succeeds.
+        let realtime_settings_guard = if realtime.is_some()
+            && force_mcp_checkpoint
+            && self.reference_context_item().await.is_none()
+        {
+            Some(thread_settings::acquire_persistence_lock(self).await)
+        } else {
+            None
+        };
+        let realtime_initial_settings = realtime_settings_guard.is_some()
+            && self.reference_context_item().await.is_none()
+            && self.state.lock().await.initial_settings_pending();
+        let realtime_settings_event = if realtime_initial_settings {
+            Some(thread_settings::applied_event(self).await)
+        } else {
+            None
+        };
+        let mut response_items = items
             .iter()
             .map(|envelope| envelope.item.clone())
             .collect::<Vec<_>>();
         {
             let mut state = self.state.lock().await;
-            state
-                .current_time_reminder
-                .note_recorded_items(&response_items);
             let pending_orders = turn_context
                 .extension_data
                 .get::<retained_context::PendingAssistantMessageOrders>();
@@ -4381,23 +4429,70 @@ impl Session {
                         });
                 }
             }
-            if items.iter().any(|envelope| {
-                matches!(envelope.item.as_ref(),
-                ResponseItem::Message { role, .. } if role == "assistant")
-                    || matches!(
-                        envelope.item.as_ref(),
-                        ResponseItem::FunctionCallOutput { .. }
-                            | ResponseItem::CustomToolCallOutput { .. }
+            if let Some(RealtimeRecord::Handoff(prepared)) = &realtime {
+                let envelope = if let Some(cached) = &prepared.cached_envelope {
+                    cached.clone()
+                } else {
+                    let [envelope] = items.as_slice() else {
+                        return Err(std::io::Error::other(
+                            "realtime admission must contain one input",
+                        ));
+                    };
+                    envelope.clone()
+                };
+                let envelope = self
+                    .record_realtime_handoff_input(
+                        &mut state,
+                        &turn_context.sub_id,
+                        envelope,
+                        prepared,
+                        realtime_settings_event,
+                        policy,
                     )
-            }) {
-                self.invalidate_system1();
+                    .await?;
+                if realtime_initial_settings {
+                    state.take_initial_settings_pending();
+                }
+                response_items = vec![envelope.item.clone()];
+                items = vec![envelope];
+            } else if matches!(&realtime, Some(RealtimeRecord::Chunk)) {
+                let [envelope] = items.as_slice() else {
+                    return Err(std::io::Error::other(
+                        "realtime chunk must contain one input",
+                    ));
+                };
+                let envelope = self
+                    .record_realtime_chunk_input(
+                        &mut state,
+                        envelope.clone(),
+                        realtime_settings_event,
+                        policy,
+                    )
+                    .await?;
+                if realtime_initial_settings {
+                    state.take_initial_settings_pending();
+                }
+                response_items = vec![envelope.item];
+            } else {
+                if items.iter().any(|envelope| {
+                    matches!(envelope.item.as_ref(),
+                    ResponseItem::Message { role, .. } if role == "assistant")
+                        || matches!(
+                            envelope.item.as_ref(),
+                            ResponseItem::FunctionCallOutput { .. }
+                                | ResponseItem::CustomToolCallOutput { .. }
+                        )
+                }) {
+                    self.invalidate_system1();
+                }
+                state
+                    .pending_audio_duration_ids
+                    .extend(file_audio::file_ids(&items).cloned());
+                state.history.record_annotated_items(&mut items, policy);
             }
             state
-                .pending_audio_duration_ids
-                .extend(file_audio::file_ids(&items).cloned());
-            state
-                .history
-                .record_annotated_items(&mut items, model_info.truncation_policy.into());
+                .current_time_reminder
+                .note_recorded_items(&response_items);
         }
         for image in image_preparations {
             self.services
@@ -4407,27 +4502,34 @@ impl Session {
                     metadata: image,
                 });
         }
-        let settings_guard =
-            if force_mcp_checkpoint && self.reference_context_item().await.is_none() {
-                Some(thread_settings::acquire_persistence_lock(self).await)
+        let persisted = if let Some(RealtimeRecord::Handoff(prepared)) = &realtime {
+            self.finish_realtime_handoff(prepared, &items[0]).await;
+            true
+        } else if matches!(&realtime, Some(RealtimeRecord::Chunk)) {
+            true
+        } else {
+            let settings_guard =
+                if force_mcp_checkpoint && self.reference_context_item().await.is_none() {
+                    Some(thread_settings::acquire_persistence_lock(self).await)
+                } else {
+                    None
+                };
+            let initial_settings = if settings_guard.is_some()
+                && self.reference_context_item().await.is_none()
+                && self.state.lock().await.take_initial_settings_pending()
+            {
+                Some(thread_settings::applied_event(self).await)
             } else {
                 None
             };
-        let initial_settings = if settings_guard.is_some()
-            && self.reference_context_item().await.is_none()
-            && self.state.lock().await.take_initial_settings_pending()
-        {
-            Some(thread_settings::applied_event(self).await)
-        } else {
-            None
+            let rollout_items = initial_settings
+                .into_iter()
+                .map(RolloutItem::EventMsg)
+                .chain(items.into_iter().map(RolloutItem::ResponseItem))
+                .collect::<Vec<_>>();
+            self.persist_rollout_items(&rollout_items).await
         };
-        let rollout_items = initial_settings
-            .into_iter()
-            .map(RolloutItem::EventMsg)
-            .chain(items.into_iter().map(RolloutItem::ResponseItem))
-            .collect::<Vec<_>>();
-        let persisted = self.persist_rollout_items(&rollout_items).await;
-        drop(settings_guard);
+        drop(realtime_settings_guard);
         if persisted && let Some(revision) = mcp_revision {
             self.services
                 .executed_tool_calls
@@ -4445,6 +4547,7 @@ impl Session {
         }
         self.send_raw_response_items(turn_context, &response_items)
             .await;
+        Ok(())
     }
 
     pub(crate) async fn record_step_world_state_if_changed(
@@ -4634,6 +4737,7 @@ impl Session {
                     .then(|| self.services.turn_environments.configured_snapshot_now()),
             )
         };
+        let mut settings_before_tier_inheritance = None;
         if self.inherits_root_service_tier(&turn_context.session_source)
             || matches!(
                 &turn_context.session_source,
@@ -4662,7 +4766,10 @@ impl Session {
                 );
                 inherited_settings.mcp_approvals_reviewer_override =
                     settings.mcp_approvals_reviewer_override;
-                settings = Arc::new(inherited_settings);
+                settings_before_tier_inheritance = Some(std::mem::replace(
+                    &mut settings,
+                    Arc::new(inherited_settings),
+                ));
             }
         }
         let dynamic_tools = self.dynamic_tools().await;
@@ -4775,8 +4882,9 @@ impl Session {
                 extension_data.insert(messages.clone());
             }
             let mut required_servers = required_servers.to_vec();
-            if settings.model_info.web_search_provider
-                == Some(codex_protocol::openai_models::WebSearchProvider::SearchMcp)
+            if !turn_context.config.subagent_web_search_disabled
+                && settings.model_info.web_search_provider
+                    == Some(codex_protocol::openai_models::WebSearchProvider::SearchMcp)
                 && turn_context.apps_enabled()
                 && !turn_context.config.requires_native_search()
                 && (turn_context.config.web_search_mode.value()
@@ -4944,6 +5052,7 @@ impl Session {
                 .then(CancellationToken::new),
             realtime: self.conversation.snapshot().await,
             settings,
+            settings_before_tier_inheritance,
             token_budget,
             session_telemetry,
             turn: turn_context,
@@ -5471,7 +5580,14 @@ impl Session {
                 .features
                 .plugin_recommendations_enabled()
         {
-            match PreparedToolRecommendations::load(self, turn_context).await {
+            let started_at = std::time::Instant::now();
+            let recommendations = PreparedToolRecommendations::load(self, turn_context).await;
+            turn_context.session_telemetry.record_duration(
+                "codex.initial_context.plugin_recommendations_wait_ms",
+                started_at.elapsed(),
+                &[],
+            );
+            match recommendations {
                 PreparedToolRecommendations::Endpoint(tools) => Some(tools),
                 PreparedToolRecommendations::Legacy(_) => None,
             }
@@ -6355,7 +6471,11 @@ impl Session {
         client_id: Option<String>,
         metadata: UserInputMetadata,
         persist_context: PersistContext,
-    ) {
+    ) -> std::io::Result<()> {
+        let realtime = match metadata.realtime_handoff_id {
+            Some(id) => self.pending_realtime_handoff(id, input).await,
+            None => None,
+        };
         let display_input = input
             .iter()
             .map(ResolvedUserInput::to_user_input)
@@ -6364,7 +6484,7 @@ impl Session {
         // Emit full prompt telemetry only for inputs selected for recording.
         turn_context.session_telemetry.user_prompt(&display_input);
         let (mut response_item, user_image_content_indices) =
-            self.response_item_from_user_input_with_image_positions(input);
+            Self::response_item_from_user_input_with_image_positions(input);
         if let Some(uuid) = metadata.response_item_uuid {
             response_item.set_id(Some(ResponseItemId::for_admitted_user_input(uuid)));
         }
@@ -6398,18 +6518,28 @@ impl Session {
             &prepared_items,
             &user_image_content_indices,
         );
-        self.record_prepared_conversation_items(
-            turn_context,
-            model_info,
-            prepared_items,
-            image_preparations,
-        )
-        .await;
+        if let Err(error) = self
+            .record_prepared_items(
+                turn_context,
+                model_info,
+                prepared_items,
+                image_preparations,
+                realtime.as_ref().map(RealtimeRecord::Handoff),
+            )
+            .await
+        {
+            if let Some(prepared) = realtime {
+                self.reject_realtime_handoff(prepared.id).await;
+            }
+            return Err(error);
+        }
         if metadata.origin.is_user() {
             self.services
                 .analytics_events_client
                 .track_accepted_user_input(&turn_context.sub_id, metadata.used_dictation);
         }
+        // Existing clients use this accepted input item to identify delegated turns.
+        // The realtime receipt adds provenance without changing that live contract.
         user_message_item.client_id = client_id;
         let turn_item = TurnItem::UserMessage(user_message_item);
         self.emit_turn_item_started(turn_context, &turn_item).await;
@@ -6421,6 +6551,7 @@ impl Session {
         )
         .await;
         self.ensure_rollout_materialized(persist_context).await;
+        Ok(())
     }
 
     pub(crate) async fn notify_stream_error(

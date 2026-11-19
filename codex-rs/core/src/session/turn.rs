@@ -339,19 +339,7 @@ pub(crate) async fn run_turn(
     required_servers.sort_unstable();
     required_servers.dedup();
 
-    // A same-turn reentry may have queued steering but no direct input. Decide after
-    // that input is drained below, rather than consuming this step's slot on old evidence.
-    if !input.is_empty() {
-        sess.adapt_reasoning(
-            &turn_context,
-            &input,
-            codex_config::System1Trigger::TurnStart,
-            &cancellation_token,
-        )
-        .await;
-    }
-
-    // run_turn owns the step used to seed context and make the first sampling request.
+    // Seed turn context before recording input; System1 sees only hook-approved input.
     let first_step_context = match sess
         .capture_step_context_with_required_mcp_servers(
             Arc::clone(&turn_context),
@@ -478,6 +466,53 @@ pub(crate) async fn run_turn(
     {
         return Ok(None);
     }
+
+    // A same-turn reentry can have queued steering but no direct input. Decide
+    // after that input is drained below, rather than classifying stale evidence.
+    let first_step_context = if input.is_empty() {
+        first_step_context
+    } else {
+        sess.adapt_reasoning(
+            &turn_context,
+            codex_config::System1Trigger::TurnStart,
+            &cancellation_token,
+        )
+        .await;
+        // A settings update may have landed during the hooks, before System1 ran.
+        let captured = first_step_context
+            .settings_before_tier_inheritance
+            .as_ref()
+            .unwrap_or(&first_step_context.settings);
+        let current = turn_context.next_step_settings.load_full();
+        let mode = sess.system1_state(
+            turn_context.config.system1.enabled,
+            /*initial_revision*/ 0,
+        );
+        let needs_fallback = if mode.enabled && mode.error.is_some() {
+            let state = sess.state.lock().await;
+            !Arc::ptr_eq(
+                &current,
+                &sess.system1_fallback_settings(
+                    Arc::clone(&current),
+                    &state.session_configuration,
+                    &turn_context,
+                ),
+            )
+        } else {
+            false
+        };
+        if !Arc::ptr_eq(captured, &current) || needs_fallback {
+            sess.capture_step_context_with_required_mcp_servers(
+                Arc::clone(&turn_context),
+                &cancellation_token,
+                required_servers,
+                required_plugins,
+            )
+            .await?
+        } else {
+            first_step_context
+        }
+    };
 
     // Guardian can replace its submitted prompt with response items during finalization.
     // Those skip UserInput telemetry above, so emit the saved prompt after acceptance.
@@ -610,7 +645,6 @@ pub(crate) async fn run_turn(
         if next_step_context.is_none() || !pending_input.is_empty() {
             sess.adapt_reasoning(
                 &turn_context,
-                &pending_input,
                 if input.is_empty()
                     && turn_context
                         .extension_data
@@ -696,7 +730,10 @@ pub(crate) async fn run_turn(
                 .await;
 
             sess.report_reasoning_effort(step_context.as_ref()).await;
-            sess.record_system1_model_step(&turn_context);
+            sess.record_system1_model_step(
+                &turn_context,
+                step_context.settings.effective_reasoning_effort(),
+            );
 
             run_sampling_request(
                 Arc::clone(&sess),
@@ -985,7 +1022,7 @@ pub(crate) async fn run_turn(
                                 return Err(err);
                             }
                             let error = err.to_codex_protocol_error();
-                            if matches!(error, CodexErrorInfo::UsageLimitExceeded) {
+                            if error.is_usage_limit() {
                                 // Preserve the completed answer while stopping automatic work.
                                 sess.emit_turn_error_lifecycle(
                                     turn_context.as_ref(),
@@ -1199,17 +1236,21 @@ pub(crate) async fn run_hooks_and_record_inputs(
 ) -> CodexResult<bool> {
     let mut blocked_input = false;
     let mut accepted_user_input = false;
+    let mut input_error = None;
     for input_item in recordable_inputs(sess, model_info, input) {
         let input_item = input_item?;
         let hook_outcome = inspect_pending_input(sess, turn_context, &input_item).await;
+        let realtime_handoff_id = match input_item.as_ref() {
+            TurnInput::UserInput { metadata, .. } => metadata.realtime_handoff_id,
+            _ => None,
+        };
         if hook_outcome.should_stop {
+            if let Some(id) = realtime_handoff_id {
+                sess.reject_realtime_handoff(id).await;
+            }
             blocked_input = true;
             record_additional_contexts(sess, turn_context, hook_outcome.additional_contexts).await;
         } else {
-            if matches!(input_item.as_ref(), TurnInput::UserInput { content, .. } if !content.is_empty())
-            {
-                accepted_user_input = true;
-            }
             // Tool outputs retain their durability barrier, including in mixed input batches.
             let input_persist_context = if persist_context == PersistContext::SteeredUserInput
                 && matches!(input_item.as_ref(), TurnInput::FunctionCallOutput(_))
@@ -1218,7 +1259,15 @@ pub(crate) async fn run_hooks_and_record_inputs(
             } else {
                 persist_context
             };
-            record_pending_input(
+            let is_user_input = matches!(input_item.as_ref(), TurnInput::UserInput { content, .. } if !content.is_empty());
+            // Owned inputs were stripped of unsupported audio and cannot lead to a model step.
+            let decision_input = match &input_item {
+                Cow::Borrowed(
+                    item @ (TurnInput::UserInput { .. } | TurnInput::InterAgentCommunication(_)),
+                ) => Some(*item),
+                _ => None,
+            };
+            if let Err(error) = record_pending_input(
                 sess,
                 turn_context,
                 model_info,
@@ -1226,13 +1275,26 @@ pub(crate) async fn run_hooks_and_record_inputs(
                 hook_outcome.additional_contexts,
                 input_persist_context,
             )
-            .await;
+            .await
+            {
+                // The batch has left the queue. Persist its unrelated siblings before failing.
+                input_error.get_or_insert(error);
+            } else {
+                accepted_user_input |= is_user_input;
+                if let Some(item) = decision_input {
+                    sess.record_system1_input(turn_context, item);
+                }
+            }
         }
     }
     // The batch has left the input queue. Persist every accepted item before the
     // optional lookup can suspend this task long enough for an interrupt to abort it.
     if !input.is_empty() {
         super::file_audio::resolve_pending(sess).await;
+    }
+    if let Some(error) = input_error {
+        sess.conversation.stop_for_history_recovery().await;
+        return Err(CodexErr::Io(error));
     }
     Ok(blocked_input && !accepted_user_input)
 }
@@ -2261,7 +2323,7 @@ pub(super) enum PreparedToolRecommendations {
 }
 
 impl PreparedToolRecommendations {
-    #[instrument(level = "trace", skip_all)]
+    #[instrument(name = "plugins.recommendations.load", level = "info", skip_all)]
     pub(super) async fn load(sess: &Session, turn_context: &TurnContext) -> Self {
         let auth = sess.services.auth_manager.auth().await;
         let endpoint_candidates = sess

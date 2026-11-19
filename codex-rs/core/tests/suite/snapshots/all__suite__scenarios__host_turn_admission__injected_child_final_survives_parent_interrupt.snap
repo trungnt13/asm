@@ -1,0 +1,20 @@
+---
+source: core/tests/suite/host_turn_admission.rs
+expression: "context_snapshot::format_request_history_snapshot(\"An acknowledged child final queued during parent sampling survives interruption and appears once in the next request.\",\n&responses::received_responses_requests(&server).await,\n&ContextSnapshotOptions::default().rewrite_known_segments(),)"
+---
+Scenario: An acknowledged child final queued during parent sampling survives interruption and appears once in the next request.
+
+## Window 1
+-- request 1 (turn) --
+00:message/developer:
+    <MODEL_INSTRUCTIONS>
+01:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/user:
+    <ENVIRONMENT_CONTEXT>
+03:message/user:
+    Start work.
+-- request 2 (turn) --
+04:agent_message
+05:message/user:
+    Continue work.

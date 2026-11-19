@@ -44,6 +44,8 @@ use crate::tools::context::ToolPayload;
 use crate::tools::handlers::multi_agents_v2::SendMessageHandler;
 use crate::tools::registry::ToolExecutor;
 use assert_matches::assert_matches;
+use codex_config::System1Backend;
+use codex_config::System1Profile;
 use codex_extension_api::ExtensionDataInit;
 use codex_extension_api::Instructions;
 use codex_extension_api::LoadInstructionsFuture;
@@ -883,10 +885,14 @@ async fn cancelled_spawn_after_input_admission_discards_child() {
     });
     let child = poll_fn(|cx| {
         assert!(spawn.as_mut().poll(cx).is_pending());
-        let threads = state.threads.try_read().expect("uncontended manager");
+        let threads = state.threads.state.try_read().expect("uncontended manager");
         // On this single-thread runtime the session loop cannot consume the first
         // input until this poll returns. Leave spawn waiting for its admission reply.
-        match threads.values().find(|thread| !thread.io.tx_sub.is_empty()) {
+        match threads
+            .threads
+            .values()
+            .find(|thread| !thread.io.tx_sub.is_empty())
+        {
             Some(child) => Poll::Ready(Arc::clone(child)),
             None => Poll::Pending,
         }
@@ -1183,10 +1189,10 @@ async fn cancelled_v2_send_finishes_reload_registration() {
     let mut send = control.send(followup_request("cancelled follow-up"));
     let (reloaded, pin_blocker) = poll_fn(|cx| {
         assert!(send.as_mut().poll(cx).is_pending());
-        let Ok(threads) = state.threads.try_read() else {
+        let Ok(threads) = state.threads.state.try_read() else {
             return Poll::Pending;
         };
-        let Some(reloaded) = threads.get(&child_id).cloned() else {
+        let Some(reloaded) = threads.threads.get(&child_id).cloned() else {
             return Poll::Pending;
         };
         // On this single-thread runtime, intercept publication before the detached
@@ -1299,18 +1305,32 @@ async fn spawn_v2_reload_test_child(
         .expect("spawn_agent should succeed")
 }
 
-async fn check_v2_agent_reload(route: V2ReloadRoute) {
-    let (home, mut config) = test_config().await;
-    let _ = config.features.enable(Feature::MultiAgentV2);
-    let _ = config.features.enable(Feature::Sqlite);
-    config.model = Some("gpt-6-astra".to_string());
+fn configure_system1_test_profile(config: &mut Config) {
     config.features.enable(Feature::StepModelSwitching).unwrap();
     config
         .features
         .enable(Feature::ReasoningEffortOverride)
         .unwrap();
-    config.system1.decision_model_api_env =
-        Some("CODEX_TEST_ADAPTIVE_REASONING_NO_KEY".to_string());
+    let profile = "decisions".to_string();
+    config.system1.profile = Some(profile.clone());
+    config.system1.profiles.insert(
+        profile,
+        System1Profile {
+            include_images: false,
+            backend: System1Backend::Openai,
+            endpoint: None,
+            model: "gpt-6-luna".to_string(),
+            api_key_env: "CODEX_TEST_ADAPTIVE_REASONING_NO_KEY".to_string(),
+        },
+    );
+}
+
+async fn check_v2_agent_reload(route: V2ReloadRoute) {
+    let (home, mut config) = test_config().await;
+    let _ = config.features.enable(Feature::MultiAgentV2);
+    let _ = config.features.enable(Feature::Sqlite);
+    config.model = Some("gpt-6-astra".to_string());
+    configure_system1_test_profile(&mut config);
     let germany = RequestCountry::from_iso_code("DE").unwrap();
     let united_states = RequestCountry::from_iso_code("US").unwrap();
     config.multi_agent_v2.max_concurrent_threads_per_session = 3;
@@ -2295,13 +2315,7 @@ async fn v2_spawn_resolves_reported_effort_without_changing_child_selection(
         .expect("enable v2");
     config.model = Some("gpt-6-astra".to_string());
     config.model_reasoning_effort = Some(ReasoningEffort::Medium);
-    config.features.enable(Feature::StepModelSwitching).unwrap();
-    config
-        .features
-        .enable(Feature::ReasoningEffortOverride)
-        .unwrap();
-    config.system1.decision_model_api_env =
-        Some("CODEX_TEST_ADAPTIVE_REASONING_NO_KEY".to_string());
+    configure_system1_test_profile(&mut config);
     let harness = AgentControlHarness::new_with_config(home, config).await;
     let (parent_id, parent) = harness.start_thread().await;
     parent

@@ -317,6 +317,7 @@ impl StepContext {
                 settings.model_info.as_ref(),
             ),
             settings: Arc::new(settings),
+            settings_before_tier_inheritance: None,
             session_telemetry: turn.session_telemetry.clone(),
             realtime: RealtimeConversationSnapshot {
                 active: turn.realtime_active,
@@ -5658,6 +5659,7 @@ async fn active_profile_update_rebuilds_network_proxy_config(
             (
                 "locked-down".to_string(),
                 PermissionProfileToml {
+                    credentials: None,
                     description: None,
                     extends: None,
                     workspace_roots: None,
@@ -5674,6 +5676,7 @@ async fn active_profile_update_rebuilds_network_proxy_config(
             (
                 "web-enabled".to_string(),
                 PermissionProfileToml {
+                    credentials: None,
                     description: None,
                     extends: None,
                     workspace_roots: None,

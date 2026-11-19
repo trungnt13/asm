@@ -1,5 +1,7 @@
 //! Trusted reasoning-effort updates follow surviving history and the next turn's selected settings.
 
+use codex_config::System1Backend;
+use codex_config::System1Profile;
 use codex_config::test_support::CloudConfigBundleFixture;
 use codex_core::ForkSnapshot;
 use codex_core::RecoverTurnRequest;
@@ -774,7 +776,18 @@ async fn reasoning_effort_override_preserves_prefix_and_only_appends_on_change(
         .with_config(move |config| {
             config.features.enable(Feature::StepModelSwitching).unwrap();
             config.system1.enabled = true;
-            config.system1.decision_model_api_env = Some(credential_env.to_string());
+            let profile = "decisions".to_string();
+            config.system1.profile = Some(profile.clone());
+            config.system1.profiles.insert(
+                profile,
+                System1Profile {
+                    include_images: false,
+                    backend: System1Backend::Openai,
+                    endpoint: None,
+                    model: "gpt-6-luna".to_string(),
+                    api_key_env: credential_env.to_string(),
+                },
+            );
         })
         .build_with_auto_env(&server)
         .await?;

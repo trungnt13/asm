@@ -960,7 +960,10 @@ impl TurnRequestProcessor {
             approval_policy.map(codex_app_server_protocol::AskForApproval::to_core);
         let approvals_reviewer =
             approvals_reviewer.map(codex_app_server_protocol::ApprovalsReviewer::to_core);
-        let sandbox_policy = sandbox_policy.map(|policy| policy.to_core());
+        let sandbox_policy = sandbox_policy
+            .map(|policy| policy.try_to_core())
+            .transpose()
+            .map_err(|err| invalid_request(format!("invalid sandboxPolicy: {err}")))?;
         let (permission_profile, active_permission_profile, profile_workspace_roots) =
             if let Some(permissions) = permissions {
                 let Some(snapshot) = snapshot.as_ref() else {
@@ -1233,7 +1236,13 @@ impl TurnRequestProcessor {
                 // Synchronize here even if the listener already observed identical settings.
                 let (mut snapshot, selected_service_tier) = thread.resume_config_snapshot().await;
                 snapshot.service_tier = selected_service_tier;
-                let thread_settings = thread_settings_from_config_snapshot(&snapshot);
+                let thread_settings = match thread_settings_from_config_snapshot(&snapshot) {
+                    Ok(settings) => settings,
+                    Err(error) => {
+                        tracing::warn!(thread_id = %params.thread_id, message = %error.message, "cannot publish Side thread settings");
+                        return Ok(ThreadInjectItemsResponse {});
+                    }
+                };
                 thread_state
                     .lock()
                     .await

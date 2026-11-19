@@ -386,7 +386,7 @@ pub(super) async fn submit_steering(
             Vec::new(),
             codex_thread_store::PersistContext::TurnStart,
         )
-        .await;
+        .await?;
     }
     let messages = super::input_messages(
         session.clone_history().await.raw_items(),

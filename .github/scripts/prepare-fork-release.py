@@ -14,6 +14,17 @@ LOCKFILE = "codex-rs/Cargo.lock"
 REPOSITORY = os.environ["GITHUB_REPOSITORY"]
 AUTHOR = "Trung Ngo"
 EMAIL = "1390402+trungnt13@users.noreply.github.com"
+RELEASE_WORKFLOW = ".github/workflows/fork-rust-release.yml"
+CANDIDATE_SUBJECT = "Prepare ASM {version} release"
+NATIVE_CHECKS = {
+    "Verify published aarch64-apple-darwin binaries",
+    "Verify published x86_64-unknown-linux-gnu binaries",
+}
+PUBLICATION_JOBS = {
+    "Complete and verify immutable release",
+    "Publish and verify immutable release",
+}
+SYNC_JOB = "Advance main only after release verification"
 
 
 def git(*arguments):
@@ -174,7 +185,8 @@ def complete_candidate(tag, revision):
 
 
 def published_assets_complete(release):
-    names = {asset["name"] for asset in release.get("assets", [])}
+    assets = release.get("assets", [])
+    names = {asset["name"] for asset in assets}
     legacy = {
         "codex-aarch64-apple-darwin.tar.gz",
         "codex-x86_64-unknown-linux-gnu.tar.gz",
@@ -185,35 +197,44 @@ def published_assets_complete(release):
         "SHA256SUMS-aarch64-apple-darwin",
         "SHA256SUMS-x86_64-unknown-linux-gnu",
     }
-    return not release["draft"] and names in (legacy, staged)
+    v3_archive = "codex-x86_64-unknown-linux-gnu-v3.tar.gz"
+    v3_manifest = "SHA256SUMS-x86_64-unknown-linux-gnu-v3"
+    if release["draft"] or len(names) != len(assets):
+        return False
+    if names in (legacy, staged):
+        return True
+    if names - {v3_archive, v3_manifest} != staged:
+        return False
+    return v3_archive in names or not any(
+        asset["name"] == v3_manifest and asset.get("state") == "uploaded"
+        for asset in assets
+    )
+
+
+def publication_run_succeeded(run):
+    return (
+        run["path"] == RELEASE_WORKFLOW
+        and run["status"] == "completed"
+        and run["conclusion"] == "success"
+    )
 
 
 def completed_publication(run, candidate, tag, candidate_ref):
-    if run["status"] != "completed" or run["conclusion"] != "success":
-        return False
-    if run["path"] != ".github/workflows/fork-rust-release.yml":
+    if not publication_run_succeeded(run):
         return False
     jobs = api(
         f"repos/{REPOSITORY}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100"
     )["jobs"]
-    required = {
-        "Verify published aarch64-apple-darwin binaries",
-        "Verify published x86_64-unknown-linux-gnu binaries",
-        "Advance main only after release verification",
-    }
     succeeded = {job["name"] for job in jobs if job["conclusion"] == "success"}
-    if not required <= succeeded or not succeeded & {
-        "Complete and verify immutable release",
-        "Publish and verify immutable release",
-    }:
+    if not (NATIVE_CHECKS | {SYNC_JOB}) <= succeeded or not succeeded & PUBLICATION_JOBS:
         return False
     if run["id"] == int(candidate_ref.rsplit("-", 1)[1]):
         return run["event"] == "workflow_dispatch" and run["head_branch"] == "main"
-    sync_job = next(
-        job
-        for job in jobs
-        if job["name"] == "Advance main only after release verification"
-    )
+    sync_job = next(job for job in jobs if job["name"] == SYNC_JOB)
+    return sync_job_matches(sync_job, candidate, tag, re.escape(candidate_ref))
+
+
+def sync_job_matches(sync_job, candidate, tag, ref_pattern):
     # Logs may contain ANSI bytes. Keep them in memory, never render them to a terminal.
     api_help = subprocess.check_output(["gh", "api", "--help"], text=True)
     raw_logs = (
@@ -230,13 +251,72 @@ def completed_publication(run, candidate, tag, candidate_ref):
     )
     # Job environment ties both original and successful resume runs to the frozen candidate.
     return all(
-        re.search(rf"\b{key}:\s+{re.escape(value)}(?:\s|$)", logs)
-        for key, value in {
-            "RELEASE_SHA": candidate,
-            "RELEASE_TAG": tag,
-            "CANDIDATE_REF": candidate_ref,
+        re.search(rf"\b{key}:\s+{pattern}(?:\s|$)", logs)
+        for key, pattern in {
+            "RELEASE_SHA": re.escape(candidate),
+            "RELEASE_TAG": re.escape(tag),
+            "CANDIDATE_REF": ref_pattern,
         }.items()
     )
+
+
+def verify_base_release(run_id, tag, revision):
+    if not re.fullmatch(r"[1-9][0-9]*", run_id):
+        raise ValueError("Release run ID must be a positive decimal integer")
+    path = f"repos/{REPOSITORY}/actions/runs/{run_id}"
+    run = api(path)
+    if (
+        not publication_run_succeeded(run)
+        or str(run["id"]) != run_id
+        or (run.get("head_repository") or {}).get("full_name") != REPOSITORY
+    ):
+        raise ValueError(f"Run {run_id} is not a successful fork release workflow")
+    candidate = run["event"] == "workflow_dispatch" and run["head_branch"] == "main"
+    if not candidate:
+        if (
+            run["event"] not in {"push", "workflow_dispatch"}
+            or run["head_branch"] != tag
+            or run["head_sha"] != revision
+        ):
+            raise ValueError(f"Run {run_id} does not identify {tag} at {revision}")
+        candidate_refs = api(f"repos/{REPOSITORY}/git/matching-refs/heads/agent/release-")
+        # Older frozen refs may be removed after the next successful release.
+        subject = git("show", "-s", "--format=%s", revision)
+        if any(ref["object"]["sha"] == revision for ref in candidate_refs) or (
+            subject == CANDIDATE_SUBJECT.format(version=tag.removeprefix("v"))
+        ):
+            raise ValueError(
+                f"{tag} requires the successful candidate run with main sync"
+            )
+
+    # Partial reruns retain successful jobs that did not run again.
+    latest = {}
+    page = 1
+    while True:
+        jobs = api(f"{path}/jobs?filter=all&per_page=100&page={page}")["jobs"]
+        for job in jobs:
+            name = job["name"]
+            if job["conclusion"] == "skipped":
+                continue
+            previous = latest.get(name)
+            if previous is None or (job["run_attempt"], job["id"]) > (
+                previous["run_attempt"],
+                previous["id"],
+            ):
+                latest[name] = job
+        if len(jobs) < 100:
+            break
+        page += 1
+    succeeded = {name for name, job in latest.items() if job["conclusion"] == "success"}
+    if not NATIVE_CHECKS <= succeeded or not succeeded & PUBLICATION_JOBS:
+        raise ValueError(f"Run {run_id} lacks successful publication and native checks")
+    if candidate and (
+        SYNC_JOB not in succeeded
+        or not sync_job_matches(
+            latest[SYNC_JOB], revision, tag, r"refs/heads/agent/release-[1-9][0-9]*"
+        )
+    ):
+        raise ValueError(f"Run {run_id} does not prove main sync for {tag} at {revision}")
 
 
 def next_release_version(upstream):
@@ -507,7 +587,7 @@ def prepare():
             "commit",
             "--allow-empty",
             "-m",
-            f"Prepare ASM {new_version} release",
+            CANDIDATE_SUBJECT.format(version=new_version),
         )
         revision = git("rev-parse", "HEAD")
         validate_candidate(revision)
@@ -574,5 +654,9 @@ if __name__ == "__main__":
         prepare()
     elif sys.argv[1:] == ["sync-main"]:
         sync_main()
+    elif len(sys.argv) == 5 and sys.argv[1] == "verify-base":
+        verify_base_release(*sys.argv[2:])
     else:
-        raise SystemExit("Usage: prepare-fork-release.py prepare|sync-main")
+        raise SystemExit(
+            "Usage: prepare-fork-release.py prepare|sync-main|verify-base RUN_ID TAG SHA"
+        )

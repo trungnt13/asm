@@ -26,6 +26,7 @@ use codex_config::ProfileV2Name;
 use codex_config::ResidencyRequirement;
 use codex_config::SandboxModeRequirement;
 use codex_config::Sourced;
+use codex_config::System1Config;
 use codex_config::ThreadConfigLoader;
 use codex_config::apply_default_gcp_auth;
 use codex_config::config_toml::CircuitBreakAction;
@@ -35,6 +36,7 @@ use codex_config::config_toml::ProjectConfig;
 use codex_config::config_toml::RealtimeAudioConfig;
 use codex_config::config_toml::RealtimeConfig;
 use codex_config::config_toml::ResponseProcessMode;
+use codex_config::config_toml::SubagentToolsToml;
 use codex_config::config_toml::ThreadStoreToml;
 use codex_config::config_toml::validate_model_providers;
 use codex_config::loader::load_config_layers_state;
@@ -81,6 +83,7 @@ use codex_features::FeatureOverrides;
 use codex_features::FeatureToml;
 use codex_features::Features;
 use codex_features::FeaturesToml;
+use codex_features::GuardianV3ConfigToml;
 use codex_features::MultiAgentV2ConfigToml;
 use codex_features::NetworkProxyConfigToml;
 use codex_features::RuntimeAuthMode;
@@ -200,6 +203,7 @@ mod runtime_refresh;
 pub(crate) use runtime_refresh::RuntimeConfigRefresh;
 #[cfg(test)]
 mod schema;
+mod subagent_tools;
 mod token_budget_startup;
 mod windows_sandbox_config;
 pub use auth_keyring::bootstrap_auth_config;
@@ -675,6 +679,11 @@ pub struct Config {
     /// Explicit spawn efforts and role efforts take precedence.
     pub subagent_default_reasoning: HashMap<String, ReasoningEffort>,
 
+    pub(crate) subagent_tools: SubagentToolsToml,
+    // Unlike the policy table, this flag applies to the current thread only.
+    pub(crate) subagent_mcp_disabled: bool,
+    pub(crate) subagent_web_search_disabled: bool,
+
     /// Model used specifically for review sessions.
     pub review_model: Option<String>,
 
@@ -772,6 +781,8 @@ pub struct Config {
     pub guardian_policy_template: Option<String>,
     /// Transcript encoding shared by Guardian review and scoring.
     pub guardian_transcript_mode: codex_protocol::TranscriptFormat,
+    /// GV3 settings captured when the app-server installs the extension.
+    pub guardian_v3: Option<Arc<GuardianV3ConfigToml>>,
     /// Frozen section policy for sync Guardian; absence keeps fixed budgeting.
     pub guardian_sync_elastic_budget: Option<codex_guardian_context::ElasticBudgetConfig>,
     /// Frozen section policy for async Guardian; absence keeps fixed budgeting.
@@ -2441,7 +2452,37 @@ pub fn validate_feature_requirements_for_config_toml(
     feature_requirements: Option<&Sourced<FeatureRequirementsToml>>,
 ) -> std::io::Result<()> {
     managed_features::validate_explicit_feature_settings_in_config_toml(cfg, feature_requirements)?;
-    managed_features::validate_feature_requirements_in_config_toml(cfg, feature_requirements)
+    managed_features::resolve_managed_features_for_config_toml(cfg, feature_requirements)?;
+    Ok(())
+}
+
+/// Validate System1 against the merged settings and effective managed features.
+pub fn validate_system1_for_config_toml(
+    cfg: &ConfigToml,
+    feature_requirements: Option<&Sourced<FeatureRequirementsToml>>,
+) -> std::io::Result<()> {
+    let Some(system1) = &cfg.system1 else {
+        return Ok(());
+    };
+    let features =
+        managed_features::resolve_managed_features_for_config_toml(cfg, feature_requirements)?;
+    validate_system1(system1, &features)
+}
+
+fn validate_system1(system1: &System1Config, features: &ManagedFeatures) -> std::io::Result<()> {
+    system1
+        .validate()
+        .map_err(|error| std::io::Error::new(ErrorKind::InvalidInput, error))?;
+    if system1.enabled
+        && (!features.enabled(Feature::ReasoningEffortOverride)
+            || !features.enabled(Feature::StepModelSwitching))
+    {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            "system1.enabled requires features.reasoning_effort_override and features.step_model_switching",
+        ));
+    }
+    Ok(())
 }
 
 fn load_catalog_json(path: &AbsolutePathBuf) -> std::io::Result<ModelsResponse> {
@@ -3258,6 +3299,44 @@ fn resolve_current_time_reminder_config(
     }))
 }
 
+fn resolve_guardian_v3_config(
+    feature: Option<FeatureToml<GuardianV3ConfigToml>>,
+) -> std::io::Result<Option<Arc<GuardianV3ConfigToml>>> {
+    let Some(FeatureToml::Config(settings)) = feature else {
+        return Ok(None);
+    };
+    if let Some(limit) = settings.max_instruction_tokens {
+        for (key, prompt) in [
+            (
+                "housekeeper.routing_instructions",
+                settings
+                    .housekeeper
+                    .as_ref()
+                    .and_then(|housekeeper| housekeeper.routing_instructions.as_deref()),
+            ),
+            (
+                "reviewer.retrieval_instructions",
+                settings
+                    .reviewer
+                    .as_ref()
+                    .and_then(|reviewer| reviewer.retrieval_instructions.as_deref()),
+            ),
+        ] {
+            let Some(prompt) = prompt else { continue };
+            let tokens = codex_utils_string::approx_token_count(prompt.trim());
+            if tokens > limit {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "features.guardianv3.{key} is {tokens} estimated tokens, exceeding max_instruction_tokens = {limit}"
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(Some(Arc::new(settings)))
+}
+
 fn resolve_terminal_resize_reflow_config(config_toml: &ConfigToml) -> TerminalResizeReflowConfig {
     let Some(tui) = config_toml.tui.as_ref() else {
         return TerminalResizeReflowConfig::default();
@@ -3742,18 +3821,7 @@ impl Config {
             &mut startup_warnings,
         )?;
         let system1 = cfg.system1.clone().unwrap_or_default();
-        system1
-            .validate()
-            .map_err(|error| std::io::Error::new(ErrorKind::InvalidInput, error))?;
-        if system1.enabled
-            && (!features.enabled(Feature::ReasoningEffortOverride)
-                || !features.enabled(Feature::StepModelSwitching))
-        {
-            return Err(std::io::Error::new(
-                ErrorKind::InvalidInput,
-                "system1.enabled requires features.reasoning_effort_override and features.step_model_switching",
-            ));
-        }
+        validate_system1(&system1, &features)?;
         if let Some(FeatureToml::Config(guardian)) = cfg
             .features
             .as_ref()
@@ -4841,6 +4909,9 @@ impl Config {
             service_tier,
             subagent_service_tiers: cfg.subagent_service_tiers,
             subagent_default_reasoning: cfg.subagent_default_reasoning,
+            subagent_tools: cfg.subagent_tools,
+            subagent_mcp_disabled: false,
+            subagent_web_search_disabled: false,
             review_model,
             model_context_window: cfg.model_context_window,
             role_model_context_window: None,
@@ -4994,6 +5065,7 @@ impl Config {
             guardian_extra_policy,
             guardian_policy_template: None,
             guardian_transcript_mode,
+            guardian_v3: resolve_guardian_v3_config(cfg.features.and_then(|features| features.guardianv3))?,
             guardian_sync_elastic_budget,
             guardian_async_elastic_budget,
             guardian_conversation_history_prompt,

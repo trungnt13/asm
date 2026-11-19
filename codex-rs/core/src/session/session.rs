@@ -665,10 +665,12 @@ async fn warm_plugins_and_skills_for_session_init(
 
 impl Session {
     pub(crate) fn turn_starts_closed(&self) -> bool {
-        self.services
-            .local_agent_runtime
-            .suspension_root()
-            .is_some()
+        self.conversation.history_recovery_required()
+            || self
+                .services
+                .local_agent_runtime
+                .suspension_root()
+                .is_some()
             || self
                 .outcome_reporting
                 .as_ref()
@@ -1334,11 +1336,18 @@ impl Session {
             })?;
         // Keep the large initialization future out of callers' stack frames.
         let session_result: anyhow::Result<Arc<Self>> = Box::pin(async {
-            if let InitialHistory::Resumed(resumed) = &mut initial_history
-                && let Some(history) = resume_context
-            {
-                resumed.history = history;
-                resumed.history_revision = None;
+            if let InitialHistory::Resumed(resumed) = &mut initial_history {
+                if let Some(history) = resume_context {
+                    resumed.history = history;
+                    resumed.history_revision = None;
+                }
+                let version = initial_multi_agent_version
+                    .unwrap_or_else(|| config.multi_agent_version_from_features());
+                crate::agent::sanitize_referenced_agent_fork(
+                    resumed.conversation_id,
+                    &mut resumed.history,
+                    version,
+                )?;
             }
             let super::model_ids::InitialModelIds {
                 item_id_generator,

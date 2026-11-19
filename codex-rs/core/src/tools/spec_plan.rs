@@ -1305,7 +1305,9 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistr
 
 #[instrument(level = "trace", skip_all)]
 fn add_mcp_resource_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistry) {
-    if !context.turn_context.config.mcp_resource_tools_enabled {
+    if context.turn_context.config.subagent_mcp_disabled
+        || !context.turn_context.config.mcp_resource_tools_enabled
+    {
         return;
     }
     if context.mcp.has_servers()

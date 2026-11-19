@@ -111,6 +111,17 @@ impl Session {
                         .to_string(),
                 ));
             }
+            if !self
+                .services
+                .thread_extension_data
+                .get::<System1Session>()
+                .is_some_and(|session| session.profile.get().is_some())
+            {
+                config
+                    .system1
+                    .selected_profile()
+                    .map_err(CodexErr::InvalidRequest)?;
+            }
             let active = self
                 .active_turn
                 .lock()

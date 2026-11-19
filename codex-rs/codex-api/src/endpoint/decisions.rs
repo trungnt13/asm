@@ -1,3 +1,5 @@
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use codex_http_client::HttpClient;
 use codex_http_client::RouteAwareRequestError;
 use codex_http_client::RouteFailureClass;
@@ -5,6 +7,7 @@ use codex_protocol::protocol::System1TransportCode;
 use serde_json::Value;
 use serde_json::json;
 use thiserror::Error;
+use uuid::Uuid;
 
 pub const DECISIONS_URL: &str = "https://api.openai.com/v1/decisions";
 const TYPESAFE_URL: &str = "https://api.typesafe.ai/v1/systemone";
@@ -98,6 +101,7 @@ impl DecisionsClient {
         input: &str,
         instructions: &str,
         choices: &[(String, String)],
+        images: &[String],
     ) -> Result<String, DecisionsError> {
         let url = match self.backend {
             DecisionBackend::OpenAi => DECISIONS_URL,
@@ -109,6 +113,7 @@ impl DecisionsClient {
             input,
             instructions,
             choices,
+            images,
         )
         .await
     }
@@ -121,9 +126,10 @@ impl DecisionsClient {
         input: &str,
         instructions: &str,
         choices: &[(String, String)],
+        images: &[String],
     ) -> Result<String, DecisionsError> {
         if model.trim().is_empty()
-            || input.trim().is_empty()
+            || (input.trim().is_empty() && images.is_empty())
             || instructions.trim().is_empty()
             || !(2..=255).contains(&choices.len())
             || choices.iter().any(|(choice, description)| {
@@ -139,6 +145,23 @@ impl DecisionsClient {
         {
             return Err(DecisionsError::InvalidRequest);
         }
+        let image = match images {
+            [] => None,
+            [url] => {
+                let (media_type, base64) =
+                    url.split_once(",").ok_or(DecisionsError::InvalidRequest)?;
+                let mime = match media_type {
+                    "data:image/png;base64" => "image/png",
+                    "data:image/jpeg;base64" => "image/jpeg",
+                    _ => return Err(DecisionsError::InvalidRequest),
+                };
+                if base64.is_empty() {
+                    return Err(DecisionsError::InvalidRequest);
+                }
+                Some((url, mime, base64))
+            }
+            _ => return Err(DecisionsError::InvalidRequest),
+        };
         let mut chunks = Vec::new();
         let mut remaining = input;
         while !remaining.is_empty() {
@@ -152,17 +175,26 @@ impl DecisionsClient {
             chunks.push(text);
             remaining = rest;
         }
-        let body = match self.backend {
+        let request = self.client.post(url).bearer_auth(&self.api_key);
+        let request = match self.backend {
             DecisionBackend::OpenAi => {
-                let input_items: Vec<_> = chunks.iter().map(|text|
+                let mut input_items: Vec<_> = chunks.iter().map(|text|
                     json!({"role": "user", "content": [{"type": "input_text", "text": text}]})
                 ).collect();
+                if let Some((url, _, _)) = image {
+                    input_items.insert(
+                        0,
+                        json!({"role": "user", "content": [
+                            {"type": "input_image", "image_url": url, "detail": "low"}
+                        ]}),
+                    );
+                }
                 tracing::debug!(
                     input_bytes = input.len(),
                     input_items = input_items.len(),
                     "Decisions input bounded"
                 );
-                json!({
+                request.json(&json!({
                     "model": model,
                     "input": input_items,
                     "questions": [{
@@ -171,7 +203,7 @@ impl DecisionsClient {
                         "instructions": instructions,
                         "choices": choices.iter().map(|(value, description)| json!({"value": value, "description": description})).collect::<Vec<_>>()
                     }]
-                })
+                }))
             }
             DecisionBackend::TypeSafe => {
                 let criteria: serde_json::Map<String, Value> = choices
@@ -180,7 +212,7 @@ impl DecisionsClient {
                         (choice.clone(), Value::String(description.clone()))
                     })
                     .collect();
-                json!({
+                let mut body = json!({
                     "model": model,
                     "state": if chunks.len() == 1 { json!(input) } else { json!(chunks) },
                     "questions": {
@@ -190,14 +222,36 @@ impl DecisionsClient {
                             "criteria": criteria
                         }
                     }
-                })
+                });
+                if let Some((_, mime, base64)) = image {
+                    let bytes = STANDARD
+                        .decode(base64)
+                        .map_err(|_| DecisionsError::InvalidRequest)?;
+                    let boundary = Uuid::new_v4().simple().to_string();
+                    let asset_ref = format!("<system1-image-{boundary}>");
+                    // TypeSafe resolves references in state through the multipart request's asset map.
+                    chunks.insert(0, &asset_ref);
+                    body["state"] = json!(chunks);
+                    body["assets"] = json!({asset_ref: {"type": "image", "part": "asset-0"}});
+                    let mut multipart = format!(
+                        "--{boundary}\r\nContent-Disposition: form-data; name=\"request\"\r\nContent-Type: application/json\r\n\r\n{body}\r\n\
+                        --{boundary}\r\nContent-Disposition: form-data; name=\"asset-0\"; filename=\"asset-0\"\r\nContent-Type: {mime}\r\n\r\n"
+                    ).into_bytes();
+                    multipart.extend_from_slice(&bytes);
+                    multipart.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+                    request
+                        .header(
+                            "content-type",
+                            format!("multipart/form-data; boundary={boundary}"),
+                        )
+                        .header("typesafe-danger-zone-images", "true")
+                        .body(multipart)
+                } else {
+                    request.json(&body)
+                }
             }
         };
-        let mut response = self
-            .client
-            .post(url)
-            .bearer_auth(&self.api_key)
-            .json(&body)
+        let mut response = request
             .send()
             .await
             .map_err(|error| DecisionsError::TransportDetails(classify_send_error(&error)))?;
