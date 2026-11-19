@@ -128,6 +128,8 @@ parse_release_metadata() {
           asset_name = value
         } else if (key == "digest") {
           asset_digest = value
+        } else if (key == "state") {
+          asset_state = value
         }
       }
 
@@ -175,13 +177,14 @@ parse_release_metadata() {
             asset_object_depth = object_depth
             asset_name = ""
             asset_digest = ""
+            asset_state = ""
           }
           expecting_value = 0
           key = ""
         } else if (char == "}") {
           if (object_depth == asset_object_depth) {
             if (asset_name != "") {
-              print "asset\t" asset_name "\t" asset_digest
+              print "asset\t" asset_name "\t" asset_digest "\t" asset_state
             }
             asset_object_depth = 0
             asset_name = ""
@@ -311,8 +314,8 @@ release_asset_digest_or_empty() {
 release_asset_exists() {
   asset="$1"
 
-  printf '%s\n' "$release_metadata" | awk -F '\t' -v asset="$asset" '
-    $1 == "asset" && $2 == asset { found = 1 }
+  printf '%s\n' "$release_metadata" | awk -F '\t' -v asset="$asset" -v state="${2:-}" '
+    $1 == "asset" && $2 == asset && (state == "" || $4 == state) { found = 1 }
     END { exit !found }
   '
 }
@@ -330,12 +333,19 @@ release_asset_digest() {
 }
 
 select_release_assets() {
-  package_asset="codex-$vendor_target.tar.gz"
-  checksum_asset="SHA256SUMS-$vendor_target"
-  if ! release_asset_exists "$checksum_asset"; then
+  asset_target="$vendor_target"
+  if [ "$vendor_target" = "x86_64-unknown-linux-gnu" ] &&
+    release_asset_exists "SHA256SUMS-x86_64-unknown-linux-gnu-v3" uploaded &&
+    linux_x86_64_v3_supported; then
+    asset_target="$vendor_target-v3"
+  fi
+
+  package_asset="codex-$asset_target.tar.gz"
+  checksum_asset="SHA256SUMS-$asset_target"
+  if [ "$asset_target" = "$vendor_target" ] && ! release_asset_exists "$checksum_asset"; then
     checksum_asset="SHA256SUMS"
   fi
-  if [ "$vendor_target" = "x86_64-unknown-linux-gnu" ] &&
+  if [ "$asset_target" = "x86_64-unknown-linux-gnu" ] &&
     ! release_asset_exists "$package_asset" &&
     release_asset_exists "codex-x86_64-unknown-linux-musl.tar.gz"; then
     echo "ASM release $resolved_version is MUSL-only; this installer requires $package_asset. Use that release's original installer for older releases." >&2
@@ -422,6 +432,12 @@ require_linux_glibc() {
     echo "ASM Linux releases require glibc 2.35 or newer (Ubuntu 22.04+); detected ${libc_version:-unknown or unsupported libc}." >&2
     exit 1
   fi
+}
+
+linux_x86_64_v3_supported() {
+  # glibc checks the whole level, including whether the OS enabled AVX state.
+  LC_ALL=C /lib64/ld-linux-x86-64.so.2 --help 2>/dev/null |
+    LC_ALL=C grep -Eq '^[[:space:]]+x86-64-v3 \(supported, searched\)$'
 }
 
 require_command() {
@@ -949,9 +965,10 @@ release_dir_is_complete() {
   release_dir="$1"
   expected_version="$2"
   expected_target="$3"
+  expected_asset_target="$4"
 
   [ -d "$release_dir" ] && [ ! -L "$release_dir" ] &&
-    [ "$(basename "$release_dir")" = "$expected_version-$expected_target" ] ||
+    [ "$(basename "$release_dir")" = "$expected_version-$expected_asset_target" ] ||
     return 1
   package_files_are_complete "$release_dir" "$expected_version" "$expected_target"
 }
@@ -1026,7 +1043,7 @@ case "$os:$machine" in
 esac
 
 resolve_release
-release_name="$resolved_version-$vendor_target"
+release_name="$resolved_version-$asset_target"
 release_dir="$RELEASES_DIR/$release_name"
 current_version="$(current_installed_version)"
 
@@ -1039,6 +1056,7 @@ else
 fi
 step "Detected platform: $platform_label"
 step "Resolved version: $resolved_version"
+step "Selected package: $package_asset"
 
 detect_conflicting_install
 
@@ -1056,7 +1074,7 @@ trap 'exit 143' TERM
 acquire_install_lock
 cleanup_stale_install_artifacts
 
-if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target"; then
+if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target" "$asset_target"; then
   if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
     warn "Found incomplete existing release at $release_dir; reinstalling."
   fi
@@ -1095,7 +1113,7 @@ if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target"
   step "Installing ASM package to $release_dir"
   install_fork_release "$release_dir" "$archive_path"
 fi
-if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target"; then
+if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target" "$asset_target"; then
   echo "Installed Codex command did not report expected version $resolved_version." >&2
   exit 1
 fi

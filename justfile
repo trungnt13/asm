@@ -17,6 +17,11 @@ help:
 build-dev *args:
     {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" build -p codex-cli -p codex-code-mode-host --bin codex --bin codex-code-mode-host {args}
 
+# Build the optional Linux x86-64-v3 package from a release tag.
+[unix]
+build-release-v3 tag output v8_dir:
+    bash "{{ justfile_directory() }}/scripts/build-release-v3.sh" "$1" "$2" "$3"
+
 alias c := codex
 codex *args:
     {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" run --bin codex -- {args}

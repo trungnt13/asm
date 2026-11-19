@@ -223,7 +223,7 @@ Keep fork/upstream release workflows separate. Use GitHub-hosted runners:
 - Use optimized `--release` and `CARGO_PROFILE_RELEASE_STRIP=debuginfo`, not `dev-small`. Retain function symbols/optimization. Fix timeouts without weakening profiles. Upstream tests do not justify more symbol/dependency removal. Keep shell commands compatible with macOS Bash 3.2, including `set -u` array expansion.
 - Build `codex`, `codex-code-mode-host`, and `codex-exec-server` from one commit/target/profile. Pass all three prebuilt executables to canonical packaging. `codex-<target>.tar.gz` contains `bin/codex`, `bin/codex-code-mode-host`, `bin/codex-exec-server`, `codex-package.json`, and `codex-path/rg`. Linux also contains `codex-resources/bwrap`, built from matching source/release profile; embed its final SHA-256 in the CLI before packaging.
 - Keep canonical layout/pinned ripgrep manifest. Include only required resources as regular executables with matching version/target metadata, including `execServer: "bin/codex-exec-server"`. Shared-server startup must recognize/validate the package without host helpers.
-- Publish six final assets: two archives, two `SHA256SUMS-<target>`, aggregate `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh). Each platform manifest covers its archive and pinned installer. No source trees/diagnostics.
+- Publish six required assets: two archives, two `SHA256SUMS-<target>`, aggregate `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh). Each platform manifest covers its archive and pinned installer. An optional local Linux v3 archive and its own checksum manifest may supplement a completed release; they do not change base assets or Latest. No source trees/diagnostics.
 - Detect candidate contract from pinned smoke's required `codex-package.json`, not optional resource flags. Pass `--no-zsh` only if supported. Preserve older candidates' original contracts.
 - Pin builds, packaging, installer bytes, checks, and reuse to candidate SHA. Pin orchestration to dispatch SHA; save controls before checkout. Never fetch newer controls mid-run. Legacy uses verified exact tagged SHA. Candidate packaging may precede tagging.
 - Before upload, run [native smoke](../.github/scripts/smoke-codex-archive.py). CLI/exec-server versions match Cargo; all three help commands succeed with usage; manifest/resources and bundled ripgrep/Bubblewrap pass. Code-mode-host `--version` is not required. Record binary/archive sizes.
@@ -921,8 +921,56 @@ python3 ../scripts/pgo/setup.py --target x86_64-unknown-linux-gnu \
 ```
 
 Load the file as assignments, not as shell code. Pass the same explicit
-`--target` to Cargo, and keep the profile directory until the build is done. Actions passes its own environment file to the same
-tool; runner-specific disk and swap setup stays in the workflows.
+`--target` to Cargo, and keep the profile directory until the build is done.
+Actions passes its environment file to the same tool; runner-specific disk and
+swap setup stays in the workflows.
+
+#### Optional local Linux x86-64-v3 release package
+
+CI keeps portable Linux on Thin LTO, four codegen units, and PGO. macOS keeps
+upstream code generation, with no PGO. Both remain required. The optional Linux
+v3 package uses `target-cpu=x86-64-v3`, Fat LTO, one codegen unit, and the
+checksum-pinned Linux PGO profile. It uses the same tag, Cargo version, GNU ABI,
+and package layout as CI. The v3 requirement is a CPU feature level, not a
+different target triple.
+
+Build from a clean checkout of the exact release tag on a v3-capable local
+machine in an Ubuntu 22.04 environment (native or a local container). Use the
+candidate toolchain, Python 3.11+ (`PYTHON` can select it), the GNU build tools
+used by CI, and `llvm-tools-preview`. Supply an absolute local output directory
+and a directory containing the matching fork V8 archive, bindings, checksum
+manifest, and `release.json`, using the same inputs as
+[`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml). The recipe
+verifies the V8 pair, keeps its build cache and logs under the output directory,
+and leaves the installed CLI untouched:
+
+```bash
+just build-release-v3 "$tag" "$output" "$v8_dir"
+```
+
+Keep the archive and its adjacent `.provenance` file together. Run the bounded
+release-source live check on the resulting CLI before uploading. Before the
+first v3 publication, update and validate the companion `tngo-workflow` setup:
+its install verification and rollback currently require the portable path.
+Once the ordinary release is complete and publication is authorized, run this
+from the same tagged checkout with authorized `GH_TOKEN` and Docker available:
+
+```bash
+GITHUB_REPOSITORY=trungnt13/asm RELEASE_TAG="$tag" RELEASE_SHA="$(git rev-parse HEAD)" \
+  python3 .github/scripts/publish-fork-release.py publish-v3 \
+    --archive "$output/codex-x86_64-unknown-linux-gnu-v3.tar.gz"
+```
+
+The upload verifies the exact tag, package, and Ubuntu 22.04 smoke. It appends
+the v3 archive and then `SHA256SUMS-x86_64-unknown-linux-gnu-v3` as its readiness
+marker. It does not create a release, promote it, or replace existing assets.
+The installer resolves the version first and selects v3 only if that release has
+the readiness marker and glibc reports the complete v3 level. Otherwise it uses
+the portable package. An invalid or missing asset for an advertised v3 package
+fails verification; it does not trigger a fallback. The variants use distinct
+installation directories.
+
+#### Training and performance evidence
 
 The selected profile used three overlapping 10/15/20-turn sessions, parallel
 child batches of 4/3/2 on first/middle/final turns, Luna with System1 disabled,

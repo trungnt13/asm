@@ -21,7 +21,9 @@ def main():
     parser.add_argument(
         "--env-file", type=Path, help="Append Cargo settings as NAME=VALUE lines"
     )
+    parser.add_argument("--lto", choices=("thin", "fat"), default="thin")
     args = parser.parse_args()
+    codegen_units = 1 if args.lto == "fat" else 4
     manifest = json.loads(
         Path(__file__).resolve().with_name("agent-linux.json").read_text()
     )
@@ -75,7 +77,11 @@ def main():
     report = {
         "manifest": manifest,
         "consumer_rustc": version,
-        "consumer_settings": {"lto": "thin", "codegen_units": 4, "cargo_jobs": 1},
+        "consumer_settings": {
+            "lto": args.lto,
+            "codegen_units": codegen_units,
+            "cargo_jobs": 1,
+        },
         "indexed_format_validation": validation.stdout,
         "indexed_format_exit_code": validation.returncode,
         "coverage_validation": "Inspect compiler missing/mismatched-profile diagnostics and candidate acceptance; readable format alone does not prove useful coverage.",
@@ -99,7 +105,9 @@ def main():
         with args.env_file.open("a") as output:
             output.write(f"CARGO_ENCODED_RUSTFLAGS={separator.join(flags)}\n")
             output.write(
-                "CARGO_PROFILE_RELEASE_LTO=thin\nCARGO_PROFILE_RELEASE_CODEGEN_UNITS=4\nCARGO_BUILD_JOBS=1\n"
+                f"CARGO_PROFILE_RELEASE_LTO={args.lto}\n"
+                f"CARGO_PROFILE_RELEASE_CODEGEN_UNITS={codegen_units}\n"
+                "CARGO_BUILD_JOBS=1\n"
             )
     return 0
 

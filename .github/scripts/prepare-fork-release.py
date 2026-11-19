@@ -174,7 +174,8 @@ def complete_candidate(tag, revision):
 
 
 def published_assets_complete(release):
-    names = {asset["name"] for asset in release.get("assets", [])}
+    assets = release.get("assets", [])
+    names = {asset["name"] for asset in assets}
     legacy = {
         "codex-aarch64-apple-darwin.tar.gz",
         "codex-x86_64-unknown-linux-gnu.tar.gz",
@@ -185,7 +186,19 @@ def published_assets_complete(release):
         "SHA256SUMS-aarch64-apple-darwin",
         "SHA256SUMS-x86_64-unknown-linux-gnu",
     }
-    return not release["draft"] and names in (legacy, staged)
+    v3_archive = "codex-x86_64-unknown-linux-gnu-v3.tar.gz"
+    v3_manifest = "SHA256SUMS-x86_64-unknown-linux-gnu-v3"
+    if release["draft"] or len(names) != len(assets):
+        return False
+    if names in (legacy, staged):
+        return True
+    if names - {v3_archive, v3_manifest} != staged:
+        return False
+    return v3_archive in names or not any(
+        asset["name"] == v3_manifest and asset.get("state") == "uploaded"
+        for asset in assets
+    )
+
 
 
 def completed_publication(run, candidate, tag, candidate_ref):
