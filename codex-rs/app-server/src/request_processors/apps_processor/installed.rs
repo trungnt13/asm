@@ -63,9 +63,12 @@ impl AppsRequestProcessor {
                 .unwrap_or_else(|| self.thread_manager.mcp_manager());
             let auth_manager = mcp_manager.auth_manager();
             let auth = auth_manager.auth().await;
-            let runtime_enabled = config
-                .features
-                .apps_enabled_for_auth(auth.as_ref().is_some_and(CodexAuth::uses_codex_backend));
+            let runtime_enabled = !thread
+                .as_ref()
+                .is_some_and(|thread| thread.subagent_mcp_disabled())
+                && config
+                    .features
+                    .apps_enabled_for_auth(auth.as_ref().is_some_and(CodexAuth::uses_codex_backend));
 
             let cache_key = connector_runtime_context_key(auth.as_ref());
             let previous_snapshot = mcp_manager

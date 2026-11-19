@@ -360,6 +360,9 @@ pub(crate) async fn resolve(
     base: &Arc<McpBinding>,
     services: &SessionServices,
 ) -> Option<ModelSearch> {
+    if turn.config.subagent_web_search_disabled {
+        return Some(ModelSearch::Disabled);
+    }
     let native_required = turn.config.requires_native_search();
     let provider = if native_required {
         WebSearchProvider::Standalone

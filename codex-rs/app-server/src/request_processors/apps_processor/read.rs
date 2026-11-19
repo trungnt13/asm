@@ -26,7 +26,11 @@ impl AppsRequestProcessor {
             .into_iter()
             .filter(|app_id| seen_app_ids.insert(app_id.clone()))
             .collect::<Vec<_>>();
-        let (mut config, mcp_manager) = self.load_apps_config(thread_id.as_deref()).await?;
+        let thread = match thread_id.as_deref() {
+            Some(id) => Some(self.load_thread(id).await?.1),
+            None => None,
+        };
+        let (mut config, mcp_manager) = self.load_apps_config(thread.as_deref()).await?;
         let auth = match mcp_manager
             .auth_manager()
             .auth_with_http_client_factory()
