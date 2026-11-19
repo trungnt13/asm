@@ -318,7 +318,7 @@ impl App {
                 }
             }
         }
-        let mut cells = Vec::new();
+        let mut cells = TranscriptCells::new();
         let mut split_images = Vec::new();
         let show_communication = self.agent_navigation.is_parent_owned(thread_id);
         let agent_role = self.chat_widget.collab_agent_metadata(thread_id).agent_role;
