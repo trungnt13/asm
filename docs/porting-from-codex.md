@@ -119,9 +119,11 @@ Before syncs or targeted ports, use [asm-upstream-sync](../.agents/skills/asm-up
 
 ### Built-in instruction changes
 
-Review the full incoming diff and the fork's resolution for repository-owned instructions, prompts, and rubrics. Include inline strings, bundled prompt or skill files, model-facing tool descriptions, and specialized prompts such as Guardian reviews. Check not just wording, but also which text is selected, when it is sent, and how it is assembled.
-
-In every rebase report and sync PR, include a **Built-in instructions, prompts, and rubrics** section. List additions, edits, removals, and changes to delivery. For each, link the source and summarize what changed, who receives it, when it applies (default, opt-in, or model-specific), and what ASM kept or changed. Say explicitly if none changed. Distinguish built-in source from user overrides and provider-injected text; do not infer what the provider received from source alone. Flag any new model-visible item that can exceed 1,000 tokens for P0 manual review.
+- Review the full upstream diff and ASM's resolution. Check inline text, bundled prompts and skills, tool descriptions, and review rubrics.
+- In each rebase report and sync PR, list changes to text, selection, assembly, and delivery. If nothing changed, say so.
+- For each change, link the source. State who receives the text, when it applies, and what ASM kept or changed.
+- Separate built-in text from user overrides and provider additions. Do not treat source review as proof of delivery.
+- If a new model-visible item can exceed 1,000 tokens, flag it for P0 manual review.
 
 ### Shared compatibility gate
 
