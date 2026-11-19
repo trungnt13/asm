@@ -108,9 +108,14 @@ impl ExternalMessageBridge {
         let authority = listener.local_addr()?.to_string();
         let stop = CancellationToken::new();
         let (mail_tx, mail_delivery) = tokio::sync::mpsc::channel(/*buffer*/ 1);
-        let directory = tempfile::Builder::new()
-            .prefix("asm-native-tools-")
-            .tempdir()?;
+        let mut directory_builder = tempfile::Builder::new();
+        directory_builder.prefix("asm-native-tools-");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            directory_builder.permissions(std::fs::Permissions::from_mode(0o700));
+        }
+        let directory = directory_builder.tempdir()?;
         let state = Arc::new(BridgeState {
             runtime,
             ready: tokio::sync::watch::channel(/*init*/ None).0,
