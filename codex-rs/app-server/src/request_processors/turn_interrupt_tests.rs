@@ -99,6 +99,7 @@ async fn interrupt_reply_waits_for_the_requested_turn(queued: bool) -> anyhow::R
     );
     let processor = TurnRequestProcessor::new(
         test.thread_manager.clone(),
+        test.thread_store.clone(),
         outgoing.clone(),
         analytics,
         Arc::new(test.config.clone()),
@@ -244,6 +245,7 @@ async fn interrupt_reply_waits_for_the_requested_turn(queued: bool) -> anyhow::R
             thread_id,
             test.codex.clone(),
             test.thread_manager.clone(),
+            Some(test.thread_store.clone()),
             outgoing.clone(),
             state.clone(),
             processor.thread_watch_manager.clone(),

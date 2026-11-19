@@ -130,6 +130,7 @@ async fn late_command_cancellation_reaches_the_current_subscriber() -> Result<()
         thread_id,
         test.codex.clone(),
         test.thread_manager.clone(),
+        Some(processor.thread_store.clone()),
         outgoing.clone(),
         thread_state_manager.thread_state(thread_id).await,
         processor.thread_watch_manager.clone(),
@@ -690,6 +691,7 @@ async fn revert_settles_interrupts_before_replacing_a_runtime() -> Result<()> {
         .await;
     let turn_processor = TurnRequestProcessor::new(
         test.thread_manager.clone(),
+        processor.thread_store.clone(),
         processor.outgoing.clone(),
         AnalyticsEventsClient::disabled(),
         processor.config.clone(),

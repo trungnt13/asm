@@ -7,7 +7,6 @@ use crate::tools::router::ToolRouter;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
-use codex_tools::IndirectNamespacePrefixes;
 use codex_tools::LoadableToolSpec;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ResponsesApiTool;
@@ -147,11 +146,9 @@ pub(crate) fn specs_for_history<T: std::borrow::Borrow<ResponseItem>>(
         selected_specs.push(spec);
     }
     let model_messages = ResolvedModelMessages::from_model(model);
-    let indirect_prefixes = IndirectNamespacePrefixes::new(
-        model_messages.indirect_description_prefixes(),
-        router.mcp_namespaces(),
-    )
-    .expect("tool router validates indirect namespace prefixes");
+    let indirect_prefixes = router
+        .indirect_namespace_prefixes(model_messages.indirect_description_prefixes())
+        .expect("tool router validates indirect namespace prefixes");
     let mut selected_specs = coalesce_loadable_tool_specs(selected_specs);
     indirect_prefixes.apply_search(&mut selected_specs);
     let mut specs = router.model_visible_specs().to_vec();

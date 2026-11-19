@@ -81,6 +81,7 @@ use serde_json::Map;
 use serde_json::Value;
 use serde_with::serde_as;
 use strum_macros::Display;
+use strum_macros::IntoStaticStr;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tracing::error;
@@ -2100,8 +2101,11 @@ impl From<SubAgentActivityEvent> for EventMsg {
 }
 
 /// Agent lifecycle status, derived from emitted events.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS, Default)]
+#[derive(
+    Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS, Default, IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 #[ts(rename_all = "snake_case")]
 pub enum AgentStatus {
     /// Agent is waiting for initialization.
@@ -2131,8 +2135,9 @@ pub enum NonSteerableTurnKind {
 }
 
 /// Codex errors that we expose to clients.
-#[derive(Clone, Debug, PartialEq, Eq, JsonSchema, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, JsonSchema, TS, IntoStaticStr)]
 #[schemars(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 #[ts(rename_all = "snake_case")]
 pub enum CodexErrorInfo {
     ContextWindowExceeded,
@@ -4899,8 +4904,9 @@ pub struct TurnAbortedEvent {
     pub duration_ms: Option<i64>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS, IntoStaticStr)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum TurnAbortReason {
     Interrupted,
     Replaced,

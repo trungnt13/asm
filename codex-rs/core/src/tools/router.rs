@@ -247,6 +247,16 @@ impl ToolRouter {
         self.registry.mcp_namespaces()
     }
 
+    pub(crate) fn indirect_namespace_prefixes<'a>(
+        &self,
+        prefixes: Option<&'a codex_protocol::openai_models::IndirectDescriptionPrefixes>,
+    ) -> Result<
+        codex_tools::IndirectNamespacePrefixes<'a>,
+        codex_tools::IndirectNamespacePrefixConflict,
+    > {
+        self.registry.indirect_namespace_prefixes(prefixes)
+    }
+
     #[cfg(test)]
     pub(crate) fn registered_tool_names_for_test(&self) -> Vec<ToolName> {
         self.registry.tool_names_for_test()

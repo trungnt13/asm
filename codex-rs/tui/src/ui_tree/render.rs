@@ -9,6 +9,8 @@ use self::text::Chunk;
 use self::text::Paint;
 use self::text::visit_chunks;
 use super::MAX_TEXT_BYTES;
+use super::RowJustify;
+use super::RowProps;
 use super::RowWrap;
 use super::TextProps;
 use super::TextWeight;
@@ -40,19 +42,34 @@ impl UiTree {
 
 impl PreparedUiTree {
     pub(crate) fn with_suffix(&self, suffix: String) -> Self {
-        let children = self
-            .0
-            .clone()
-            .into_iter()
-            .chain(PreparedNode::from_node(
-                UiNode::String(suffix),
+        let Some(suffix) = PreparedNode::from_node(UiNode::String(suffix), Paint::default()) else {
+            return Self(self.0.clone());
+        };
+        if let Some(PreparedNode {
+            kind:
+                NodeKind::Row {
+                    children,
+                    props,
+                    paint,
+                },
+            ..
+        }) = &self.0
+            && props.justify == Some(RowJustify::Between)
+            && let Some((last, preceding)) = children.split_last()
+        {
+            // Keep the provider's justified row at the root so it receives the full width.
+            let trailing_group = PreparedNode::row(
+                vec![last.clone(), suffix],
+                RowProps::default(),
                 Paint::default(),
-            ))
-            .collect();
+            );
+            let children = preceding.iter().cloned().chain(trailing_group).collect();
+            return Self(PreparedNode::row(children, props.clone(), paint.clone()));
+        }
+        let children = self.0.clone().into_iter().chain([suffix]).collect();
         Self(PreparedNode::row(
             children,
-            /*gap*/ 0,
-            RowWrap::Nowrap,
+            RowProps::default(),
             Paint::default(),
         ))
     }
@@ -211,28 +228,36 @@ fn layout_node<'a>(
     visit: &mut Visit<'a, '_>,
 ) -> usize {
     match &node.kind {
+        NodeKind::Empty => 0,
         NodeKind::Text(text) => text.layout(width, limit, visit),
         NodeKind::Row {
             children,
-            gap,
-            wrap,
+            props,
             paint,
         } => {
-            let gap = (*gap).min((width + 1) as u64) as usize;
+            let gap = props.gap.min((width + 1) as u64) as usize;
+            let mut place_band = |children: &'a [PreparedNode], used, y| {
+                let spare = match props.justify.unwrap_or_default() {
+                    RowJustify::Start => 0,
+                    RowJustify::Between => width.saturating_sub(used),
+                };
+                layout_band(
+                    children,
+                    width,
+                    limit - y,
+                    gap,
+                    spare,
+                    paint,
+                    &mut |row, part| visit(y + row, part),
+                )
+            };
             let mut y = 0;
             let mut start = 0;
             let mut used = 0;
             for (i, child) in children.iter().enumerate() {
                 let preferred = child.widths.preferred.min((width + 1) as u64) as usize;
-                if *wrap == RowWrap::Wrap && i > start && used + gap + preferred > width {
-                    y += layout_band(
-                        &children[start..i],
-                        width,
-                        limit - y,
-                        gap,
-                        paint,
-                        &mut |row, part| visit(y + row, part),
-                    );
+                if props.wrap == RowWrap::Wrap && i > start && used + gap + preferred > width {
+                    y += place_band(&children[start..i], used, y);
                     if y == limit {
                         return y;
                     }
@@ -244,14 +269,7 @@ fn layout_node<'a>(
                 }
                 used += preferred;
             }
-            y + layout_band(
-                &children[start..],
-                width,
-                limit - y,
-                gap,
-                paint,
-                &mut |row, part| visit(y + row, part),
-            )
+            y + place_band(&children[start..], used, y)
         }
     }
 }
@@ -261,18 +279,23 @@ fn layout_band<'a>(
     width: usize,
     limit: usize,
     gap: usize,
+    spare: usize,
     paint: &'a Paint,
     visit: &mut Visit<'a, '_>,
 ) -> usize {
     let bounded = |cells: u64| cells.min((width + 1) as u64) as usize;
+    let gaps = children.len().saturating_sub(1);
+    // Round each item's cumulative share to the nearest cell, keeping both edges fixed.
+    let share = |i: usize| (i * spare + gaps / 2).checked_div(gaps).unwrap_or_default();
     let mut reserved = children
         .iter()
         .map(|c| bounded(c.widths.minimum))
         .sum::<usize>()
-        + gap * children.len().saturating_sub(1);
+        + gap * gaps
+        + share(gaps);
     let mut offset = 0usize;
     let mut ends = Vec::new();
-    for child in children {
+    for (i, child) in children.iter().enumerate() {
         let minimum = bounded(child.widths.minimum);
         reserved -= minimum;
         let available = bounded(child.widths.preferred)
@@ -293,8 +316,13 @@ fn layout_band<'a>(
                 *end += part.width();
             }
         });
-        offset += available + gap;
-        reserved = reserved.saturating_sub(gap);
+        let next_gap = if i < gaps {
+            gap + share(i + 1) - share(i)
+        } else {
+            0
+        };
+        offset += available + next_gap;
+        reserved = reserved.saturating_sub(next_gap);
     }
     ends.len()
 }

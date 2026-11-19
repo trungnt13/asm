@@ -2098,6 +2098,7 @@ dependencies = [
  "codex-analytics",
  "codex-app-server-daemon",
  "codex-app-server-protocol",
+ "codex-app-server-remote-client",
  "codex-app-server-transport",
  "codex-arg0",
  "codex-aws-auth",
@@ -2213,7 +2214,7 @@ dependencies = [
  "codex-api",
  "codex-app-server",
  "codex-app-server-protocol",
- "codex-app-server-transport",
+ "codex-app-server-remote-client",
  "codex-arg0",
  "codex-backend-client",
  "codex-cloud-client",
@@ -2227,7 +2228,6 @@ dependencies = [
  "codex-protocol",
  "codex-uds",
  "codex-utils-absolute-path",
- "codex-utils-rustls-provider",
  "color-eyre",
  "futures",
  "pretty_assertions",
@@ -2313,6 +2313,25 @@ name = "codex-app-server-protocol-noop-macros"
 version = "0.171.1-alpha.12"
 
 [[package]]
+name = "codex-app-server-remote-client"
+version = "0.171.1-alpha.12"
+dependencies = [
+ "codex-app-server-protocol",
+ "codex-uds",
+ "codex-utils-absolute-path",
+ "codex-utils-rustls-provider",
+ "futures",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "url",
+ "zstd 0.13.3",
+]
+
+[[package]]
 name = "codex-app-server-test-client"
 version = "0.171.1-alpha.12"
 dependencies = [
@@ -2345,6 +2364,7 @@ dependencies = [
  "chrono",
  "codex-api",
  "codex-app-server-protocol",
+ "codex-app-server-remote-client",
  "codex-config",
  "codex-core",
  "codex-features",
@@ -2380,7 +2400,6 @@ dependencies = [
  "url",
  "uuid",
  "wiremock",
- "zstd 0.13.3",
 ]
 
 [[package]]
@@ -4557,6 +4576,7 @@ dependencies = [
  "codex-http-headers-helper",
  "codex-protocol",
  "codex-utils-absolute-path",
+ "codex-utils-cargo-bin",
  "codex-utils-process",
  "codex-utils-stream-parser",
  "codex-utils-string",

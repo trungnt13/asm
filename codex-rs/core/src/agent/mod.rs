@@ -9,6 +9,7 @@ pub(crate) mod model_catalog;
 mod registry;
 pub(crate) mod role;
 pub(crate) mod status;
+pub(crate) mod turn_metrics;
 pub(crate) mod types;
 
 pub(crate) use codex_protocol::protocol::AgentStatus;

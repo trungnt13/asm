@@ -2942,6 +2942,7 @@ impl Session {
 
     /// Persist the event to rollout and send it to clients.
     pub(crate) async fn send_event(&self, turn_context: &TurnContext, mut msg: EventMsg) {
+        crate::agent::turn_metrics::record_terminal_event(turn_context, &msg);
         if let Some((item_id, started_at_ms)) = msg.command_approval_start() {
             // The client can see the command before execution. Keep its first start
             // for the canonical lifecycle events that will be saved in history.
@@ -5034,6 +5035,7 @@ impl Session {
         Ok(Arc::new(StepContext {
             sampled_through_sequence: None,
             serving_assessment: None,
+            guardian_probe: None,
             turn_cancellation: cancellation_token.clone(),
             preempt: turn_context
                 .config

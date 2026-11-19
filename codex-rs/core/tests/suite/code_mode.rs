@@ -5174,7 +5174,7 @@ try {
 #[derive(Default)]
 struct ResponseIdObserver {
     response_ids: Mutex<Vec<(String, Option<String>)>>,
-    serving_assessments: Mutex<Vec<Option<bool>>>,
+    guardian_probes: Mutex<Vec<Option<bool>>>,
     originating_items: Mutex<Vec<(String, Option<codex_protocol::ResponseItemId>)>>,
     wait_started: tokio::sync::Notify,
 }
@@ -5189,10 +5189,10 @@ impl ToolLifecycleContributor for ResponseIdObserver {
                     .as_str()
                     .is_some_and(|cmd| cmd.starts_with("printf 'phase "))
             {
-                self.serving_assessments
+                self.guardian_probes
                     .lock()
                     .unwrap()
-                    .push(input.serving_assessment);
+                    .push(input.guardian_probe);
             }
             if matches!(input.tool_name.name.as_str(), "exec" | "exec_command") {
                 self.originating_items.lock().unwrap().push((
@@ -5217,9 +5217,9 @@ impl ToolLifecycleContributor for ResponseIdObserver {
 }
 
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]
-#[test_case::test_case(None; "without_assessment")]
-#[test_case::test_case(Some(false); "low_risk_assessment")]
-#[test_case::test_case(Some(true); "review_required_assessment")]
+#[test_case::test_case(None; "without_probe")]
+#[test_case::test_case(Some(false); "low_risk_probe")]
+#[test_case::test_case(Some(true); "review_required_probe")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn code_mode_can_yield_and_resume_with_wait(requires_review: Option<bool>) -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -5229,10 +5229,11 @@ async fn code_mode_can_yield_and_resume_with_wait(requires_review: Option<bool>)
         .and(wiremock::matchers::body_partial_json(
             serde_json::json!({"model": "gpt-5.6-luna"}),
         ))
-        .respond_with(responses::sse_response(sse(vec![ev_completed(
-            "unexpected-score",
-        )])))
-        .expect(0)
+        .respond_with(responses::sse_response(sse(vec![
+            ev_assistant_message("score", "low"),
+            ev_completed("score"),
+        ])))
+        .with_priority(/*p*/ 1)
         .mount(&server)
         .await;
     let observer = Arc::new(ResponseIdObserver::default());
@@ -5415,7 +5416,7 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
     );
 
     assert_eq!(
-        *observer.serving_assessments.lock().unwrap(),
+        *observer.guardian_probes.lock().unwrap(),
         vec![requires_review; 3]
     );
     let observed = observer.response_ids.lock().unwrap();
@@ -7748,6 +7749,13 @@ async fn code_mode_node_repl_text_evidence_is_visible_only_to_guardian(
                 .features
                 .set_enabled(Feature::GuardianNodeReplTranscriptImages, transcript_images)
                 .expect("configure Guardian transcript images");
+            if check_detail {
+                // The invalid image and its valid successor exceed the modern stdio frame limit.
+                config
+                    .features
+                    .disable(Feature::McpConnectionSharing)
+                    .expect("use legacy stdio for the oversized image response");
+            }
             let mcp: McpServerConfig = serde_json::from_value(serde_json::json!({
                 "command": mcp_server_bin,
                 "environment_id": remote_aware_environment_id(),
@@ -8984,12 +8992,18 @@ async fn code_mode_search_normalizes_and_calls_deferred_dynamic_tools(
         .with_model_info_override("gpt-5.5", |model_info| {
             model_info.supports_search_tool = true;
             model_info.tool_mode = Some(ToolMode::CodeMode);
-            model_info
+            let tools = model_info
                 .model_messages
                 .get_or_insert_default()
                 .tools
-                .get_or_insert_default()
-                .functions_namespace_functions_description_prefixes =
+                .get_or_insert_default();
+            tools.indirect_description_prefixes = Some(
+                serde_json::from_value(serde_json::json!({
+                    "builtin_tool_namespaces": {"functions": "Builtin."}
+                }))
+                .unwrap(),
+            );
+            tools.functions_namespace_functions_description_prefixes =
                 Some(std::collections::BTreeMap::from([(
                     "hidden-dynamic-tool".to_string(),
                     "Function guidance.".to_string(),
@@ -9057,6 +9071,9 @@ const out = await tools[tool.name]({ city: "Paris" });
 text(
   JSON.stringify({
     name: tool?.name ?? null,
+    builtinLabel: ALL_TOOLS.find(t => t.name === "view_image").description.startsWith("Builtin.\n\n"),
+    dynamicLabel: ALL_TOOLS.find(t => t.name === tool.name).description.includes("Builtin."),
+    searchLabel: tool.description.includes("Builtin."),
     description: tool?.description ?? null,
     out,
     recoveredFromInvalidArguments: errors.length === 2,
@@ -9176,6 +9193,9 @@ text(
         Some(&Value::String("hidden-ok".to_string()))
     );
     assert_eq!(parsed["recoveredFromInvalidArguments"], true);
+    assert_eq!(parsed["builtinLabel"], false);
+    assert_eq!(parsed["dynamicLabel"], false);
+    assert_eq!(parsed["searchLabel"], false);
     let loaded = search_response.single_request().tool_search_output("find");
     let loaded = loaded["tools"]
         .as_array()
@@ -9183,6 +9203,14 @@ text(
         .iter()
         .find(|tool| tool["name"] == namespace)
         .expect("loaded namespace");
+    assert_eq!(
+        loaded["description"],
+        if namespace == "functions" {
+            "Builtin.\n\nCodex app tools."
+        } else {
+            "Codex app tools."
+        }
+    );
     assert_eq!(
         loaded["tools"][0]["description"],
         if namespace == "functions" {
