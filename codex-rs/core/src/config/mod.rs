@@ -202,6 +202,7 @@ mod runtime_refresh;
 pub(crate) use runtime_refresh::RuntimeConfigRefresh;
 #[cfg(test)]
 mod schema;
+mod subagent_tools;
 mod token_budget_startup;
 mod windows_sandbox_config;
 pub use auth_keyring::bootstrap_auth_config;
@@ -680,6 +681,7 @@ pub struct Config {
     pub(crate) subagent_tools: SubagentToolsToml,
     // Unlike the policy table, this flag applies to the current thread only.
     pub(crate) subagent_mcp_disabled: bool,
+    pub(crate) subagent_web_search_disabled: bool,
 
     /// Model used specifically for review sessions.
     pub review_model: Option<String>,
@@ -4889,6 +4891,7 @@ impl Config {
             subagent_default_reasoning: cfg.subagent_default_reasoning,
             subagent_tools: cfg.subagent_tools,
             subagent_mcp_disabled: false,
+            subagent_web_search_disabled: false,
             review_model,
             model_context_window: cfg.model_context_window,
             role_model_context_window: None,

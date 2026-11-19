@@ -4873,8 +4873,9 @@ impl Session {
                 extension_data.insert(messages.clone());
             }
             let mut required_servers = required_servers.to_vec();
-            if settings.model_info.web_search_provider
-                == Some(codex_protocol::openai_models::WebSearchProvider::SearchMcp)
+            if !turn_context.config.subagent_web_search_disabled
+                && settings.model_info.web_search_provider
+                    == Some(codex_protocol::openai_models::WebSearchProvider::SearchMcp)
                 && turn_context.apps_enabled()
                 && !turn_context.config.requires_native_search()
                 && (turn_context.config.web_search_mode.value()

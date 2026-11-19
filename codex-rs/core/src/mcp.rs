@@ -47,6 +47,9 @@ const LEGACY_CODEX_APPS_REGISTRATION_ID: &str = "legacy_codex_apps";
 /// Insert into `StartThreadOptions::thread_extension_init` before starting the thread.
 pub struct McpServersDisabled;
 
+/// Keeps MCP disabled when a child thread's config is reloaded.
+pub(crate) struct SubagentMcpDisabled;
+
 /// MCP configuration and capability availability derived from the same inputs.
 #[derive(Clone)]
 pub(crate) struct McpRuntimeProjection {
@@ -315,18 +318,40 @@ impl McpManager {
         disabled_plugin_ids: &[String],
     ) -> McpRuntimeProjection {
         let config = context.config();
-        if config.subagent_mcp_disabled
-            || context
-                .thread_init()
-                .is_some_and(|init| init.get::<McpServersDisabled>().is_some())
-        {
+        let prediction_policy = context
+            .thread_init()
+            .is_some_and(|init| init.get::<McpServersDisabled>().is_some());
+        let subagent_policy = context
+            .thread_init()
+            .is_some_and(|init| init.get::<SubagentMcpDisabled>().is_some());
+        if prediction_policy || subagent_policy {
             let mut mcp_config = config.to_mcp_config_with_loaded_plugins(&Default::default(), []);
             mcp_config.mcp_server_catalog = Default::default();
             mcp_config.apps_enabled = false;
+            let (plugins_available, selected_plugins) = if subagent_policy
+                && !prediction_policy
+                && config.features.enabled(Feature::Plugins)
+            {
+                let loaded_plugins = self
+                    .plugins_manager
+                    .plugins_for_config(&config.plugins_config_input())
+                    .await
+                    .without_plugins(disabled_plugin_ids);
+                let selected_plugins = self
+                    .selected_plugins_for_step(context, &config.plugins, disabled_plugin_ids)
+                    .await;
+                (
+                    !selected_plugins.plugins.is_empty()
+                        || !loaded_plugins.capability_summaries().is_empty(),
+                    selected_plugins,
+                )
+            } else {
+                (false, SelectedPluginSnapshot::default())
+            };
             return McpRuntimeProjection {
                 config: mcp_config,
-                plugins_available: false,
-                selected_plugins: Default::default(),
+                plugins_available,
+                selected_plugins,
             };
         }
         let plugins_config = &config.plugins;

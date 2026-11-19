@@ -51,6 +51,13 @@ impl AppsRequestProcessor {
         let reload = params.force_refetch;
         let thread = if let Some(thread_id) = params.thread_id.as_deref() {
             let (_, loaded_thread) = self.load_thread(thread_id).await?;
+            if loaded_thread.subagent_mcp_disabled() {
+                record_legacy_apps_installed_duration(installed_start, reload);
+                return Ok(Some(AppsListResponse {
+                    data: Vec::new(),
+                    next_cursor: None,
+                }));
+            }
             Some(loaded_thread)
         } else {
             None

@@ -7,6 +7,8 @@
 use super::session::SessionConfiguration;
 use super::*;
 use crate::mcp::McpRuntimeProjection;
+use crate::mcp::McpServersDisabled;
+use crate::mcp::SubagentMcpDisabled;
 use codex_config::McpServerDisabledReason;
 use codex_config::McpServerTransportConfig;
 use codex_file_system::WindowsSandboxSelection;
@@ -144,13 +146,10 @@ impl Session {
         mut projection: McpRuntimeProjection,
     ) -> BoxFuture<'a, McpRuntimeProjection> {
         Box::pin(async move {
+            let thread_init = &self.services.mcp_thread_init;
             if self.isolation == codex_extension_api::SessionIsolation::Isolated
-                || config.subagent_mcp_disabled
-                || self
-                    .services
-                    .mcp_thread_init
-                    .get::<crate::mcp::McpServersDisabled>()
-                    .is_some()
+                || thread_init.get::<McpServersDisabled>().is_some()
+                || thread_init.get::<SubagentMcpDisabled>().is_some()
             {
                 return projection;
             }
