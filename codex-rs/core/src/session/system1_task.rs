@@ -20,6 +20,8 @@ pub(super) const WARMUP_TIMEOUT: std::time::Duration =
 pub(super) struct DecisionRequest {
     pub(super) model: String,
     pub(super) input: String,
+    pub(super) image: Option<Arc<super::system1_evidence::System1Image>>,
+    pub(super) requires_image: bool,
     pub(super) instructions: String,
     pub(super) choices: Vec<(String, String)>,
 }
@@ -78,6 +80,27 @@ pub(super) async fn run_decision(
         span.record("thread.id", session.thread_id().to_string());
     }
     let started = Instant::now();
+    let image = if let Some(image) = request.image {
+        let minimum_side = match client.backend_name() {
+            "typesafe" => 280,
+            _ => 0,
+        };
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return,
+            _ = guard.freshness.cancelled() => return,
+            result = tokio::time::timeout_at(guard.deadline,
+                tokio::task::spawn_blocking(move || image.prepare(minimum_side))) => match result {
+                    Ok(Ok(url)) => url,
+                    _ => return,
+                },
+        }
+    } else {
+        None
+    };
+    if image.is_none() && request.requires_image {
+        return;
+    }
     let timeout = guard.deadline.saturating_duration_since(started);
     tracing::debug!(
         input_bytes = request.input.len(),
@@ -93,7 +116,7 @@ pub(super) async fn run_decision(
                 if let Some(attempt) = &mut attempt {
                     attempt.mark_http_attempted(client.backend_name());
                 }
-                client.choose_effort(&request.model, &request.input, &request.instructions, &request.choices).await
+                client.choose_effort(&request.model, &request.input, &request.instructions, &request.choices, image.as_slice()).await
             }
         ) => match result {
             Err(_) => {

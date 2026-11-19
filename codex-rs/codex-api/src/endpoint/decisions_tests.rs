@@ -59,6 +59,7 @@ async fn basic_decisions_uses_custom_rubric_and_large_context() {
                     ("low".to_string(), "Routine work.".to_string()),
                     ("high".to_string(), "Difficult work.".to_string())
                 ],
+                &[],
             )
             .await,
         Ok("high".to_string()),
@@ -99,6 +100,7 @@ async fn basic_decisions_returns_low_effort() {
                     ("low".to_string(), "Routine work.".to_string()),
                     ("medium".to_string(), "Balanced work.".to_string())
                 ],
+                &[],
             )
             .await,
         Ok("low".to_string()),
@@ -127,6 +129,7 @@ async fn special_decisions_rejects_unsupported_effort() {
                 ("low".to_string(), "Routine work.".to_string()),
                 ("medium".to_string(), "Balanced work.".to_string()),
             ],
+            &[],
         )
         .await;
     assert_eq!(result, Err(DecisionsError::InvalidResponse));

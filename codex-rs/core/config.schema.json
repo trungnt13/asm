@@ -5531,6 +5531,11 @@
           "default": "Difficult debugging, multiple interacting constraints, conflicting evidence, or substantial uncertainty. Use max only for exceptionally difficult problems.",
           "type": "string"
         },
+        "include_images": {
+          "default": false,
+          "description": "Allow the legacy OpenAI connection to receive current-turn user images.",
+          "type": "boolean"
+        },
         "low_effort_description": {
           "default": "Straightforward coding, focused searches, and bounded analysis.",
           "type": "string"
@@ -5608,6 +5613,11 @@
         "endpoint": {
           "default": null,
           "type": "string"
+        },
+        "include_images": {
+          "default": false,
+          "description": "Allow this endpoint to receive current-turn user images.",
+          "type": "boolean"
         },
         "model": {
           "type": "string"

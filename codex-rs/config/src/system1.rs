@@ -25,6 +25,9 @@ pub enum System1Backend {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct System1Profile {
+    /// Allow this endpoint to receive current-turn user images.
+    #[serde(default)]
+    pub include_images: bool,
     #[serde(rename = "protocol", alias = "backend")]
     pub backend: System1Backend,
     #[serde(default)]
@@ -38,6 +41,8 @@ pub struct System1Profile {
 #[serde(default, deny_unknown_fields)]
 pub struct System1Config {
     pub enabled: bool,
+    /// Allow the legacy OpenAI connection to receive current-turn user images.
+    pub include_images: bool,
     /// Adapt turns 1, 1 + N, 1 + 2N, ... independently in each agent.
     #[schemars(range(min = 1))]
     pub decision_every_n_turns: u64,
@@ -69,6 +74,7 @@ impl Default for System1Config {
     fn default() -> Self {
         Self {
             enabled: false,
+            include_images: false,
             decision_every_n_turns: 1,
             decision_every_n_steps: 1,
             profile: None,
@@ -185,6 +191,7 @@ impl System1Config {
                 .ok_or_else(|| format!("system1.profile references unknown profile {name:?}"))?
         } else {
             System1Profile {
+                include_images: self.include_images,
                 backend: System1Backend::Openai,
                 endpoint: None,
                 model: self

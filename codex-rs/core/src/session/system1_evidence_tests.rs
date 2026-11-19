@@ -65,11 +65,15 @@ fn basic_evidence_includes_task_and_conversation_history() {
         .into(),
     ];
     let mut evidence = System1Evidence::default();
-    evidence.ingest(&[input("Review performance.")], &[], /*limit*/ 8192);
+    evidence.ingest(
+        &[input("Review performance.")],
+        /*limit*/ 8192,
+        /*include_images*/ false,
+    );
     evidence.ingest(
         &[input("Review documentation only.")],
-        &history,
         /*limit*/ 8192,
+        /*include_images*/ false,
     );
     assert_eq!(
         evidence.render(&history, /*limit*/ 8192),
@@ -77,8 +81,8 @@ fn basic_evidence_includes_task_and_conversation_history() {
     );
     evidence.ingest(
         &[input("Review performance.")],
-        &history,
         /*limit*/ 8192,
+        /*include_images*/ false,
     );
     assert_eq!(
         evidence.render(&history, /*limit*/ 8192),
@@ -109,7 +113,11 @@ fn basic_evidence_respects_configured_context_budget() {
         /*metadata*/ None,
     )];
     let mut evidence = System1Evidence::default();
-    evidence.ingest(&[input], &history, /*limit*/ 32768);
+    evidence.ingest(
+        &[input],
+        /*limit*/ 32768,
+        /*include_images*/ false,
+    );
     let text = evidence.render(&history, /*limit*/ 32768);
     assert!(text.len() <= 32768);
     assert!(text.starts_with("Current user task:\n界"));
@@ -169,16 +177,14 @@ fn basic_evidence_respects_configured_context_budget() {
             ..user_metadata.unwrap()
         }),
     ));
-    let mut evidence = System1Evidence {
+    let evidence = System1Evidence {
         task: "Current task.".to_string(),
         ..Default::default()
     };
-    evidence.ingest(&[], &history, /*limit*/ 8192);
     let default_text = evidence.render(&history, /*limit*/ 8192);
     assert!(default_text.len() <= 8192);
     assert!(!default_text.contains("EARLIER_USER_CONSTRAINT"));
     assert!(!default_text.contains("LATE_ASSISTANT_PART"));
-    evidence.ingest(&[], &history, /*limit*/ 32768);
     let expanded_text = evidence.render(&history, /*limit*/ 32768);
     assert!(expanded_text.len() <= 32768);
     assert!(expanded_text.contains("\nuser: EARLIER_USER_CONSTRAINT"));

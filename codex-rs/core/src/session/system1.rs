@@ -34,7 +34,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
-use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::AbortOnDropHandle;
@@ -176,6 +175,19 @@ impl Drop for System1Probe {
 }
 
 impl System1Session {
+    fn include_images(&self, config: &System1Config) -> bool {
+        self.profile.get().map_or_else(
+            || match &config.profile {
+                Some(name) => config
+                    .profiles
+                    .get(name)
+                    .is_some_and(|profile| profile.include_images),
+                None => config.include_images,
+            },
+            |profile| profile.settings.include_images,
+        )
+    }
+
     fn client(&self, config: &Config) -> Result<(Arc<DecisionsClient>, String), DecisionsError> {
         let profile = if let Some(profile) = self.profile.get() {
             profile
@@ -392,6 +404,8 @@ impl Session {
             DecisionRequest {
                 model,
                 input: "Acknowledge a greeting.".to_string(),
+                image: None,
+                requires_image: false,
                 instructions: "Choose the lowest effort sufficient for this routine task."
                     .to_string(),
                 choices: [ReasoningEffort::Low, ReasoningEffort::Medium]
@@ -490,11 +504,44 @@ impl Session {
             .store(/*val*/ false, Ordering::Release);
     }
 
+    pub(super) fn record_system1_input<'a>(
+        &self,
+        turn: &TurnContext,
+        input: impl IntoIterator<Item = &'a TurnInput>,
+    ) {
+        let config = &turn.config.system1;
+        if turn
+            .extension_data
+            .get::<StdMutex<System1Cadence>>()
+            .is_none()
+            || !self
+                .features
+                .enabled(codex_features::Feature::StepModelSwitching)
+            || !self
+                .features
+                .enabled(codex_features::Feature::ReasoningEffortOverride)
+        {
+            return;
+        }
+        let Some(session) = self.services.thread_extension_data.get::<System1Session>() else {
+            return;
+        };
+        turn.extension_data
+            .get_or_init(StdMutex::<System1Evidence>::default)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .ingest(
+                input,
+                config.max_context_bytes,
+                session.include_images(config),
+            );
+        self.invalidate_system1();
+    }
+
     #[tracing::instrument(skip_all)]
     pub(super) async fn adapt_reasoning(
         self: &Arc<Self>,
         turn: &Arc<TurnContext>,
-        input: &[TurnInput],
         trigger: System1Trigger,
         cancellation: &CancellationToken,
     ) {
@@ -561,10 +608,10 @@ impl Session {
             let Some(task_done) = task_done else {
                 return;
             };
-            let evidence = turn
-                .extension_data
-                .get_or_init(Mutex::<System1Evidence>::default);
-            let Ok(mut evidence) = evidence.try_lock() else {
+            let Some(evidence) = turn.extension_data.get::<StdMutex<System1Evidence>>() else {
+                return;
+            };
+            let Ok(evidence) = evidence.try_lock() else {
                 return;
             };
             let Ok(state) = self.state.try_lock() else {
@@ -578,12 +625,6 @@ impl Session {
             {
                 return;
             }
-            evidence.ingest(
-                input,
-                state.history.annotated_items(),
-                config.max_context_bytes,
-            );
-            self.invalidate_system1();
             if !cadence_due {
                 tracing::debug!(thread.id = %self.thread_id(), reason = "cadence", "System1 skipped");
                 return;
@@ -595,7 +636,10 @@ impl Session {
             {
                 return;
             }
-            if evidence.encrypted_task_unavailable || evidence.task.is_empty() {
+            if evidence.encrypted_task_unavailable
+                || (evidence.task.trim().is_empty()
+                    && !(session.include_images(config) && evidence.image.is_some()))
+            {
                 if evidence.encrypted_task_unavailable {
                     tracing::debug!(thread.id = %self.thread_id(), reason = "encrypted_task_unavailable",
                     "System1 skipped");
@@ -646,11 +690,17 @@ impl Session {
                 )
             });
             match session.client(&turn.config) {
-                Ok((client, model)) => Ok((
+                Ok((client, model))
+                    if !evidence.task.trim().is_empty()
+                        || (session.include_images(config) && evidence.image.is_some()) =>
+                {
+                    Ok((
                     client,
                     DecisionRequest {
                         model,
                         input: text,
+                        image: evidence.image.as_ref().filter(|_| session.include_images(config)).map(Arc::clone),
+                        requires_image: evidence.task.trim().is_empty(),
                         instructions: {
                             let baseline = turn
                                 .extension_data
@@ -737,7 +787,9 @@ impl Session {
                         generation: session.generation.load(Ordering::Acquire),
                     },
                     attempt,
-                )),
+                ))
+                }
+                Ok(_) => return,
                 Err(error) => {
                     let mut stats = session
                         .stats
