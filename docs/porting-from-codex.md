@@ -119,11 +119,12 @@ Before syncs or targeted ports, use [asm-upstream-sync](../.agents/skills/asm-up
 
 ### Local validation for upstream rebases
 
-- Run only the local checks needed for changed build inputs, conflict resolutions, and behavior that crosses the ASM and upstream boundary.
-- Build affected binaries when needed. Use existing focused checks and run required generators. Do not run whole suites by default.
+- Run only local checks that cover changed build inputs, conflict resolutions, or upstream changes that affect ASM.
+- When needed, build the affected binaries. Run required generators. Use focused tests, not whole suites.
 - If the base moves, repeat only the checks whose inputs changed. Reuse matching evidence from earlier checks.
 - Put `[skip ci]` in each new rebase PR head commit. Do not start, retry, or wait for hosted CI unless the owner asks.
-- Do not run real-provider inference by default. Keep the read-only backend catalog lookup. If local checks are insufficient, report the gap and ask before expanding validation.
+- Do not run real-provider inference by default. Keep the read-only model catalog lookup.
+- If local checks are insufficient, report the gap. Ask before you run more checks.
 - Keep applicable compatibility checks local. Do not bypass branch protection or report skipped checks as passing. Release validation is unchanged.
 
 ### Built-in instruction changes
