@@ -1347,7 +1347,7 @@ fn unsupported_uploaded_audio_error() -> CodexErr {
 }
 
 /// Extensions and telemetry consume the protocol view, including the original mention and path labels.
-fn input_for_extensions(input: &[TurnInput]) -> Vec<UserInput> {
+pub(crate) fn input_for_extensions(input: &[TurnInput]) -> Vec<UserInput> {
     input
         .iter()
         .filter_map(|item| match item {
@@ -1361,7 +1361,7 @@ fn input_for_extensions(input: &[TurnInput]) -> Vec<UserInput> {
         .collect()
 }
 
-async fn required_mcp_servers_for_input(
+pub(crate) async fn required_mcp_servers_for_input(
     sess: &Arc<Session>,
     turn_context: &TurnContext,
     user_input: &[UserInput],
@@ -1465,7 +1465,7 @@ async fn required_mcp_servers_for_input(
 }
 
 #[instrument(level = "trace", skip_all)]
-async fn build_skills_and_plugins(
+pub(crate) async fn build_skills_and_plugins(
     sess: &Arc<Session>,
     step_context: &StepContext,
     user_input: &[UserInput],

@@ -36,22 +36,29 @@ fn fake_cli(rules: Value) -> anyhow::Result<TempDir> {
     Ok(directory)
 }
 
-async fn claude(rules: Value) -> anyhow::Result<(TempDir, ClaudeRuntime)> {
+async fn claude(mut rules: Value) -> anyhow::Result<(TempDir, ClaudeRuntime)> {
+    rules.as_array_mut().unwrap().insert(
+        /*index*/ 0,
+        json!([
+            "initialize", [{"type": "control_response", "response": {
+                "subtype": "success", "request_id": "$initialize", "response": {"commands": []}
+            }}]
+        ]),
+    );
     let directory = fake_cli(rules)?;
     let runtime = ClaudeRuntime::spawn(ClaudeOptions {
+        queued_input_count: Default::default(),
         executable: directory.path().join("cli"),
         cwd: directory.path().to_owned(),
         model: "fake".to_owned(),
         effort: None,
         auto_compact_window: None,
-        role_instructions: None,
-        session_kind: ClaudeSessionKind::NativeDefault,
+        system_prompt: "Use ASM tools.".to_owned(),
+        session_kind: ClaudeSessionKind::Chat,
         session: ClaudeSession::New {
             id: SESSION.to_owned(),
         },
-        bridge_directory: None,
-        disallowed_tools: Vec::new(),
-        skill_overrides: Default::default(),
+        bridge_directory: directory.path().to_owned(),
     })
     .await?;
     Ok((directory, runtime))
@@ -80,7 +87,10 @@ async fn turn(runtime: &mut ClaudeRuntime, interrupt: bool) -> Outcome {
 }
 
 fn init() -> Value {
-    json!({"type": "system", "subtype": "init", "capabilities": ["interrupt_send_now_v1"]})
+    json!({"type": "system", "subtype": "init", "capabilities": ["interrupt_send_now_v1"],
+        "tools": ["mcp__asm__exec"], "skills": [], "slash_commands": [],
+        "mcp_servers": [{"name": "asm", "source": "plugin", "status": "connected"}],
+        "plugins": [{"name": "asm", "source": "asm@inline"}]})
 }
 
 fn result(subtype: &str, api_error: Option<&str>) -> Value {
@@ -95,7 +105,7 @@ fn idle() -> Value {
 
 #[tokio::test]
 async fn claude_session_survives_a_usage_limit_and_an_interrupt() -> anyhow::Result<()> {
-    let tool = json!({"type": "tool_use", "id": "tool", "name": "Bash", "input": {}});
+    let tool = json!({"type": "tool_use", "id": "tool", "name": "mcp__asm__exec", "input": {}});
     let (_directory, mut runtime) = claude(json!([
         ["user", [
             init(),

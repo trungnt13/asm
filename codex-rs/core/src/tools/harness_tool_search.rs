@@ -21,7 +21,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 pub(crate) fn enabled(turn: &TurnContext, model: &ModelInfo) -> bool {
-    turn.config.model_provider_id == "fireworks" && !model.supports_search_tool
+    (turn.config.model_provider_id == "fireworks" || model.slug.starts_with("claude-code/"))
+        && !model.supports_search_tool
 }
 
 pub(super) struct FunctionToolSearch {

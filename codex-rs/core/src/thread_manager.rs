@@ -1986,6 +1986,20 @@ impl ThreadManager {
                         "Claude Code side conversations need the loaded main thread".to_string(),
                     ));
                 };
+                options.config.multi_agent_v2.disable_native_tools = true;
+                options
+                    .config
+                    .features
+                    .disable(Feature::AgentMessageBoard)
+                    .map_err(|error| CodexErr::InvalidRequest(error.to_string()))?;
+                options
+                    .config
+                    .features
+                    .disable(Feature::AgentMessageBoardMcp)
+                    .map_err(|error| CodexErr::InvalidRequest(error.to_string()))?;
+                options
+                    .thread_extension_init
+                    .remove::<codex_message_board::LocalBoardConnection>();
                 // Closing a side unsubscribes it; unload at once so its native process ends too.
                 options.config.thread_unload_delay = std::time::Duration::ZERO;
                 Some(

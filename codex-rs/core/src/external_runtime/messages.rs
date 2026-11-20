@@ -5,6 +5,7 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::ContentItemProvenance;
 use codex_protocol::models::ImageReference;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::openai_models::NativeRuntime;
 use serde_json::Value;
 use serde_json::json;
 
@@ -14,6 +15,7 @@ use crate::session::session::Session;
 
 pub(super) fn input_messages<'a>(
     items: impl IntoIterator<Item = &'a ResponseItem>,
+    runtime: NativeRuntime,
 ) -> anyhow::Result<Vec<Value>> {
     let mut messages = Vec::new();
     for item in items {
@@ -84,6 +86,19 @@ pub(super) fn input_messages<'a>(
                         });
                     }
                     messages.push(Value::Array(blocks));
+                }
+            }
+            ResponseItem::Message { role, .. }
+                if runtime == NativeRuntime::ClaudeCode
+                    && matches!(role.as_str(), "developer" | "user") =>
+            {
+                let ResponseItem::Message { content, .. } = input::context_item(item)? else {
+                    unreachable!("native context is a labeled plaintext message");
+                };
+                for part in content {
+                    if let ContentItem::InputText { text } = part {
+                        messages.push(Value::String(text));
+                    }
                 }
             }
             // Native received mail uses AgentMessage; sent mail is an assistant Message.
@@ -176,9 +191,9 @@ pub(super) fn validate_pending_prompt(
     pending: &[TurnInput],
     boundary: Option<&str>,
     validate: impl FnOnce(&codex_external_runtime::Prompt) -> anyhow::Result<()>,
+    runtime: NativeRuntime,
 ) -> anyhow::Result<()> {
-    // Preview the same normalized content that admission will record, without
-    // changing history or the native delivery checkpoint on validation failure.
+    // Preview normalized pending input before recording it or advancing delivery.
     let items = pending
         .iter()
         .map(|item| match item {
@@ -190,7 +205,7 @@ pub(super) fn validate_pending_prompt(
         })
         .collect::<Vec<_>>();
     let mut messages = messages.to_vec();
-    messages.extend(input_messages(&items)?);
+    messages.extend(input_messages(&items, runtime)?);
     if let Some(boundary) = boundary {
         messages.insert(/*index*/ 0, Value::String(boundary.to_owned()));
     }

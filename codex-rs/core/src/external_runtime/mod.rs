@@ -2,6 +2,7 @@
 mod activity;
 mod bridge;
 mod completion;
+mod context;
 mod continuation;
 use completion::complete_response;
 use completion::save_reconciled_checkpoint;
@@ -19,7 +20,6 @@ pub(crate) use deletion::delete_thread_data;
 pub(crate) use deletion::ensure_no_runtime_owner;
 use events::record_assistant_frame;
 use fork::TEMPORARY_FORK_BOUNDARY;
-use fork::TEMPORARY_FORK_DISALLOWED_TOOLS;
 pub(crate) use fork::prepare_temporary_fork;
 pub(crate) use input::context_item;
 use messages::input_messages;
@@ -272,7 +272,7 @@ async fn run_conversation(
     let (native_runtime, _) = NativeRuntime::for_model(&settings.model_info.slug)
         .context("not a native runtime model")?;
     let runtime_name = native_runtime.display_name();
-    if session.tool_policy.require_managed_sandbox {
+    if native_runtime == NativeRuntime::CursorAgent && session.tool_policy.require_managed_sandbox {
         bail!(
             "{runtime_name} native tools cannot satisfy the required ASM-managed sandbox; use an ASM-managed model"
         );
@@ -336,7 +336,7 @@ async fn run_conversation(
         None
     };
     // Native V2 children get ASM messaging tools through the loopback JSON bridge.
-    let messaging = child_agent;
+    let messaging = child_agent || native_runtime == NativeRuntime::ClaudeCode;
     let page_context = if native_runtime == NativeRuntime::ClaudeCode {
         let lease = RuntimeLease::take(&session.external_runtime)?;
         lease.runtime.as_ref().map_or(
@@ -367,29 +367,19 @@ async fn run_conversation(
             let history = session.clone_history().await;
             input::filter_page_context(input, page_context, history.raw_items());
         }
-        if input::prepare_input(input)? > 0 {
-            session
-                .send_event(
-                    turn,
-                    EventMsg::Warning(WarningEvent {
-                        message: "Encrypted ASM input was ignored; the user prompt is preserved."
-                            .to_owned(),
-                    }),
-                )
-                .await;
-        }
         let original_history = session.clone_history().await;
-        let messages = input_messages(original_history.raw_items())?;
+        let messages = input_messages(original_history.raw_items(), native_runtime)?;
         let mut lease = RuntimeLease::take(&session.external_runtime)?;
         let needs_binding = lease.runtime.is_some();
         let mut fork_boundary = None;
+        let mut prepared_context = None;
         if lease.runtime.is_none() {
-            let mut role_instructions = if thread_spawn_child {
+            let role_instructions = if thread_spawn_child {
                 turn.config.role_developer_instructions.clone()
             } else {
                 None
             };
-            if thread_spawn_child
+            let restored_role = if thread_spawn_child
                 && turn.multi_agent_version == MultiAgentVersion::V1
                 && role_instructions.is_none()
             {
@@ -401,8 +391,10 @@ async fn run_conversation(
                 )
                 .await
                 .map_err(anyhow::Error::msg)?;
-                role_instructions = role_config.role_developer_instructions;
-            }
+                role_config.role_developer_instructions
+            } else {
+                None
+            };
             let directory = turn.config.codex_home.join("claude-runtime");
             std::fs::create_dir_all(&directory)?;
             let checkpoint_path = directory
@@ -438,16 +430,28 @@ async fn run_conversation(
                     (checkpoint, resume, Linkage::Saved)
                 }
                 (None, Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-                    // Shell-only history can precede the first native conversation.
-                    // Other native input still requires its saved linkage to prevent replay.
+                    // Unsent generated context can survive rejected first-input admission.
+                    // Only host-attributed text and shell context are safe without native linkage.
                     let previous_input = original_history.raw_items().filter(|item| {
                         !matches!(item, ResponseItem::Message {
-                            internal_chat_message_metadata_passthrough: Some(metadata), ..
+                            role, content, internal_chat_message_metadata_passthrough: Some(metadata), ..
                         } if metadata.content_item_kinds.as_ref().is_some_and(|kinds| {
                             kinds.len() == 1 && kinds[0].as_str() == input::SHELL_CONTEXT_KIND
-                        }))
+                        }) || (native_runtime == NativeRuntime::ClaudeCode
+                            && matches!(role.as_str(), "user" | "developer")
+                            && !content.is_empty()
+                            && content.iter().all(|part| matches!(part, codex_protocol::models::ContentItem::InputText { .. }))
+                            && metadata.content_item_metadata.as_ref().is_some_and(|parts| {
+                                parts.len() == content.len() && parts.iter().all(|part| matches!(
+                                    part.provenance,
+                                    codex_protocol::models::ContentItemProvenance::Harness { hook: false }
+                                        | codex_protocol::models::ContentItemProvenance::DeveloperInstructions { .. }
+                                        | codex_protocol::models::ContentItemProvenance::Skills
+                                        | codex_protocol::models::ContentItemProvenance::AgentsMd
+                                ))
+                            })))
                     });
-                    if !input_messages(previous_input)?.is_empty()
+                    if !input_messages(previous_input, native_runtime)?.is_empty()
                         || original_history.raw_items().any(|item| matches!(item, ResponseItem::Message { role, .. } if role == "assistant"))
                     {
                         bail!("missing native session linkage for existing history; start a new chat");
@@ -455,7 +459,11 @@ async fn run_conversation(
                     let id = session.thread_id().to_string();
                     (
                         Checkpoint {
-                            format_version: 2,
+                            format_version: if native_runtime == NativeRuntime::ClaudeCode {
+                                3
+                            } else {
+                                2
+                            },
                             model: settings.model_info.slug.clone(),
                             effort: effort.clone(),
                             auto_compact_window,
@@ -488,13 +496,28 @@ async fn run_conversation(
                 return Ok(last_message);
             }
             let bridge = if messaging {
-                let step = session
-                    .capture_native_messaging_step_context(Arc::clone(turn), cancellation)
+                let step = if native_runtime == NativeRuntime::ClaudeCode {
+                    let prepared = context::capture(
+                        session,
+                        Arc::clone(turn),
+                        input,
+                        restored_role.as_deref(),
+                        cancellation,
+                    )
                     .await?;
+                    let step = Arc::clone(&prepared.step);
+                    prepared_context = Some(prepared);
+                    step
+                } else {
+                    session
+                        .capture_native_messaging_step_context(Arc::clone(turn), cancellation)
+                        .await?
+                };
                 let max_wait = turn.config.multi_agent_v2.max_wait_timeout_ms;
-                let bridge = ExternalMessageBridge::start(std::time::Duration::from_millis(
-                    u64::try_from(max_wait).unwrap_or_default(),
-                ))
+                let bridge = ExternalMessageBridge::start(
+                    std::time::Duration::from_millis(u64::try_from(max_wait).unwrap_or_default()),
+                    native_runtime,
+                )
                 .await?;
                 bridge
                     .set_turn(Arc::clone(session), step, cancellation.clone())
@@ -505,7 +528,7 @@ async fn run_conversation(
             };
             let message = match native_runtime {
                 NativeRuntime::ClaudeCode => {
-                    "Claude Code owns instructions, tools, hooks and permissions, and bypasses its permission prompts; native deny rules and managed policy still apply. ASM sandbox and approvals do not apply."
+                    "Claude Code supplies inference and conversation state. ASM owns tools, instructions, skills, sandbox and approvals."
                 }
                 NativeRuntime::CursorAgent if child_agent => {
                     "Cursor Agent owns instructions, tools and permissions. Cursor runs with --force; native denies and team auto-run controls still apply. ASM sandbox and approvals do not apply; remaining Cursor approval requests are denied. Token usage and context fill are unavailable. ASM communication uses a local CLI helper through native shell tools; messages arrive between turns."
@@ -526,30 +549,22 @@ async fn run_conversation(
                 SessionStart::New { .. } => Some(Default::default()),
                 SessionStart::Resume { .. } | SessionStart::Fork { .. } => None,
             };
-            let mut disallowed_tools = Vec::new();
-            // Spawned children run headless: nobody can answer their native questions.
-            if thread_spawn_child {
-                disallowed_tools.push("AskUserQuestion".to_owned());
-            }
-            // A side conversation answers questions; it must not start or steer native agents.
             if matches!(linkage, Linkage::Temporary) {
-                disallowed_tools.extend(TEMPORARY_FORK_DISALLOWED_TOOLS.map(str::to_owned));
                 fork_boundary = Some(TEMPORARY_FORK_BOUNDARY);
             }
             let mut runtime = ExternalSession::spawn_runtime(
                 bridge.as_ref(),
-                disallowed_tools,
-                &turn.config.native_runtimes.claude_code,
-                role_instructions,
-                if thread_spawn_child {
-                    codex_external_runtime::ClaudeSessionKind::ManagedChild
-                } else if !turn.session_source.is_non_root_agent()
-                    && !matches!(linkage, Linkage::Temporary)
-                {
-                    codex_external_runtime::ClaudeSessionKind::ManagedRoot
+                if native_runtime == NativeRuntime::ClaudeCode {
+                    Some(session.get_prompt_base_instructions().await.text)
                 } else {
-                    codex_external_runtime::ClaudeSessionKind::NativeDefault
+                    role_instructions.or(restored_role)
                 },
+                if thread_spawn_child {
+                    codex_external_runtime::ClaudeSessionKind::Child
+                } else {
+                    codex_external_runtime::ClaudeSessionKind::Chat
+                },
+                Arc::clone(&session.external_runtime.queued_input_count),
                 &mut checkpoint,
                 &checkpoint_path,
                 session_start,
@@ -586,45 +601,105 @@ async fn run_conversation(
                 usage_baseline,
             });
         }
-        // Release the shared history vector before recording input to avoid a deep copy.
+        if needs_binding && native_runtime == NativeRuntime::ClaudeCode {
+            prepared_context = Some(
+                context::capture(
+                    session,
+                    Arc::clone(turn),
+                    input,
+                    /*restored_role*/ None,
+                    cancellation,
+                )
+                .await?,
+            );
+        }
+        if native_runtime == NativeRuntime::ClaudeCode {
+            input::normalize_selections(input);
+        }
+        if input::prepare_input(input)? > 0 {
+            session
+                .send_event(
+                    turn,
+                    EventMsg::Warning(WarningEvent {
+                        message: "Encrypted ASM input was ignored; the user prompt is preserved."
+                            .to_owned(),
+                    }),
+                )
+                .await;
+        }
         drop(original_history);
+        drop(messages);
         let runtime = lease
             .runtime
             .as_mut()
             .context("native session was not initialized")?;
-        runtime.checkpoint.validate_live(
-            &settings.model_info.slug,
-            bound_auto_compact_window(thread_spawn_child, auto_compact_window, &runtime.checkpoint),
-            &cwd,
-            messaging,
-            &messages,
-        )?;
-        validate_pending_prompt(
-            session,
-            &messages[runtime.checkpoint.input_count..],
-            input,
-            fork_boundary,
-            |prompt| match &runtime.runtime {
-                RuntimeProcess::Claude(_) => codex_external_runtime::validate_claude_prompt(prompt),
-                RuntimeProcess::Cursor(process) => process.validate_prompt(prompt),
-            },
-        )?;
-        drop(messages);
-        if runtime.checkpoint.effort != effort {
-            match &mut runtime.runtime {
-                RuntimeProcess::Claude(process) => {
-                    runtime.checkpoint.in_flight = true;
-                    runtime
-                        .linkage
-                        .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
-                    process.set_effort(effort.as_deref()).await?;
+        let prepared_step = prepared_context
+            .as_ref()
+            .map(|prepared| Arc::clone(&prepared.step));
+        {
+            let runtime = &mut *runtime;
+            let input = input.as_slice();
+            let effort = &effort;
+            let cwd = &cwd;
+            let model = &settings.model_info.slug;
+            let admit = move |context_items: &[ResponseItem], injections: &[ResponseItem]| {
+                let generated =
+                    input_messages(context_items.iter().chain(injections), native_runtime);
+                async move {
+                    let generated = generated?;
+                    let mut messages =
+                        input_messages(session.clone_history().await.raw_items(), native_runtime)?;
+                    runtime.checkpoint.validate_live(
+                        model,
+                        bound_auto_compact_window(
+                            thread_spawn_child,
+                            auto_compact_window,
+                            &runtime.checkpoint,
+                        ),
+                        cwd,
+                        messaging,
+                        &messages,
+                    )?;
+                    messages.extend(generated);
+                    validate_pending_prompt(
+                        session,
+                        &messages[runtime.checkpoint.input_count..],
+                        input,
+                        fork_boundary,
+                        |prompt| match &runtime.runtime {
+                            RuntimeProcess::Claude(_) => {
+                                codex_external_runtime::validate_claude_prompt(prompt)
+                            }
+                            RuntimeProcess::Cursor(process) => process.validate_prompt(prompt),
+                        },
+                        native_runtime,
+                    )?;
+                    drop(messages);
+                    if &runtime.checkpoint.effort != effort {
+                        match &mut runtime.runtime {
+                            RuntimeProcess::Claude(process) => {
+                                runtime.checkpoint.in_flight = true;
+                                runtime
+                                    .linkage
+                                    .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
+                                process.set_effort(effort.as_deref()).await?;
+                            }
+                            RuntimeProcess::Cursor(process) => {
+                                process.set_effort(effort.as_deref()).await?;
+                            }
+                        }
+                        runtime.checkpoint.effort.clone_from(effort);
+                        runtime
+                            .linkage
+                            .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
+                    }
+                    Ok::<(), anyhow::Error>(())
                 }
-                RuntimeProcess::Cursor(process) => process.set_effort(effort.as_deref()).await?,
+            };
+            match prepared_context {
+                Some(prepared) => Box::pin(context::record(session, prepared, admit)).await?,
+                None => admit(/*context_items*/ &[], /*injections*/ &[]).await?,
             }
-            runtime.checkpoint.effort = effort.clone();
-            runtime
-                .linkage
-                .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
         }
         for item in input.drain(..) {
             // Reject native setup or effort changes before recording input for later delivery.
@@ -639,7 +714,7 @@ async fn run_conversation(
             .await?;
         }
         let history = session.clone_history().await;
-        let messages = input_messages(history.raw_items())?;
+        let messages = input_messages(history.raw_items(), native_runtime)?;
         drop(history);
         let mut pending_messages = messages[runtime.checkpoint.input_count..].to_vec();
         let mut prompt = prompt_content(&pending_messages)?;
@@ -652,9 +727,14 @@ async fn run_conversation(
         }
         drop(pending_messages);
         if needs_binding && let Some(bridge) = &runtime.bridge {
-            let step = session
-                .capture_native_messaging_step_context(Arc::clone(turn), cancellation)
-                .await?;
+            let step = match prepared_step {
+                Some(step) => step,
+                None => {
+                    session
+                        .capture_native_messaging_step_context(Arc::clone(turn), cancellation)
+                        .await?
+                }
+            };
             bridge
                 .set_turn(Arc::clone(session), step, cancellation.clone())
                 .await?;
@@ -737,7 +817,7 @@ async fn run_conversation(
                                     codex_thread_store::PersistContext::TurnStart).await?;
                             }
                         }
-                        let messages = input_messages(session.clone_history().await.raw_items())?;
+                        let messages = input_messages(session.clone_history().await.raw_items(), native_runtime)?;
                         let mut delivered = messages[runtime.checkpoint.input_count..].iter()
                             .map(|message| message.as_str().map(str::to_owned)
                                 .context("Cursor mailbox only supports text input"))

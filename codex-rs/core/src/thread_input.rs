@@ -40,10 +40,19 @@ pub(crate) async fn subscribe_input_activity(
         .input_queue
         .turn_state_for_sub_id(&session.active_turn, turn_id)
         .await;
-    session
+    let (activity, pending) = session
         .input_queue
         .subscribe_activity(turn_state.as_deref())
-        .await
+        .await;
+    let pending = pending.or_else(|| {
+        (session
+            .external_runtime
+            .queued_input_count
+            .load(std::sync::atomic::Ordering::SeqCst)
+            > 0)
+        .then_some(crate::session::InputQueueActivity::Steer)
+    });
+    (activity, pending)
 }
 
 pub(crate) async fn wait_for_activity(

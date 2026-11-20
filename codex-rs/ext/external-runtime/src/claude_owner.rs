@@ -66,7 +66,7 @@ impl ClaudeRuntime {
     pub async fn spawn(options: ClaudeOptions) -> Result<Self> {
         let child = matches!(
             options.session_kind,
-            crate::claude::ClaudeSessionKind::ManagedChild
+            crate::claude::ClaudeSessionKind::Child
         );
         let mut driver = ClaudeDriver::spawn(options).await?;
         let mid_turn_delivery = driver.subscribe_mid_turn_delivery();

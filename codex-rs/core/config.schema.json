@@ -750,14 +750,6 @@
     "ClaudeCodeConfig": {
       "additionalProperties": false,
       "properties": {
-        "disallowed_tools": {
-          "default": [],
-          "description": "Additional native tool exclusions; ASM's mandatory restrictions remain active.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "page_context": {
           "allOf": [
             {
@@ -766,14 +758,6 @@
           ],
           "default": "inherit",
           "description": "Controls queued Desktop Page context without changing native history."
-        },
-        "skill_overrides": {
-          "additionalProperties": {
-            "$ref": "#/definitions/SkillVisibility"
-          },
-          "default": {},
-          "description": "Native skill visibility overrides, applied only to ASM-launched Claude processes.",
-          "type": "object"
         }
       },
       "type": "object"
@@ -3714,9 +3698,7 @@
             }
           ],
           "default": {
-            "disallowed_tools": [],
-            "page_context": "inherit",
-            "skill_overrides": {}
+            "page_context": "inherit"
           }
         }
       },
@@ -5322,15 +5304,6 @@
       ],
       "type": "object"
     },
-    "SkillVisibility": {
-      "enum": [
-        "on",
-        "name-only",
-        "user-invocable-only",
-        "off"
-      ],
-      "type": "string"
-    },
     "SkillsConfig": {
       "additionalProperties": false,
       "properties": {
@@ -6303,8 +6276,8 @@
           "type": "boolean"
         },
         "show_tooltips": {
-          "default": true,
-          "description": "Show startup tooltips in the TUI welcome screen. Defaults to `true`.",
+          "default": false,
+          "description": "Show startup, working, and completion tips in the TUI. Defaults to `false`.",
           "type": "boolean"
         },
         "sidebar_width_percent": {
@@ -9617,9 +9590,7 @@
       ],
       "default": {
         "claude_code": {
-          "disallowed_tools": [],
-          "page_context": "inherit",
-          "skill_overrides": {}
+          "page_context": "inherit"
         }
       },
       "description": "Launch-only settings for native runtimes, leaving standalone CLI settings unchanged."

@@ -959,9 +959,9 @@ pub struct Tui {
     #[serde(default)]
     pub rendering: TuiRendering,
 
-    /// Show startup tooltips in the TUI welcome screen.
-    /// Defaults to `true`.
-    #[serde(default = "default_true")]
+    /// Show startup, working, and completion tips in the TUI.
+    /// Defaults to `false`.
+    #[serde(default)]
     pub show_tooltips: bool,
 
     /// Show informational notices about connected app server version differences.
