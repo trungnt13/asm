@@ -64,6 +64,7 @@ members = [
     "exec-server-cli",
     "exec-server/tests/support",
     "execpolicy",
+    "execpolicy-rules",
     "ext/agent-message-board",
     "ext/external-runtime",
     "ext/connectors",
@@ -161,6 +162,8 @@ members = [
     "state",
     "terminal-detection",
     "test-binary-support",
+    "thread-context-ids",
+    "thread-context-ids/tests/support",
     "thread-store",
     "uds",
     "codex-experimental-api-macros",
@@ -239,6 +242,7 @@ codex-exec-server = { path = "exec-server" }
 codex-exec-server-cli = { path = "exec-server-cli" }
 codex-exec-server-test-support = { path = "exec-server/tests/support" }
 codex-execpolicy = { path = "execpolicy" }
+codex-execpolicy-rules = { path = "execpolicy-rules" }
 codex-extension-api = { path = "ext/extension-api" }
 codex-external-runtime = { path = "ext/external-runtime" }
 codex-extension-items = { path = "ext/items" }
@@ -300,6 +304,8 @@ codex-skills = { path = "skills" }
 codex-state = { path = "state" }
 codex-terminal-detection = { path = "terminal-detection" }
 codex-test-binary-support = { path = "test-binary-support" }
+codex-thread-context-ids = { path = "thread-context-ids" }
+codex-thread-context-ids-test-support = { path = "thread-context-ids/tests/support" }
 codex-thread-store = { path = "thread-store" }
 codex-tools = { path = "tools" }
 codex-tcp-tunnel = { path = "tcp-tunnel" }

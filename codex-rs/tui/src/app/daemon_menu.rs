@@ -41,7 +41,7 @@ impl App {
         }
     }
 
-    pub(super) fn open_daemon_menu(&mut self) {
+    pub(super) fn open_daemon_menu(&mut self, policy_error: Option<&str>) {
         let status = self
             .chat_widget
             .remote_connection
@@ -69,6 +69,10 @@ impl App {
         } else {
             None
         };
+        let updates_allowed = policy_error.is_none();
+        if let Some(error) = policy_error {
+            header.push(Line::from(error.to_owned().dim()));
+        }
         if let Some(guidance) = unavailable {
             header.push(Line::from(guidance.dim()));
         }
@@ -89,6 +93,7 @@ impl App {
             (DaemonUpdateSource::ThisCli, "Use this CLI build"),
         ]
         .into_iter()
+        .filter(|_| updates_allowed)
         .map(|(source, name)| SelectionItem {
             name: name.to_string(),
             is_disabled: unavailable.is_some(),
@@ -168,7 +173,7 @@ impl App {
 
     pub(super) fn confirm_daemon_update(&mut self, source: DaemonUpdateSource) {
         if !codex_install_context::BUILT_IN_UPDATES_ENABLED {
-            self.open_daemon_menu();
+            self.open_daemon_menu(/*policy_error*/ None);
             return;
         }
         let Some(executable) = &self.daemon_cli_executable else {
