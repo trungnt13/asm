@@ -55,8 +55,11 @@ use codex_protocol::protocol::WarningEvent;
 use tokio_util::sync::CancellationToken;
 
 use crate::hook_runtime::record_pending_input;
+use crate::session::InputQueueEntry;
+use crate::session::SubmittedAdditionalContext;
 use crate::session::TurnInput;
 use crate::session::session::Session;
+use crate::session::turn::merge_submitted_context;
 use crate::session::turn_context::TurnContext;
 use crate::state::TaskKind;
 use crate::tasks::SessionTaskResult;
@@ -356,8 +359,18 @@ async fn run_conversation(
         if cancellation.is_cancelled() {
             bail!("turn interrupted");
         }
+        let needs_pending_input = input.is_empty();
+        if let Some(context) = turn.extension_data.remove::<SubmittedAdditionalContext>() {
+            let mut items = merge_submitted_context(session, turn, &context)
+                .await
+                .into_iter()
+                .map(TurnInput::ResponseItem)
+                .collect::<Vec<_>>();
+            items.append(input);
+            *input = items;
+        }
         // Automatic child starts place their assignment in the queue, not task input.
-        if input.is_empty() {
+        if needs_pending_input {
             session
                 .input_queue
                 .accept_mailbox_delivery_for_current_turn(&session.active_turn, &turn.sub_id)
@@ -366,7 +379,7 @@ async fn run_conversation(
                 .input_queue
                 .get_pending_input(&session.active_turn)
                 .await;
-            *input = pending;
+            input.extend(materialize_native_inputs(session, turn, pending).await);
         }
         if page_context != codex_config::PageContextPolicy::Inherit {
             let history = session.clone_history().await;
@@ -913,7 +926,8 @@ async fn run_conversation(
                     }, if native_runtime == NativeRuntime::CursorAgent && !cancellation.is_cancelled() => {
                         if reply.is_closed() { continue; }
                         if let Some(turn_state) = &turn_state {
-                            let mut pending = session.input_queue.take_current_turn_mail(turn_state).await;
+                            let pending = session.input_queue.take_current_turn_mail(turn_state).await;
+                            let mut pending = materialize_native_inputs(session, turn, pending).await;
                             if input::prepare_input(&mut pending)? > 0 {
                                 session.send_event(turn, EventMsg::Warning(WarningEvent { message: "Encrypted ASM input was ignored; the user prompt is preserved.".to_owned() })).await;
                             }
@@ -1012,8 +1026,28 @@ async fn run_conversation(
         if pending.is_empty() {
             return Ok(last_message);
         }
-        *input = pending;
+        *input = materialize_native_inputs(session, turn, pending).await;
     }
+}
+
+async fn materialize_native_inputs(
+    session: &Session,
+    turn: &TurnContext,
+    entries: Vec<InputQueueEntry>,
+) -> Vec<TurnInput> {
+    let mut inputs = Vec::with_capacity(entries.len());
+    for entry in entries {
+        if let Some(context) = entry.additional_context {
+            inputs.extend(
+                merge_submitted_context(session, turn, &context)
+                    .await
+                    .into_iter()
+                    .map(TurnInput::ResponseItem),
+            );
+        }
+        inputs.push(entry.input);
+    }
+    inputs
 }
 
 async fn record_frame(

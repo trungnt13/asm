@@ -6,6 +6,12 @@
       "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
       "type": "string"
     },
+    "AgentRoleForkTurns": {
+      "enum": [
+        "none"
+      ],
+      "type": "string"
+    },
     "AgentRoleToml": {
       "additionalProperties": false,
       "properties": {
@@ -20,6 +26,14 @@
         "description": {
           "description": "Human-facing role documentation used in spawn tool guidance. Required unless supplied by the referenced agent role file.",
           "type": "string"
+        },
+        "fork_turns": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AgentRoleForkTurns"
+            }
+          ],
+          "description": "Force fresh history at spawn instead of forking the parent's turns."
         },
         "nickname_candidates": {
           "description": "Candidate nicknames for agents spawned with this role.",
@@ -1115,6 +1129,9 @@
               "type": "boolean"
             },
             "daemon_auto_start": {
+              "type": "boolean"
+            },
+            "daemon_updates": {
               "type": "boolean"
             },
             "daybreak_program_propagation": {
@@ -8787,6 +8804,9 @@
           "type": "boolean"
         },
         "daemon_auto_start": {
+          "type": "boolean"
+        },
+        "daemon_updates": {
           "type": "boolean"
         },
         "daybreak_program_propagation": {

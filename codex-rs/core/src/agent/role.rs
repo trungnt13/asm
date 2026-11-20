@@ -11,6 +11,7 @@ use crate::config::deserialize_config_toml_with_base;
 use anyhow::anyhow;
 use codex_agent_roles::parse_agent_role_file_contents;
 use codex_config::SkillsConfig;
+use codex_config::config_toml::AgentRoleForkTurns;
 use codex_config::loader::resolve_relative_paths_in_config_toml;
 use codex_exec_server::read_sensitive_file_to_string;
 use codex_features::Feature;
@@ -388,7 +389,13 @@ pub(crate) mod spawn_tool_spec {
                     }
                 })
                 .unwrap_or_default();
-            format!("{name}: {{\n{description}{role_settings_note}\n}}")
+            let fork_note = match declaration.fork_turns {
+                Some(AgentRoleForkTurns::None) => {
+                    "\n- This role skips the parent transcript even when you request `all`. Include a self-contained task and any necessary references in `message`."
+                }
+                None => "",
+            };
+            format!("{name}: {{\n{description}{role_settings_note}{fork_note}\n}}")
         } else {
             format!("{name}: no description")
         }
@@ -408,6 +415,7 @@ mod built_in {
                         description: Some("Default agent.".to_string()),
                         config_file: None,
                         nickname_candidates: None,
+                        fork_turns: None,
                     },
                 ),
                 (
@@ -425,6 +433,7 @@ Rules:
                         ),
                         config_file: Some("explorer.toml".to_string().parse().unwrap_or_default()),
                         nickname_candidates: None,
+                        fork_turns: None,
                     },
                 ),
                 (
@@ -444,6 +453,7 @@ Rules:
                         ),
                         config_file: None,
                         nickname_candidates: None,
+                        fork_turns: None,
                     },
                 ),
                 // Awaiter is temp removed

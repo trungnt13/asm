@@ -90,7 +90,7 @@ fn validate_response_item_image_urls(items: &[ResponseItem]) -> Result<(), JSONR
 #[derive(Clone)]
 pub(crate) struct TurnRequestProcessor {
     thread_manager: Arc<ThreadManager>,
-    thread_store: Arc<dyn codex_thread_store::ThreadStore>,
+    thread_store: Arc<dyn ThreadStore>,
     outgoing: Arc<OutgoingMessageSender>,
     analytics_events_client: AnalyticsEventsClient,
     config: Arc<Config>,
@@ -103,10 +103,9 @@ pub(crate) struct TurnRequestProcessor {
 }
 
 fn map_additional_context(
-    additional_context: Option<HashMap<String, AdditionalContextEntry>>,
+    additional_context: HashMap<String, AdditionalContextEntry>,
 ) -> BTreeMap<String, CoreAdditionalContextEntry> {
     additional_context
-        .unwrap_or_default()
         .into_iter()
         .map(|(key, entry)| {
             let entry = CoreAdditionalContextEntry {
@@ -149,7 +148,7 @@ impl TurnRequestProcessor {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         thread_manager: Arc<ThreadManager>,
-        thread_store: Arc<dyn codex_thread_store::ThreadStore>,
+        thread_store: Arc<dyn ThreadStore>,
         outgoing: Arc<OutgoingMessageSender>,
         analytics_events_client: AnalyticsEventsClient,
         config: Arc<Config>,
@@ -648,9 +647,10 @@ impl TurnRequestProcessor {
             return Err(error);
         }
         // Validate before changing the thread's live MCP policy.
-        let additional_context = map_additional_context(params.additional_context.take());
+        let additional_context = params.additional_context.take().map(map_additional_context);
         additional_context
-            .values()
+            .iter()
+            .flat_map(BTreeMap::values)
             .try_for_each(CoreAdditionalContextEntry::validate)
             .map_err(invalid_request)
             .inspect_err(|error| {
@@ -1342,7 +1342,7 @@ impl TurnRequestProcessor {
             .into_iter()
             .map(V2UserInput::into_core)
             .collect();
-        let additional_context = map_additional_context(params.additional_context);
+        let additional_context = params.additional_context.map(map_additional_context);
 
         let submission = thread
             .steer_turn(

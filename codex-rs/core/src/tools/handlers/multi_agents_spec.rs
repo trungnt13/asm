@@ -406,7 +406,7 @@ pub(crate) fn require_spawn_agent_fork_turns(parameters: &mut JsonSchema) {
     parameters.properties.get_or_insert_default().insert(
         "fork_turns".to_string(),
         JsonSchema::string(Some(
-            "Parent history to inherit. Use `none` for no history or `all` for full history."
+            "Use `none` to skip the parent transcript or `all` to fork it. The selected role may force `none`."
                 .to_string(),
         )),
     );
@@ -466,7 +466,7 @@ Codex-runtime agents will have the same tools as you and the ability to spawn th
 It will be able to send you and other running agents messages, and its final answer will be provided to you when it finishes.
 The new agent's canonical task name will be provided to it along with the message.
 
-Note that passing `fork_turns="none"` will not pass any surrounding context to the spawned subagent, which may cause the agent to lack the context it needs to complete its task, whereas `fork_turns="all"` will provide the subagent with all surrounding context."#
+If the parent transcript is not forked, include the context needed for the task in `message`."#
         )
     };
 
