@@ -81,4 +81,14 @@ impl Session {
             DecisionDisposition::Warmup => unreachable!("warmup is excluded from runtime stats"),
         }
     }
+
+    pub(crate) fn record_native_system1_effort_change(&self) {
+        if let Some(state) = self.services.thread_extension_data.get::<System1Session>() {
+            let mut stats = state
+                .stats
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            stats.effort_changes = stats.effort_changes.saturating_add(/*rhs*/ 1);
+        }
+    }
 }

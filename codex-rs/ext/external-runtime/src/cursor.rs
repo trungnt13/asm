@@ -53,6 +53,7 @@ pub struct CursorRuntime {
     session_id: String,
     next_request_id: u64,
     config_options: Value,
+    baseline_effort: Option<String>,
     supports_images: bool,
     usable: bool,
     failure_result: Option<Value>,
@@ -86,6 +87,7 @@ impl CursorRuntime {
             session_id: String::new(),
             next_request_id: 0,
             config_options: Value::Null,
+            baseline_effort: None,
             supports_images: false,
             usable: false,
             failure_result: None,
@@ -139,6 +141,8 @@ impl CursorRuntime {
                 "content": [{"type": "text", "text": instructions}],
             });
         }
+        let can_read_baseline =
+            matches!(&options.session, CursorSession::New) || options.effort.is_none();
         let session = match options.session {
             CursorSession::New => {
                 let session = self.request("session/new", params).await?;
@@ -204,25 +208,21 @@ impl CursorRuntime {
                     .map(|(id, value)| (id.to_owned(), value.to_owned()))
             })
             .collect::<Result<Vec<_>>>()?;
+        let mut encoded_baseline = None;
+        let mut manual_effort = None;
         if let Some(effort) = options.effort {
-            let thought = selected["configOptions"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .find(|option| {
-                    option["category"] == "thought_level"
-                        && option["options"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .any(|value| value["value"] == effort)
-                });
+            let thought = reasoning_options(&selected["configOptions"])
+                .find(|option| advertises_effort(option, &effort));
             if let Some(thought) = thought {
                 let id = thought["id"]
                     .as_str()
                     .context("Cursor effort parameter has no ID")?;
+                encoded_baseline = parameters
+                    .iter()
+                    .find(|(key, _)| key == id)
+                    .map(|(_, value)| value.clone());
                 parameters.retain(|(key, _)| key != id);
-                parameters.push((id.to_owned(), effort));
+                manual_effort = Some(effort);
             } else if effort != "none" || !matches!(model, "default" | "auto" | "auto-smart") {
                 bail!("Cursor model `{model}` does not advertise adjustable effort");
             }
@@ -255,12 +255,26 @@ impl CursorRuntime {
             );
         }
         self.config_options = selected["configOptions"].clone();
+        self.baseline_effort = encoded_baseline
+            .filter(|effort| self.reasoning_efforts().any(|value| value == effort))
+            .or_else(|| {
+                if can_read_baseline {
+                    self.current_effort()
+                        .filter(|effort| self.reasoning_efforts().any(|value| value == *effort))
+                        .map(str::to_owned)
+                } else {
+                    None
+                }
+            });
         self.usable = true;
+        if let Some(effort) = manual_effort {
+            self.set_effort(Some(&effort)).await?;
+        }
         Ok(())
     }
 
     pub fn reasoning_efforts(&self) -> impl Iterator<Item = &str> {
-        thought_level_options(&self.config_options)
+        reasoning_options(&self.config_options)
             .flat_map(|option| option["options"].as_array().into_iter().flatten())
             .filter_map(|value| value["value"].as_str())
     }
@@ -272,14 +286,8 @@ impl CursorRuntime {
             "Cursor session requires recovery before changing effort"
         );
         let effort = effort.context("Cursor requires an explicit effort when changing it")?;
-        let id = thought_level_options(&self.config_options)
-            .find(|option| {
-                option["options"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .any(|value| value["value"] == effort)
-            })
+        let id = reasoning_options(&self.config_options)
+            .find(|option| advertises_effort(option, effort))
             .and_then(|option| option["id"].as_str())
             .context("Cursor does not advertise the requested effort")?
             .to_owned();
@@ -308,6 +316,7 @@ impl CursorRuntime {
                 "Cursor did not confirm requested effort"
             );
             self.config_options = selected["configOptions"].clone();
+            tracing::debug!(effective_effort = effort, "Cursor effort confirmed");
             Ok(())
         }
         .await;
@@ -321,8 +330,11 @@ impl CursorRuntime {
     }
 
     pub fn current_effort(&self) -> Option<&str> {
-        thought_level_options(&self.config_options)
-            .find_map(|option| option["currentValue"].as_str())
+        reasoning_options(&self.config_options).find_map(|option| option["currentValue"].as_str())
+    }
+
+    pub fn baseline_effort(&self) -> Option<&str> {
+        self.baseline_effort.as_deref()
     }
 
     pub fn session_id(&self) -> &str {
@@ -500,6 +512,11 @@ impl CursorRuntime {
                     let update = &frame["params"]["update"];
                     let child = update["subagentSessionId"].as_str();
                     match update["sessionUpdate"].as_str() {
+                        Some("config_option_update")
+                            if session == self.session_id && update["configOptions"].is_array() =>
+                        {
+                            self.config_options = update["configOptions"].clone();
+                        }
                         Some("subagent_spawned") => {
                             let child = child.context("Cursor subagent has no session ID")?;
                             children.insert(child.to_owned(), /*v*/ None);
@@ -580,17 +597,28 @@ impl CursorRuntime {
     }
 }
 
-/// Refreshes the private config directory from the user's Cursor settings, read-only.
-/// Native permission and approval settings live there; login and other native resources
-/// do not, so they stay shared without copying credentials.
-fn thought_level_options(config_options: &Value) -> impl Iterator<Item = &Value> {
+fn reasoning_options(config_options: &Value) -> impl Iterator<Item = &Value> {
     config_options
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|option| option["category"] == "thought_level")
+        .filter(|option| {
+            option["category"] == "thought_level"
+                && ["minimal", "low", "medium", "high", "xhigh", "max"]
+                    .into_iter()
+                    .any(|effort| advertises_effort(option, effort))
+        })
 }
 
+fn advertises_effort(option: &Value, effort: &str) -> bool {
+    option["options"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|value| value["value"] == effort)
+}
+
+/// Refreshes the private config directory from the user's Cursor settings.
 fn copy_user_config(config_dir: &std::path::Path) -> Result<()> {
     // Match Cursor's precedence: a variable counts only when it is not blank.
     let variable = |name| {

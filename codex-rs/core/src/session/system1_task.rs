@@ -202,5 +202,6 @@ pub(super) async fn run_decision(
     if let Some(attempt) = attempt {
         attempt.finish(api, disposition, selected);
     }
-    native_selection.filter(|_| !cancellation.is_cancelled() && !guard.freshness.is_cancelled())
+    // The guarded publication admitted this choice. A later steer cannot undo it.
+    native_selection
 }

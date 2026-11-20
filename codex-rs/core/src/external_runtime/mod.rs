@@ -509,6 +509,7 @@ async fn run_conversation(
                             },
                             model: settings.model_info.slug.clone(),
                             effort: effort.clone(),
+                            cursor_baseline_effort: None,
                             auto_compact_window,
                             cwd: cwd.clone(),
                             session_id: id.clone(),
@@ -714,10 +715,19 @@ async fn run_conversation(
                             RuntimeProcess::Claude(_) => {
                                 &["low", "medium", "high", "xhigh", "max"][..]
                             }
-                            RuntimeProcess::Cursor(process) => {
+                            RuntimeProcess::Cursor(process)
+                                if runtime
+                                    .checkpoint
+                                    .cursor_baseline_effort
+                                    .as_deref()
+                                    .is_some_and(|baseline| {
+                                        process.reasoning_efforts().any(|effort| effort == baseline)
+                                    }) =>
+                            {
                                 cursor_efforts = process.reasoning_efforts().collect::<Vec<_>>();
                                 &cursor_efforts
                             }
+                            RuntimeProcess::Cursor(_) => &[],
                         };
                         *decision_eligible = session.native_system1_eligible(turn, supported);
                         if *decision_eligible
@@ -749,29 +759,49 @@ async fn run_conversation(
                         .as_ref()
                         .map(ToString::to_string)
                         .or_else(|| effort.clone());
+                    let cursor_target = requested
+                        .as_deref()
+                        .or(runtime.checkpoint.cursor_baseline_effort.as_deref());
                     if runtime.checkpoint.effort != requested
                         || (first_prompt && decision_effort.is_some())
+                        || matches!(&runtime.runtime, RuntimeProcess::Cursor(process)
+                        if cursor_target.is_some_and(|target| {
+                            let current = process.current_effort();
+                            (target != "none" || current.is_some()) && Some(target) != current
+                        }))
                     {
-                        match &mut runtime.runtime {
+                        let changed = match &mut runtime.runtime {
                             RuntimeProcess::Claude(process) => {
                                 runtime.checkpoint.in_flight = true;
                                 runtime
                                     .linkage
                                     .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
                                 process.set_effort(requested.as_deref()).await?;
+                                runtime
+                                    .checkpoint
+                                    .effort
+                                    .as_deref()
+                                    .is_some_and(|previous| Some(previous) != requested.as_deref())
                             }
                             RuntimeProcess::Cursor(process) => {
-                                // Cursor has no unset control. Restore the pinned model default
-                                // if the turn did not explicitly select an effort.
-                                let effort = requested.as_deref().or_else(|| {
-                                    settings
-                                        .model_info
-                                        .default_reasoning_level
-                                        .as_ref()
-                                        .map(ReasoningEffort::as_str)
-                                });
-                                process.set_effort(effort).await?;
+                                let previous = process.current_effort();
+                                if previous != cursor_target
+                                    || (first_prompt && decision_effort.is_some())
+                                {
+                                    let target = cursor_target.context(
+                                        "Cursor has no saved baseline effort; start a new chat",
+                                    )?;
+                                    let changed =
+                                        previous.is_some_and(|previous| previous != target);
+                                    process.set_effort(Some(target)).await?;
+                                    changed
+                                } else {
+                                    false
+                                }
                             }
+                        };
+                        if changed && decision_effort.is_some() {
+                            session.record_native_system1_effort_change();
                         }
                         tracing::debug!(runtime_name, effort = ?requested, "Native effort confirmed");
                         runtime.checkpoint.effort = requested;
