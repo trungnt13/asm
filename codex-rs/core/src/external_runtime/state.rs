@@ -15,6 +15,8 @@ pub(super) struct Checkpoint {
     pub(super) format_version: u8,
     pub(super) model: String,
     pub(super) effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) cursor_baseline_effort: Option<String>,
     #[serde(default)]
     pub(super) auto_compact_window: Option<i64>,
     pub(super) cwd: PathBuf,
@@ -253,6 +255,9 @@ impl ExternalSession {
                 bridge_directory: bridge.map(|bridge| bridge.directory().to_owned()),
             })
             .await?;
+            if checkpoint.cursor_baseline_effort.is_none() {
+                checkpoint.cursor_baseline_effort = runtime.baseline_effort().map(str::to_owned);
+            }
             // Cursor assigns new session IDs; link before the first prompt is submitted.
             checkpoint.session_id = runtime.session_id().to_owned();
             return Ok(RuntimeProcess::Cursor(Box::new(runtime)));

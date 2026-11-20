@@ -37,6 +37,7 @@ pub(super) enum DecisionTarget {
         expected: Arc<ResolvedStepSettings>,
         task_done: Arc<Notify>,
         generation: u64,
+        native: bool,
     },
 }
 
@@ -53,7 +54,7 @@ pub(super) async fn run_decision(
     guard: System1DecisionGuard,
     target: DecisionTarget,
     mut attempt: Option<DecisionAttempt>,
-) {
+) -> Option<ReasoningEffort> {
     let span = tracing::Span::current();
     let (session, generation) = match &target {
         DecisionTarget::Warmup {
@@ -141,15 +142,14 @@ pub(super) async fn run_decision(
                 );
                 match &target {
                     DecisionTarget::Warmup { .. } => (DecisionApiOutcome::Success, DecisionDisposition::Warmup, effort, None),
-                    DecisionTarget::System1 { turn, expected, task_done, .. } => {
+                    DecisionTarget::System1 { turn, expected, task_done, native, .. } => {
                         if let (Some(session), Some(turn), Some(effort)) = (session.upgrade(), turn.upgrade(), effort) {
                             let unchanged = expected.effective_reasoning_effort().as_ref() == Some(&effort);
                             let outcome = session.apply_system1_turn_settings(
                                 &turn, expected, task_done, &guard, effort.clone(),
                             ).await;
-                            tracing::debug!(%effort, applied = outcome == TurnSettingsUpdateOutcome::Applied,
-                                latency_ms = started.elapsed().as_millis(), "System1 decision");
                             let (disposition, error) = match outcome {
+                                TurnSettingsUpdateOutcome::Applied if *native => (DecisionDisposition::Selected, None),
                                 TurnSettingsUpdateOutcome::Applied => (if unchanged { DecisionDisposition::Unchanged } else { DecisionDisposition::Applied }, None),
                                 TurnSettingsUpdateOutcome::Rejected { .. } => (DecisionDisposition::Rejected, Some(System1Error::Rejected)),
                                 TurnSettingsUpdateOutcome::TargetUnavailable => (DecisionDisposition::TargetUnavailable,
@@ -166,7 +166,10 @@ pub(super) async fn run_decision(
     };
     let error = error.filter(|_| !cancellation.is_cancelled() && !guard.freshness.is_cancelled());
     if matches!(target, DecisionTarget::System1 { .. })
-        && !matches!(api, DecisionApiOutcome::InvalidImage | DecisionApiOutcome::ImagePreparationFailed)
+        && !matches!(
+            api,
+            DecisionApiOutcome::InvalidImage | DecisionApiOutcome::ImagePreparationFailed
+        )
         && let Some(session) = session.upgrade()
     {
         session.record_system1_decision(disposition, error, started.elapsed());
@@ -193,7 +196,12 @@ pub(super) async fn run_decision(
             )
             .await;
     }
+    let native_selection = matches!(disposition, DecisionDisposition::Selected)
+        .then(|| selected.clone())
+        .flatten();
     if let Some(attempt) = attempt {
         attempt.finish(api, disposition, selected);
     }
+    // The guarded publication admitted this choice. A later steer cannot undo it.
+    native_selection
 }

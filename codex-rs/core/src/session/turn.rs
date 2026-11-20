@@ -490,12 +490,14 @@ pub(crate) async fn run_turn(
     let first_step_context = if input.is_empty() {
         first_step_context
     } else {
-        sess.adapt_reasoning(
-            &turn_context,
-            codex_config::System1Trigger::TurnStart,
-            &cancellation_token,
-        )
-        .await;
+        let _ = sess
+            .adapt_reasoning(
+                &turn_context,
+                codex_config::System1Trigger::TurnStart,
+                &cancellation_token,
+                /*native_efforts*/ None,
+            )
+            .await;
         // A settings update may have landed during the hooks, before System1 ran.
         let captured = first_step_context
             .settings_before_tier_inheritance
@@ -662,21 +664,23 @@ pub(crate) async fn run_turn(
         .await;
 
         if next_step_context.is_none() || !pending_input.is_empty() {
-            sess.adapt_reasoning(
-                &turn_context,
-                if input.is_empty()
-                    && turn_context
-                        .extension_data
-                        .get::<super::system1::System1ModelStepStarted>()
-                        .is_none()
-                {
-                    codex_config::System1Trigger::TurnStart
-                } else {
-                    codex_config::System1Trigger::ToolResult
-                },
-                &cancellation_token,
-            )
-            .await;
+            let _ = sess
+                .adapt_reasoning(
+                    &turn_context,
+                    if input.is_empty()
+                        && turn_context
+                            .extension_data
+                            .get::<super::system1::System1ModelStepStarted>()
+                            .is_none()
+                    {
+                        codex_config::System1Trigger::TurnStart
+                    } else {
+                        codex_config::System1Trigger::ToolResult
+                    },
+                    &cancellation_token,
+                    /*native_efforts*/ None,
+                )
+                .await;
         }
 
         // Capture once so context, advertised tools, and tool calls share one request view.
