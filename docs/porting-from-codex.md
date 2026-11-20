@@ -70,7 +70,7 @@ After approved integration, reuse checks and the verified binary pair only with 
 
 Before real-provider validation, use [asm-live-check](../.agents/skills/asm-live-check/SKILL.md). Follow its isolation, evidence, and cleanup procedure.
 
-- Every PR needs a successful real-provider live check before review or merge readiness. Select the smallest changed-behavior/fork-interaction scenario; state the expected result. Builds, offline checks, and mocks are not substitutes. Missing credentials, budget, or compatible setup block readiness. Do not replay unrelated upstream features or whole sessions. Release smoke remains separately required.
+- Except for [local-only upstream rebases](#local-validation-for-upstream-rebases), every PR needs a successful real-provider live check before readiness. Select the smallest changed-behavior/fork-interaction scenario; state the expected result. Builds, offline checks, and mocks are not substitutes when a live check is required. Missing credentials, budget, or compatible setup block readiness. Do not replay unrelated upstream features or whole sessions. Release smoke remains separately required.
 - Always choose the cheapest available model that supports the behavior being validated, using current prices and including required helper calls. Do not inherit the interactive model merely because it is configured. Use the lowest adequate reasoning effort and standard speed; apply overrides only in isolated validation state, never personal defaults. Record the model, selection evidence, and budget before calling. If the behavior requires a more expensive model, ask before making that exception.
 - Before calls, set request/turn counts and a time limit. Minimize input/requested output; set supported token limits. Stop at proof or first failure, then inspect evidence. Do not default to broad replays, model matrices, benchmarks, or repeated cold builds.
 - Use existing sign-in only as authorized. No separate spend approval is needed when the conservative estimate for the entire live check is strictly below US$1.00. Record the estimate before making calls, using current provider pricing and the planned request and token limits, including required runtime helper calls. If the cost cannot be estimated or the estimate is US$1.00 or more, get approval for the endpoint, model, request/token limits, and spend cap before making calls.
@@ -116,6 +116,16 @@ The PR owner must complete cleanup after an authorized merge, before reporting i
 ## Upstream sync
 
 Before syncs or targeted ports, use [asm-upstream-sync](../.agents/skills/asm-upstream-sync/SKILL.md). Follow its conflict-reuse and evidence procedure.
+
+### Local validation for upstream rebases
+
+- Run only local checks that cover changed build inputs, conflict resolutions, or upstream changes that affect ASM.
+- When needed, build the affected binaries. Run required generators. Use focused tests, not whole suites.
+- If the base moves, repeat only the checks whose inputs changed. Reuse matching evidence from earlier checks.
+- Put `[skip ci]` in each new rebase PR head commit. Do not start, retry, or wait for hosted CI unless the owner asks.
+- Do not run real-provider inference by default. Keep the read-only model catalog lookup.
+- If local checks are insufficient, report the gap. Ask before you run more checks.
+- Keep applicable compatibility checks local. Do not bypass branch protection or report skipped checks as passing. Release validation is unchanged.
 
 ### Built-in instruction changes
 
