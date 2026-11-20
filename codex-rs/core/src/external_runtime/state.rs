@@ -138,6 +138,7 @@ enum TemporaryFork {
 }
 
 pub(crate) struct ExternalSession {
+    pub(super) initial_context: Vec<serde_json::Value>,
     pub(super) runtime: RuntimeProcess,
     pub(super) foreground_idle: bool,
     pub(super) page_context: codex_config::PageContextPolicy,
@@ -232,6 +233,7 @@ impl ExternalSession {
         checkpoint: &mut Checkpoint,
         checkpoint_path: &std::path::Path,
         session: SessionStart,
+        linkage: &Linkage,
     ) -> anyhow::Result<RuntimeProcess> {
         use anyhow::Context;
         let (runtime, model) =
@@ -268,7 +270,10 @@ impl ExternalSession {
             model.to_owned()
         };
         let session = match session {
-            SessionStart::New { id } => codex_external_runtime::ClaudeSession::New { id },
+            SessionStart::New { id } => match linkage {
+                Linkage::Saved => codex_external_runtime::ClaudeSession::New { id },
+                Linkage::Temporary => codex_external_runtime::ClaudeSession::NewTemporary { id },
+            },
             SessionStart::Resume { id } => codex_external_runtime::ClaudeSession::Resume { id },
             SessionStart::Fork { parent, at, id } => {
                 codex_external_runtime::ClaudeSession::Fork { parent, at, id }

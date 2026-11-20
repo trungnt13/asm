@@ -192,6 +192,10 @@ pub struct CodexHarnessMetadata {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub inherited_user_message: bool,
 
+    /// Portable reference history, not a previously delivered native input.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub portable_handoff: bool,
+
     /// Sender context captured by the host when this task message was accepted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender_user_messages: Option<Box<SenderUserMessages>>,
@@ -561,7 +565,7 @@ mod rollout_payload;
 pub use guardian_history::GuardianHistoryCheckpoint;
 pub use guardian_history::GuardianRetainedOmissions;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct CompactedItem {
     pub message: String,
     pub replacement_history: Option<Vec<ResponseItemEnvelope>>,
@@ -772,7 +776,7 @@ impl InitialHistory {
             .and_then(|meta| meta.parent_thread_id)
     }
 
-    fn get_session_meta(&self) -> Option<&SessionMeta> {
+    pub fn get_session_meta(&self) -> Option<&SessionMeta> {
         match self {
             Self::New | Self::Cleared => None,
             Self::Resumed(resumed) => resumed.history.iter().find_map(|item| match item {

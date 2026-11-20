@@ -66,11 +66,12 @@ impl ChatWidget {
         &mut self,
         model: String,
         effort: Option<ReasoningEffortConfig>,
+        service_tier: Option<String>,
     ) {
         let thread_id = self.thread_id();
         self.bottom_pane.show_selection_view(SelectionViewParams {
             title: Some("Start a new session?".to_string()),
-            subtitle: Some(format!("Use {model}. The current session stays saved; conversation history is not copied. The selected model uses its configured provider or native runtime.")),
+            subtitle: Some(format!("Use {model} with its configured provider or native runtime. The current session stays saved, and any available chat history is carried into the new session.")),
             items: vec![SelectionItem {
                 name: "Start new session".to_string(),
                 dismiss_on_select: true,
@@ -78,12 +79,19 @@ impl ChatWidget {
                     thread_id,
                     model: model.clone(),
                     effort: effort.clone(),
+                    service_tier: service_tier.clone(),
                     confirmed: true,
                 }))],
                 ..Default::default()
             }],
             ..SelectionViewParams::picker()
         });
+    }
+
+    pub(crate) fn model_session_has_context(&self) -> bool {
+        self.turn_lifecycle.has_turn_history
+            || self.forked_from.is_some()
+            || self.active_side_conversation
     }
 
     pub(super) fn session_model_selection_action(

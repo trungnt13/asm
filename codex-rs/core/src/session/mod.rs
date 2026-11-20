@@ -612,10 +612,30 @@ pub(crate) const SUBMISSION_CHANNEL_CAPACITY: usize = 512;
 const CYBER_VERIFY_URL: &str = "https://chatgpt.com/cyber";
 const CYBER_SAFETY_URL: &str = "https://developers.openai.com/codex/concepts/cyber-safety";
 
+pub(crate) fn history_thread_settings(
+    history: &InitialHistory,
+) -> Option<&codex_protocol::protocol::ThreadSettingsSnapshot> {
+    let InitialHistory::Resumed(resumed) = history else {
+        return None;
+    };
+    resumed.history.iter().rev().find_map(|item| match item {
+        RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event))
+            if event.thread_id == Some(resumed.conversation_id) =>
+        {
+            Some(&event.thread_settings)
+        }
+        _ => None,
+    })
+}
+
 /// Returns the native runtime recorded in saved history, if any.
 pub(crate) fn history_native_runtime(
     history: &InitialHistory,
 ) -> Option<codex_protocol::openai_models::NativeRuntime> {
+    if let Some(settings) = history_thread_settings(history) {
+        return codex_protocol::openai_models::NativeRuntime::for_model(&settings.model)
+            .map(|(runtime, _)| runtime);
+    }
     history.get_rollout_items().iter().find_map(|item| {
         let model = match item {
             RolloutItem::TurnContext(context) => &context.model,
@@ -960,12 +980,14 @@ impl Session {
             ));
         }
         // Compare concrete runtimes so Claude and Cursor sessions never resume each other.
-        // Claude history forks only into a temporary side, which Claude forks natively.
         let temporary_claude_fork = config.ephemeral
             && native_runtime == Some(codex_protocol::openai_models::NativeRuntime::ClaudeCode)
             && history_native_runtime(&conversation_history) == native_runtime;
         if (matches!(&conversation_history, InitialHistory::Forked(_))
             && !temporary_claude_fork
+            && thread_extension_init
+                .get::<crate::handoff::PortableHistory>()
+                .is_none()
             && (uses_native_runtime || history_native_runtime(&conversation_history).is_some()))
             || (matches!(&conversation_history, InitialHistory::Resumed(_))
                 && history_native_runtime(&conversation_history) != native_runtime)
@@ -2120,7 +2142,12 @@ impl Session {
                         // Ancestor records remain behind history_base; only effective child
                         // settings and boundaries synthesized by snapshot processing are local.
                         rollout_items.drain(..*inherited_item_count);
-                        rollout_items.insert(0, thread_settings_applied);
+                        if matches!(rollout_items.first(), Some(RolloutItem::Compacted(_))) {
+                            // Keep destination identity visible when cold replay starts at the replacement.
+                            rollout_items.push(thread_settings_applied);
+                        } else {
+                            rollout_items.insert(0, thread_settings_applied);
+                        }
                     }
                     ForkPersistence::Copied | ForkPersistence::CopiedDeferred
                         if is_paginated_subagent =>

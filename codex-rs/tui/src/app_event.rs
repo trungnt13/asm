@@ -752,6 +752,7 @@ pub(crate) enum AppEvent {
         thread_id: Option<ThreadId>,
         model: String,
         effort: Option<ReasoningEffort>,
+        service_tier: Option<String>,
         confirmed: bool,
     },
     /// Resolve the /new host before offering choices about the displayed checkout.

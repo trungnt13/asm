@@ -10,6 +10,7 @@ use crate::agent::child_config::select_subagent_service_tier;
 use crate::agent::helper_daybreak;
 use crate::agent::history::load_agent_model_context;
 use crate::agent::history::prepare_forked_history;
+use crate::agent::history::requires_handoff;
 use crate::agent::role::apply_role_to_config;
 use crate::agent::types::AgentMetadata;
 use crate::agent::types::LiveAgent;
@@ -19,6 +20,7 @@ use crate::agents_md_manager::SessionInstructions;
 use crate::codex_thread::CodexThread;
 use crate::codex_thread::ThreadConfigSnapshot;
 use crate::config::PermissionProfileSnapshot;
+use crate::handoff::PortableHistory;
 use crate::thread_manager::StartThreadOptions;
 use codex_features::Feature;
 use codex_protocol::config_types::WebSearchMode;
@@ -608,6 +610,28 @@ impl LocalAgentControl {
         } else {
             codex_protocol::RequestCountry::UNKNOWN
         };
+        let portable_history = if let Some(source) = initial_history.forked_from_id()
+            && Some(source) == parent_thread_id
+        {
+            let portable = if let Some(parent) = &inherited_parent {
+                let settings = parent.config_snapshot().await;
+                requires_handoff(Some(&settings.model), &settings.model_provider_id, &config)
+            } else {
+                state
+                    .read_stored_thread(ReadThreadParams {
+                        thread_id: source,
+                        include_archived: true,
+                        include_history: false,
+                    })
+                    .await
+                    .map_or(true, |parent| {
+                        requires_handoff(parent.model.as_deref(), &parent.model_provider, &config)
+                    })
+            };
+            portable.then_some(PortableHistory)
+        } else {
+            None
+        };
         let prompt_cache_key = inherited_parent.as_ref().map(|parent| {
             parent
                 .session
@@ -668,6 +692,7 @@ impl LocalAgentControl {
                 request_country,
                 prompt_cache_key,
                 initial_history,
+                portable_history,
                 agent_control: self.clone(),
                 session_source,
                 parent_thread_id,
@@ -939,7 +964,7 @@ impl LocalAgentControl {
         let fork_context = match (session_source, options.fork_mode.as_ref()) {
             (Some(session_source), Some(_)) => {
                 let fork_context_started_at = Instant::now();
-                let (initial_history, history_mode) = prepare_forked_history(
+                let (initial_history, history_mode, portable) = prepare_forked_history(
                     &state,
                     &session_source,
                     &options,
@@ -950,6 +975,9 @@ impl LocalAgentControl {
                 .map_err(|err| err.with_agent_context(AgentErrorContext::ForkHistory))?;
                 start_options.initial_history = initial_history;
                 start_options.history_mode = history_mode;
+                if let Some(portable) = portable {
+                    start_options.thread_extension_init.insert(portable);
+                }
                 Some(fork_context_started_at.elapsed())
             }
             (Some(_), None) => {

@@ -6,6 +6,9 @@ use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::input_text;
+use codex_protocol::protocol::ThreadSource;
+
+pub const SIDE_CHAT_SOURCE: &str = ThreadSource::TUI_SIDE_CHAT_SOURCE;
 
 pub const SIDE_BOUNDARY_TITLE: &str = "Side conversation boundary.";
 

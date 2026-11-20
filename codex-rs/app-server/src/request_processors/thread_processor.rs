@@ -1537,7 +1537,7 @@ impl ThreadRequestProcessor {
         selected_capability_roots: Vec<SelectedCapabilityRoot>,
         history_mode: Option<ThreadHistoryMode>,
         session_start_source: Option<codex_app_server_protocol::ThreadStartSource>,
-        thread_source: Option<codex_protocol::protocol::ThreadSource>,
+        mut thread_source: Option<codex_protocol::protocol::ThreadSource>,
         project_id: Option<String>,
         daybreak_enabled: Option<bool>,
         daybreak_program_propagation_enrolled: Option<bool>,
@@ -1685,6 +1685,7 @@ impl ThreadRequestProcessor {
         let mut side_settings_initialization = super::desktop_side::apply_defaults(
             side_instructions.as_deref(),
             &mut config,
+            &mut thread_source,
             super::desktop_side::SideOrigin::Start,
         );
         if let Some(initialization) = side_settings_initialization.as_mut()
@@ -5982,7 +5983,7 @@ impl ThreadRequestProcessor {
 
         let fallback_model_provider = options.config.model_provider_id.clone();
         let parent_trace = self.request_trace_context(&request_id).await;
-        let thread_source = thread_source.map(Into::into);
+        let mut thread_source = thread_source.map(Into::into);
 
         let mut history_items = if prepared_fork.is_some() {
             source_history_items
@@ -6063,6 +6064,7 @@ impl ThreadRequestProcessor {
         let side_settings_initialization = super::desktop_side::apply_defaults(
             side_instructions.as_deref(),
             &mut options.config,
+            &mut thread_source,
             super::desktop_side::SideOrigin::Fork,
         );
         let fork_options = StartThreadOptions {

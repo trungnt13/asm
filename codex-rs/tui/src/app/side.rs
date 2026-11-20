@@ -6,6 +6,7 @@ use super::*;
 use crate::app_event::SideStartMode;
 use crate::app_server_session::SideChatStorage;
 use crate::chatwidget::InterruptedTurnNoticeMode;
+use codex_protocol::openai_models::NativeRuntime;
 
 const SIDE_RENAME_BLOCK_MESSAGE: &str = "Side conversations are ephemeral and cannot be renamed.";
 const SIDE_MAIN_THREAD_UNAVAILABLE_MESSAGE: &str =
@@ -877,8 +878,9 @@ impl App {
 
         let storage = if workspace
             && app_server.can_list_saved_side_chats(parent_thread_id)
-            && !codex_protocol::openai_models::is_native_runtime_model(
-                self.chat_widget.current_model(),
+            && !matches!(
+                NativeRuntime::for_model(self.chat_widget.current_model()),
+                Some((NativeRuntime::CursorAgent, _))
             ) {
             SideChatStorage::Attached
         } else {

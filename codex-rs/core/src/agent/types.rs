@@ -39,6 +39,7 @@ pub struct SpawnAgentOptions {
     pub request_country: codex_protocol::RequestCountry,
     pub fork_parent_spawn_call_id: Option<String>,
     pub fork_mode: Option<SpawnAgentForkMode>,
+    pub native_fork_cut: Option<codex_history::InitialHistory>,
     pub parent_thread_id: Option<ThreadId>,
     pub parent_turn_id: Option<String>,
     /// Attribute delegated usage to the turn that initiated it.

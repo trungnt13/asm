@@ -22,6 +22,7 @@ pub use fragment::RenderedFragment;
 
 pub use recap_prompt::RecapPrompt;
 pub use side_conversation::SIDE_BOUNDARY_TITLE;
+pub use side_conversation::SIDE_CHAT_SOURCE;
 pub use side_conversation::SideConversationPolicy;
 pub use side_conversation::side_conversation_boundary;
 

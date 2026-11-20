@@ -57,6 +57,8 @@ use codex_attachment_store::AttachmentStore;
 use codex_attachment_store::InlineAttachmentStore;
 use codex_code_mode::CodeModeSessionProvider;
 use codex_code_mode::DisabledCodeModeSessionProvider;
+use codex_context_fragments::SIDE_CHAT_SOURCE;
+use codex_context_fragments::SideConversationPolicy;
 use codex_core_plugins::PluginsManager;
 use codex_exec_server::EnvironmentManager;
 use codex_execpolicy::Policy;
@@ -600,6 +602,7 @@ pub(crate) struct ResumeThreadWithHistoryOptions {
     pub(crate) inherited_instructions: Option<SessionInstructions>,
     pub(crate) inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
     pub(crate) client_mcp_extensions: Option<ClientMcpExtensions>,
+    pub(crate) portable_history: Option<crate::handoff::PortableHistory>,
 }
 
 /// Shared, `Arc`-owned state for [`ThreadManager`]. This `Arc` is required to have a single
@@ -1967,52 +1970,74 @@ impl ThreadManager {
             InitialHistory::Forked(_) => history.forked_from_id(),
             InitialHistory::New | InitialHistory::Cleared => None,
         };
-        // Native history is forked only by Claude itself, into a temporary unsaved side session.
-        let native_fork = match crate::session::history_native_runtime(&history) {
-            None => None,
-            Some(NativeRuntime::ClaudeCode)
-                if options.config.ephemeral && matches!(snapshot, ForkSnapshot::Interrupted) =>
-            {
-                let source = match source_thread_id {
-                    Some(source_thread_id) => self.get_thread(source_thread_id).await.ok(),
-                    None => None,
-                };
-                let Some(source) = source else {
-                    return Err(CodexErr::InvalidRequest(
-                        "Claude Code side conversations need the loaded main thread".to_string(),
-                    ));
-                };
-                options.config.multi_agent_v2.disable_native_tools = true;
-                options
-                    .config
-                    .features
-                    .disable(Feature::AgentMessageBoard)
-                    .map_err(|error| CodexErr::InvalidRequest(error.to_string()))?;
-                options
-                    .config
-                    .features
-                    .disable(Feature::AgentMessageBoardMcp)
-                    .map_err(|error| CodexErr::InvalidRequest(error.to_string()))?;
-                options
-                    .thread_extension_init
-                    .remove::<codex_message_board::LocalBoardConnection>();
-                // Closing a side unsubscribes it; unload at once so its native process ends too.
-                options.config.thread_unload_delay = std::time::Duration::ZERO;
-                Some(
-                    crate::external_runtime::prepare_temporary_fork(
-                        &source.session,
-                        &options.config.codex_home,
-                        options.config.model.as_deref(),
-                        history.get_rollout_items(),
+        let source_settings = crate::session::history_thread_settings(&history);
+        let source_provider = source_settings
+            .map(|settings| settings.model_provider_id.as_str())
+            .or_else(|| {
+                history
+                    .get_session_meta()
+                    .filter(|meta| Some(meta.id) == source_thread_id)
+                    .and_then(|meta| meta.model_provider.as_deref())
+            });
+        let native_source = crate::session::history_native_runtime(&history);
+        let native_target = options
+            .config
+            .model
+            .as_deref()
+            .and_then(NativeRuntime::for_model)
+            .map(|(runtime, _)| runtime);
+        let side = matches!(options.thread_source.as_ref(), Some(ThreadSource::Feature(source))
+            if matches!(source.as_str(), SIDE_CHAT_SOURCE | ThreadSource::DESKTOP_SIDE_CHAT_SOURCE));
+        let native_side = side
+            && options.config.ephemeral
+            && native_source == Some(NativeRuntime::ClaudeCode)
+            && native_source == native_target
+            && source_settings.is_none_or(|source| {
+                options.config.model.as_deref() == Some(source.model.as_str())
+            })
+            && matches!(snapshot, ForkSnapshot::Interrupted)
+            && !snapshot_turn_state(&history).ends_mid_turn;
+        let portable = !native_side
+            && (native_source.is_some()
+                || native_target.is_some()
+                || source_provider
+                    .is_some_and(|provider| provider != options.config.model_provider_id));
+        if portable
+            && options
+                .thread_extension_init
+                .get::<InheritedSessionId>()
+                .is_some()
+        {
+            return Err(CodexErr::InvalidRequest(
+                "A prediction fork cannot change its inherited runtime context".to_owned(),
+            ));
+        }
+        if native_target == Some(NativeRuntime::CursorAgent)
+            && (side || options.config.ephemeral)
+        {
+            return Err(CodexErr::InvalidRequest(
+                "Cursor does not support this Side conversation".to_owned(),
+            ));
+        }
+        let native_fork = if native_side {
+            let source = self
+                .get_thread(source_thread_id.ok_or_else(|| {
+                    CodexErr::InvalidRequest(
+                        "Claude Code side conversations need the loaded main thread".to_owned(),
                     )
-                    .await?,
+                })?)
+                .await?;
+            Some(
+                crate::external_runtime::prepare_temporary_fork(
+                    &source.session,
+                    &options.config.codex_home,
+                    options.config.model.as_deref(),
+                    history.get_rollout_items(),
                 )
-            }
-            Some(NativeRuntime::ClaudeCode | NativeRuntime::CursorAgent) => {
-                return Err(CodexErr::InvalidRequest(
-                    "Native runtime history can only be forked whole into a temporary Claude Code side conversation; start a fresh thread".to_string(),
-                ));
-            }
+                .await?,
+            )
+        } else {
+            None
         };
         // Capture the live source before later startup work can unload it. Keep
         // the fork's own providers, not the source's task-bound callback.
@@ -2024,7 +2049,7 @@ impl ThreadManager {
                     .as_ref()
                     .unwrap_or(&self.state.session_source),
                 /*parent_thread_id*/ None,
-                source_thread_id,
+                source_thread_id.filter(|_| !portable),
                 options.thread_instructions_provider.clone(),
             )
             .await;
@@ -2042,7 +2067,43 @@ impl ThreadManager {
             &options.config,
             multi_agent_version,
         );
+        let source_history_mode = history.get_history_mode(ThreadHistoryMode::Legacy);
         options.initial_history = fork_history_from_snapshot(snapshot, history, interrupted_marker);
+        if portable {
+            options.history_mode = Some(source_history_mode);
+            let projected = crate::handoff::project(
+                &options.initial_history,
+                options.config.handoff.max_history_bytes.get(),
+                |_| true,
+            )?;
+            if let ForkPersistence::Referenced {
+                inherited_item_count,
+                ..
+            } = &mut fork_persistence
+            {
+                *inherited_item_count = 0;
+                options.history_mode = Some(ThreadHistoryMode::Paginated);
+                options.initial_history = InitialHistory::Forked(vec![RolloutItem::Compacted(
+                    Box::new(codex_history::CompactedItem {
+                        replacement_history: Some(projected),
+                        window_number: Some(0),
+                        ..Default::default()
+                    }),
+                )]);
+            } else {
+                let items = projected.into_iter().flat_map(|envelope| {
+                    let events = crate::event_mapping::parse_turn_item(&envelope.item)
+                        .map(|item| item.as_legacy_events(/*show_raw_agent_reasoning*/ false))
+                        .unwrap_or_default();
+                    std::iter::once(RolloutItem::ResponseItem(envelope))
+                        .chain(events.into_iter().map(RolloutItem::EventMsg))
+                });
+                options.initial_history = InitialHistory::Forked(items.collect());
+            }
+            options
+                .thread_extension_init
+                .insert(crate::handoff::PortableHistory);
+        }
         if options
             .thread_extension_init
             .get::<InheritedSessionId>()
@@ -2591,13 +2652,14 @@ impl ThreadManagerState {
             inherited_instructions,
             inherited_exec_policy,
             client_mcp_extensions,
+            portable_history,
         } = options;
         let (parent_client_mcp_extensions, inherited_prompt_cache_key) =
             self.inherited_child_settings(parent_thread_id).await;
         let client_mcp_extensions = client_mcp_extensions.unwrap_or(parent_client_mcp_extensions);
         let prompt_cache_key = prompt_cache_key.unwrap_or(inherited_prompt_cache_key);
         let thread_source = initial_history.get_resumed_thread_source();
-        let options = StartThreadOptions {
+        let mut options = StartThreadOptions {
             request_country,
             prompt_cache_key,
             initial_history,
@@ -2612,6 +2674,9 @@ impl ThreadManagerState {
             client_mcp_extensions,
             ..StartThreadOptions::new(config)
         };
+        if let Some(history) = portable_history {
+            options.thread_extension_init.insert(history);
+        }
         let mut request =
             ThreadSpawnRequest::new(options, Arc::clone(&self.auth_manager), agent_control);
         request.parent_thread_id = parent_thread_id;
@@ -2736,7 +2801,7 @@ impl ThreadManagerState {
             mut config,
             prevent_daybreak_program_propagation_enrollment,
             request_country,
-            prompt_cache_key,
+            mut prompt_cache_key,
             thread_instructions_provider,
             allow_provider_model_fallback,
             initial_history,
@@ -2760,6 +2825,40 @@ impl ThreadManagerState {
         } = options;
         if prevent_daybreak_program_propagation_enrollment {
             thread_extension_init.insert(crate::agent::helper_daybreak::PreventRootEnrollment);
+        }
+        if matches!(thread_source.as_ref(), Some(ThreadSource::Feature(source))
+            if matches!(source.as_str(), SIDE_CHAT_SOURCE | ThreadSource::DESKTOP_SIDE_CHAT_SOURCE))
+            && config
+                .model
+                .as_deref()
+                .and_then(NativeRuntime::for_model)
+                .is_some_and(|(runtime, _)| runtime == NativeRuntime::ClaudeCode)
+        {
+            let policy = if config.ephemeral {
+                SideConversationPolicy::Temporary
+            } else {
+                SideConversationPolicy::Attached
+            };
+            let policy_text = policy.instructions(/*existing*/ None);
+            if !config
+                .developer_instructions
+                .as_deref()
+                .is_some_and(|existing| existing.contains(&policy_text))
+            {
+                config.developer_instructions =
+                    Some(policy.instructions(config.developer_instructions.as_deref()));
+            }
+            config.multi_agent_v2.disable_native_tools = true;
+            for feature in [Feature::AgentMessageBoard, Feature::AgentMessageBoardMcp] {
+                config
+                    .features
+                    .disable(feature)
+                    .map_err(|error| CodexErr::InvalidRequest(error.to_string()))?;
+            }
+            thread_extension_init.remove::<codex_message_board::LocalBoardConnection>();
+            if config.ephemeral {
+                config.thread_unload_delay = std::time::Duration::ZERO;
+            }
         }
         if resume_preparation.is_some()
             && (config.ephemeral || !matches!(&initial_history, InitialHistory::Resumed(_)))
@@ -2933,7 +3032,29 @@ impl ThreadManagerState {
                 .restore_v2_agent_metadata(&config, resumed.conversation_id)
                 .await;
         }
+        let portable = thread_extension_init
+            .get::<crate::handoff::PortableHistory>()
+            .is_some();
+        if portable {
+            prompt_cache_key = PromptCacheKey::default();
+            if session_source.is_non_root_agent() {
+                config.base_instructions = None;
+                config.base_instructions_provenance = None;
+                config.developer_instructions =
+                    config.role_developer_instructions.clone().or_else(|| {
+                        config
+                            .multi_agent_v2
+                            .subagent_developer_instructions
+                            .clone()
+                    });
+            }
+        }
         let mut instructions = match inherited_instructions {
+            _ if portable => SessionInstructions {
+                user_provider: Some(Arc::clone(&self.user_instructions_provider)),
+                thread_provider: thread_instructions_provider,
+                ..Default::default()
+            },
             Some(instructions) => instructions,
             None if isolation == SessionIsolation::Isolated => SessionInstructions::default(),
             None => {

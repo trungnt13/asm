@@ -1,3 +1,5 @@
+use super::active_handoff::HandoffCapture;
+use super::active_handoff::HandoffCut;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use codex_protocol::items::AgentMessageContent;
@@ -18,6 +20,8 @@ pub(super) struct MessageStream {
     pub(super) activity: super::activity::ActivityStream,
     pub(super) id: Option<String>,
     pub(super) text: String,
+    handoff_tools: HashMap<String, String>,
+    pub(super) submitted_steering_count: usize,
     pub(super) started: bool,
     phase: Option<MessagePhase>,
     generation_started_at: Option<Instant>,
@@ -130,13 +134,28 @@ pub(super) async fn record_assistant_frame(
             })
         })();
     }
+    let handoff_capture = turn.extension_data.get::<HandoffCapture>();
     if frame["type"] == "stream_event" {
         let event = &frame["event"];
         if event["type"] == "message_start" {
+            if let Some(capture) = &handoff_capture {
+                capture.send_replace(None);
+            }
             stream.id = event["message"]["id"].as_str().map(str::to_owned);
             stream.text.clear();
+            stream.handoff_tools.clear();
             stream.started = false;
             return Ok(None);
+        }
+        if handoff_capture.is_some()
+            && stream.id.is_some()
+            && event["type"] == "content_block_start"
+            && event["content_block"]["type"] == "tool_use"
+            && let Some(id) = event["content_block"]["id"].as_str()
+            && let Some(name) = event["content_block"]["name"].as_str()
+            && name.starts_with("mcp__asm__")
+        {
+            stream.handoff_tools.insert(id.to_owned(), name.to_owned());
         }
         if event["delta"]["type"] == "text_delta"
             && let (Some(id), Some(delta)) = (stream.id.as_ref(), event["delta"]["text"].as_str())
@@ -182,7 +201,20 @@ pub(super) async fn record_assistant_frame(
         // The CLI emits assistant frames per block, before message_stop; deltas own that text.
         return Ok(None);
     }
-    complete_message(session, turn, stream).await
+    let publish_handoff = frame["type"] == "stream_event" && stream.id.is_some();
+    let text = complete_message(session, turn, stream).await?;
+    if publish_handoff
+        && !stream.handoff_tools.is_empty()
+        // A replay echo may show queuing, not consumption by this assistant request.
+        && stream.submitted_steering_count == 0
+        && let Some(capture) = handoff_capture
+    {
+        capture.send_replace(Some(HandoffCut {
+            tools: std::mem::take(&mut stream.handoff_tools),
+            history: session.clone_history().await,
+        }));
+    }
+    Ok(text)
 }
 
 /// Records the streamed assistant message, if any, as one completed transcript item.

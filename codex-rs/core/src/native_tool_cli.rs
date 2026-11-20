@@ -54,7 +54,11 @@ async fn call_native_tool() -> anyhow::Result<Value> {
                 let name = arguments
                     .get(/*index*/ 1)
                     .context("Missing ASM tool name")?;
-                ("/call", json!({"name":name,"arguments":body}))
+                let id = arguments.get(/*index*/ 2);
+                (
+                    "/call",
+                    json!({"name":name,"arguments":body,"nativeToolUseId":id}),
+                )
             }
         }
         _ => bail!("Usage: --asm-native-tools list | call <name> (JSON arguments on stdin)"),

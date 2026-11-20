@@ -26,6 +26,7 @@ use crate::tools::handlers::multi_agents_common::record_collab_spawn_failure;
 use codex_config::config_toml::AgentRoleForkTurns;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::AgentPath;
+use codex_protocol::error::AgentErrorContext;
 use codex_protocol::error::CodexErr;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::MultiAgentVersion;
@@ -220,6 +221,18 @@ pub(crate) async fn prepare(
     .await
     .map_err(ThreadSpawnError::Preparation)?;
     let config = prepared.config;
+    let native_fork_cut = if fork_mode.is_some()
+        && turn.multi_agent_version == MultiAgentVersion::V2
+        && crate::external_runtime::is_native_model(&step_context.settings.model_info.slug)
+    {
+        Some(
+            crate::external_runtime::active_handoff_history(step_context)
+                .await
+                .map_err(|err| err.with_agent_context(AgentErrorContext::ForkHistory))?,
+        )
+    } else {
+        None
+    };
     let task_name = turn
         .session_source
         .get_agent_path()
@@ -267,6 +280,7 @@ pub(crate) async fn prepare(
                 request_country: step_context.settings.request_country().clone(),
                 fork_parent_spawn_call_id: fork_mode.as_ref().map(|_| call_id.to_string()),
                 fork_mode,
+                native_fork_cut,
                 parent_thread_id: Some(session.thread_id),
                 parent_turn_id: Some(turn.sub_id.clone()),
                 root_turn_id: turn.turn_metadata_state.root_turn_id(),

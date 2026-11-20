@@ -32,6 +32,7 @@ use codex_config::apply_default_gcp_auth;
 use codex_config::config_toml::CircuitBreakAction;
 use codex_config::config_toml::ConfigToml;
 use codex_config::config_toml::DEFAULT_PROJECT_DOC_MAX_BYTES;
+use codex_config::config_toml::HandoffConfig;
 use codex_config::config_toml::ProjectConfig;
 use codex_config::config_toml::RealtimeAudioConfig;
 use codex_config::config_toml::RealtimeConfig;
@@ -672,6 +673,7 @@ pub struct Config {
     /// Retry model overloads until recovery or cancellation.
     pub continue_when_model_at_capacity: bool,
     pub native_runtimes: codex_config::NativeRuntimesConfig,
+    pub handoff: HandoffConfig,
     /// Default Daybreak preference for new threads and non-interactive turns.
     pub daybreak_enabled: bool,
 
@@ -5164,6 +5166,7 @@ impl Config {
             load_external_models_json: cfg.load_external_models_json.unwrap_or(true),
             continue_when_model_at_capacity: cfg.continue_when_model_at_capacity.unwrap_or(false),
             native_runtimes: cfg.native_runtimes,
+            handoff: cfg.handoff,
             model_verbosity: cfg.model_verbosity,
             chatgpt_base_url_is_explicit,
             chatgpt_base_url: cfg

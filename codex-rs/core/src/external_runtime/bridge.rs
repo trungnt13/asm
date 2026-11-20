@@ -38,6 +38,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use super::active_handoff::HandoffInvocation;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::tools::context::ToolPayload;
@@ -640,6 +641,22 @@ async fn invoke_message_tool(
         .and_then(Value::as_str)
         .context("Missing tool name")?
         .to_owned();
+    let handoff_lease = if managed
+        && let Some(tool_use_id) = params["nativeToolUseId"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+    {
+        let active = turn.cancel.child_token();
+        let lease = active.clone().drop_guard();
+        step.extension_data.insert(HandoffInvocation {
+            tool_use_id: tool_use_id.to_owned(),
+            tool_name: format!("mcp__asm__{name}"),
+            active,
+        });
+        Some(lease)
+    } else {
+        None
+    };
     if name == "direct_tool" && step.settings.model_info.slug.starts_with("claude-code/") {
         let direct = tools.iter().filter(|tool| {
             !matches!(
@@ -797,6 +814,7 @@ async fn invoke_message_tool(
         }
         result = &mut dispatch => result?,
     };
+    drop(handoff_lease);
     let mut item = Arc::unwrap_or_clone(output.item);
     let result = convert_output(&item);
     if native_runtime == NativeRuntime::ClaudeCode {
