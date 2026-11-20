@@ -46,6 +46,7 @@ use codex_history::RolloutItem;
 use codex_protocol::error::CodexErr;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::NativeRuntime;
+use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
@@ -346,6 +347,10 @@ async fn run_conversation(
     } else {
         codex_config::PageContextPolicy::Inherit
     };
+    session.start_system1_turn(turn);
+    let mut first_prompt = true;
+    let mut decision_effort: Option<ReasoningEffort> = None;
+    let mut decision_eligible = false;
     let mut last_message = None;
     loop {
         if cancellation.is_cancelled() {
@@ -640,6 +645,8 @@ async fn run_conversation(
             let runtime = &mut *runtime;
             let input = input.as_slice();
             let effort = &effort;
+            let decision_effort = &mut decision_effort;
+            let decision_eligible = &mut decision_eligible;
             let cwd = &cwd;
             let model = &settings.model_info.slug;
             let admit = move |context_items: &[ResponseItem], injections: &[ResponseItem]| {
@@ -675,20 +682,73 @@ async fn run_conversation(
                         native_runtime,
                     )?;
                     drop(messages);
-                    if &runtime.checkpoint.effort != effort {
+                    if first_prompt {
+                        let cursor_efforts;
+                        let supported = match &runtime.runtime {
+                            RuntimeProcess::Claude(_) => {
+                                &["low", "medium", "high", "xhigh", "max"][..]
+                            }
+                            RuntimeProcess::Cursor(process) => {
+                                cursor_efforts = process.reasoning_efforts().collect::<Vec<_>>();
+                                &cursor_efforts
+                            }
+                        };
+                        *decision_eligible = session.native_system1_eligible(turn, supported);
+                        if *decision_eligible
+                            && session.system1_enabled(turn.config.system1.enabled)
+                        {
+                            for item in input.iter().filter(|item| {
+                                matches!(
+                                    item,
+                                    TurnInput::UserInput { .. }
+                                        | TurnInput::InterAgentCommunication(_)
+                                )
+                            }) {
+                                session.record_system1_input(turn, item);
+                            }
+                            *decision_effort = session
+                                .adapt_reasoning(
+                                    turn,
+                                    codex_config::System1Trigger::TurnStart,
+                                    cancellation,
+                                    Some(supported),
+                                )
+                                .await;
+                        }
+                    }
+                    if cancellation.is_cancelled() {
+                        bail!("turn interrupted");
+                    }
+                    let requested = decision_effort
+                        .as_ref()
+                        .map(ToString::to_string)
+                        .or_else(|| effort.clone());
+                    if runtime.checkpoint.effort != requested
+                        || (first_prompt && decision_effort.is_some())
+                    {
                         match &mut runtime.runtime {
                             RuntimeProcess::Claude(process) => {
                                 runtime.checkpoint.in_flight = true;
                                 runtime
                                     .linkage
                                     .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
-                                process.set_effort(effort.as_deref()).await?;
+                                process.set_effort(requested.as_deref()).await?;
                             }
                             RuntimeProcess::Cursor(process) => {
-                                process.set_effort(effort.as_deref()).await?;
+                                // Cursor has no unset control. Restore the pinned model default
+                                // if the turn did not explicitly select an effort.
+                                let effort = requested.as_deref().or_else(|| {
+                                    settings
+                                        .model_info
+                                        .default_reasoning_level
+                                        .as_ref()
+                                        .map(ReasoningEffort::as_str)
+                                });
+                                process.set_effort(effort).await?;
                             }
                         }
-                        runtime.checkpoint.effort.clone_from(effort);
+                        tracing::debug!(runtime_name, effort = ?requested, "Native effort confirmed");
+                        runtime.checkpoint.effort = requested;
                         runtime
                             .linkage
                             .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
@@ -738,6 +798,17 @@ async fn run_conversation(
             bridge
                 .set_turn(Arc::clone(session), step, cancellation.clone())
                 .await?;
+        }
+        if first_prompt {
+            let applied = match &runtime.runtime {
+                RuntimeProcess::Claude(_) => runtime.checkpoint.effort.as_deref(),
+                RuntimeProcess::Cursor(process) => process.current_effort(),
+            }
+            .and_then(|effort| effort.parse().ok());
+            session
+                .report_system1_effort(turn, applied, decision_eligible)
+                .await;
+            first_prompt = false;
         }
         runtime.checkpoint.input_count = messages.len();
         runtime.checkpoint.input_prefix = input_prefix(&messages)?;

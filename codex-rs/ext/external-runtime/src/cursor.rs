@@ -255,6 +255,12 @@ impl CursorRuntime {
         Ok(())
     }
 
+    pub fn reasoning_efforts(&self) -> impl Iterator<Item = &str> {
+        thought_level_options(&self.config_options)
+            .flat_map(|option| option["options"].as_array().into_iter().flatten())
+            .filter_map(|value| value["value"].as_str())
+    }
+
     #[tracing::instrument(skip_all)]
     pub async fn set_effort(&mut self, effort: Option<&str>) -> Result<()> {
         anyhow::ensure!(
@@ -262,18 +268,13 @@ impl CursorRuntime {
             "Cursor session requires recovery before changing effort"
         );
         let effort = effort.context("Cursor requires an explicit effort when changing it")?;
-        let id = self
-            .config_options
-            .as_array()
-            .into_iter()
-            .flatten()
+        let id = thought_level_options(&self.config_options)
             .find(|option| {
-                option["category"] == "thought_level"
-                    && option["options"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .any(|value| value["value"] == effort)
+                option["options"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|value| value["value"] == effort)
             })
             .and_then(|option| option["id"].as_str())
             .context("Cursor does not advertise the requested effort")?
@@ -313,6 +314,11 @@ impl CursorRuntime {
         }
         guard.armed = false;
         result
+    }
+
+    pub fn current_effort(&self) -> Option<&str> {
+        thought_level_options(&self.config_options)
+            .find_map(|option| option["currentValue"].as_str())
     }
 
     pub fn session_id(&self) -> &str {
@@ -573,6 +579,14 @@ impl CursorRuntime {
 /// Refreshes the private config directory from the user's Cursor settings, read-only.
 /// Native permission and approval settings live there; login and other native resources
 /// do not, so they stay shared without copying credentials.
+fn thought_level_options(config_options: &Value) -> impl Iterator<Item = &Value> {
+    config_options
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|option| option["category"] == "thought_level")
+}
+
 fn copy_user_config(config_dir: &std::path::Path) -> Result<()> {
     // Match Cursor's precedence: a variable counts only when it is not blank.
     let variable = |name| {

@@ -2104,12 +2104,6 @@ impl Session {
                 next_internal_sub_id: AtomicU64::new(0),
             });
             let initial_system1 = config.system1.enabled
-                && !crate::external_runtime::is_native_model(
-                    session_configuration
-                        .step_settings
-                        .collaboration_mode
-                        .model(),
-                )
                 && super::system1::ordinary_agent_session(
                     &session_configuration.session_source,
                     session_configuration.thread_source.as_ref(),

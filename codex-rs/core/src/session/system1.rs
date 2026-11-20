@@ -266,7 +266,21 @@ impl Session {
 
     #[tracing::instrument(skip_all)]
     pub(super) async fn report_reasoning_effort(&self, step: &super::step_context::StepContext) {
-        let config = &step.turn.config.system1;
+        let reasoning_effort = step.settings.effective_reasoning_effort();
+        let eligible =
+            self.system1_model_eligible(&step.turn.config.system1, &step.settings.model_info);
+        self.report_system1_effort(&step.turn, reasoning_effort, eligible)
+            .await;
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub(crate) async fn report_system1_effort(
+        &self,
+        turn: &TurnContext,
+        reasoning_effort: Option<ReasoningEffort>,
+        eligible: bool,
+    ) {
+        let config = &turn.config.system1;
         let mode_enabled = self.system1_enabled(config.enabled);
         let ever_enabled = self
             .services
@@ -276,34 +290,27 @@ impl Session {
         if !config.enabled && !ever_enabled {
             return;
         }
-        let root = {
+        {
             let state = self.state.lock().await;
-            ordinary_agent_session(
-                &step.turn.session_source,
+            if !ordinary_agent_session(
+                &turn.session_source,
                 state.session_configuration.thread_source.as_ref(),
-            )
-        };
-        if !root {
-            return;
+            ) {
+                return;
+            }
         }
-        let reasoning_effort = step.settings.effective_reasoning_effort();
         let system1 = mode_enabled
-            && !config.update_on.is_empty()
+            && eligible
             && !self.system1_paused()
-            && self
-                .services
-                .model_client
-                .reasoning_effort_override_enabled(&step.settings.model_info)
             && reasoning_effort
                 .as_ref()
-                .is_none_or(|effort| ORDINARY_EFFORTS.contains(effort))
-            && allowed_efforts(config, &step.settings.model_info).len() >= 2;
+                .is_none_or(|effort| ORDINARY_EFFORTS.contains(effort));
         // This transient UI update must not wait for rollout persistence before sampling.
         self.deliver_event_raw(codex_protocol::protocol::Event {
-            id: step.turn.sub_id.clone(),
+            id: turn.sub_id.clone(),
             msg: codex_protocol::protocol::EventMsg::ReasoningEffortUpdated(
                 codex_protocol::protocol::ReasoningEffortUpdatedEvent {
-                    turn_id: step.turn.sub_id.clone(),
+                    turn_id: turn.sub_id.clone(),
                     reasoning_effort,
                     system1,
                 },
@@ -312,8 +319,45 @@ impl Session {
         .await;
     }
 
+    fn system1_model_eligible(&self, config: &System1Config, model: &ModelInfo) -> bool {
+        let supported = if crate::external_runtime::is_native_model(&model.slug) {
+            config.update_on.contains(&System1Trigger::TurnStart)
+                && self
+                    .features
+                    .enabled(codex_features::Feature::StepModelSwitching)
+                && self
+                    .features
+                    .enabled(codex_features::Feature::ReasoningEffortOverride)
+        } else {
+            !config.update_on.is_empty()
+                && self
+                    .services
+                    .model_client
+                    .reasoning_effort_override_enabled(model)
+        };
+        supported && allowed_efforts(config, model).len() >= 2
+    }
+
+    pub(crate) fn native_system1_eligible(
+        &self,
+        turn: &TurnContext,
+        native_efforts: &[&str],
+    ) -> bool {
+        let config = &turn.config.system1;
+        self.system1_model_eligible(config, turn.model_info())
+            && allowed_efforts(config, turn.model_info())
+                .iter()
+                .filter(|effort| native_efforts.contains(&effort.as_str()))
+                .take(2)
+                .count()
+                == 2
+    }
+
     fn system1_warmup_eligible(&self, config: &Config, source: &SessionConfiguration) -> bool {
         if !self.system1_enabled(config.system1.enabled)
+            || crate::external_runtime::is_native_model(
+                source.step_settings.collaboration_mode.model(),
+            )
             || config.system1.update_on.is_empty()
             || !ordinary_agent_session(&source.session_source, source.thread_source.as_ref())
         {
@@ -396,7 +440,7 @@ impl Session {
                 .child_token(),
             deadline: Instant::now() + super::system1_task::WARMUP_TIMEOUT,
         };
-        let warmup = AbortOnDropHandle::new(tokio::spawn(run_decision(
+        let warmup = run_decision(
             client,
             DecisionRequest {
                 model,
@@ -426,7 +470,10 @@ impl Session {
                 generation: session.generation.load(Ordering::Acquire),
             },
             attempt,
-        )));
+        );
+        let warmup = AbortOnDropHandle::new(tokio::spawn(async move {
+            let _ = warmup.await;
+        }));
         *session
             .warmup
             .lock()
@@ -505,7 +552,7 @@ impl Session {
             .store(/*val*/ false, Ordering::Release);
     }
 
-    pub(super) fn record_system1_input(&self, turn: &TurnContext, input: &TurnInput) {
+    pub(crate) fn record_system1_input(&self, turn: &TurnContext, input: &TurnInput) {
         let config = &turn.config.system1;
         if turn
             .extension_data
@@ -536,12 +583,13 @@ impl Session {
     }
 
     #[tracing::instrument(skip_all)]
-    pub(super) async fn adapt_reasoning(
+    pub(crate) async fn adapt_reasoning(
         self: &Arc<Self>,
         turn: &Arc<TurnContext>,
         trigger: System1Trigger,
         cancellation: &CancellationToken,
-    ) {
+        native_efforts: Option<&[&str]>,
+    ) -> Option<ReasoningEffort> {
         let config = &turn.config.system1;
         let session = self
             .services
@@ -565,33 +613,33 @@ impl Session {
                     }))
         };
         if !mode.enabled {
-            return;
+            return None;
         }
         let started = Instant::now();
         let deadline = started + Duration::from_millis(config.decision_timeout_ms);
         let mut _probe = None;
         let prepared = {
             let Ok(_settings_guard) = self.thread_settings_persistence.try_acquire() else {
-                return;
+                return None;
             };
             let expected = turn.next_step_settings.load_full();
-            if !self
-                .services
-                .model_client
-                .reasoning_effort_override_enabled(&expected.model_info)
+            if !self.system1_model_eligible(config, &expected.model_info)
                 || expected
                     .effective_reasoning_effort()
                     .is_some_and(|effort| !ORDINARY_EFFORTS.contains(&effort))
             {
-                return;
+                return None;
             }
-            let allowed = allowed_efforts(config, &expected.model_info);
+            let mut allowed = allowed_efforts(config, &expected.model_info);
+            if let Some(native_efforts) = native_efforts {
+                allowed.retain(|effort| native_efforts.contains(&effort.as_str()));
+            }
             if allowed.len() < 2 {
-                return;
+                return None;
             }
             let task_done = {
                 let Ok(active) = self.active_turn.try_lock() else {
-                    return;
+                    return None;
                 };
                 active
                     .as_ref()
@@ -603,16 +651,16 @@ impl Session {
                     })
             };
             let Some(task_done) = task_done else {
-                return;
+                return None;
             };
             let Some(evidence) = turn.extension_data.get::<StdMutex<System1Evidence>>() else {
-                return;
+                return None;
             };
             let Ok(evidence) = evidence.try_lock() else {
-                return;
+                return None;
             };
             let Ok(state) = self.state.try_lock() else {
-                return;
+                return None;
             };
             if state.shutting_down
                 || !ordinary_agent_session(
@@ -620,18 +668,18 @@ impl Session {
                     state.session_configuration.thread_source.as_ref(),
                 )
             {
-                return;
+                return None;
             }
             if !cadence_due {
                 tracing::debug!(thread.id = %self.thread_id(), reason = "cadence", "System1 skipped");
-                return;
+                return None;
             }
             if !config.update_on.contains(&trigger)
                 || cancellation.is_cancelled()
                 || self.system1_paused()
                 || Instant::now() >= deadline
             {
-                return;
+                return None;
             }
             if evidence.encrypted_task_unavailable
                 || (!evidence.has_task_text()
@@ -641,7 +689,7 @@ impl Session {
                     tracing::debug!(thread.id = %self.thread_id(), reason = "encrypted_task_unavailable",
                     "System1 skipped");
                 }
-                return;
+                return None;
             }
             let session = self
                 .services
@@ -658,7 +706,7 @@ impl Session {
                         .next_probe
                         .is_some_and(|deadline| Instant::now() < deadline)
                 {
-                    return;
+                    return None;
                 }
                 recovery.in_flight = true;
                 _probe = Some(System1Probe {
@@ -676,7 +724,7 @@ impl Session {
             };
             let text = evidence.render(state.history.annotated_items(), config.max_context_bytes);
             if Instant::now() >= deadline {
-                return;
+                return None;
             }
             drop(state);
             let attempt = self.system1_decision_log(&turn.config).map(|log| {
@@ -756,11 +804,12 @@ impl Session {
                             expected,
                             task_done,
                             generation: session.generation.load(Ordering::Acquire),
+                            native: native_efforts.is_some(),
                         },
                         attempt,
                     ))
                 }
-                Ok(_) => return,
+                Ok(_) => return None,
                 Err(error) => {
                     let mut stats = session
                         .stats
@@ -783,7 +832,7 @@ impl Session {
         // Capture a main step only after the decision has published settings or health.
         match prepared {
             Ok((client, request, cancellation, guard, target, attempt)) => {
-                run_decision(client, request, cancellation, guard, target, attempt).await;
+                run_decision(client, request, cancellation, guard, target, attempt).await
             }
             Err((error, generation, guard)) => {
                 let error = health::classify_error(error);
@@ -796,6 +845,7 @@ impl Session {
                     }),
                 )
                 .await;
+                None
             }
         }
     }

@@ -58,7 +58,9 @@ impl Session {
         stats.total_elapsed_ms = stats.total_elapsed_ms.saturating_add(elapsed_ms);
         stats.last_elapsed_ms = Some(elapsed_ms);
         match disposition {
-            DecisionDisposition::Applied | DecisionDisposition::Unchanged => {
+            DecisionDisposition::Applied
+            | DecisionDisposition::Selected
+            | DecisionDisposition::Unchanged => {
                 stats.accepted = stats.accepted.saturating_add(/*rhs*/ 1);
                 if matches!(disposition, DecisionDisposition::Applied) {
                     stats.effort_changes = stats.effort_changes.saturating_add(/*rhs*/ 1);

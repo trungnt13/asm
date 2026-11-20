@@ -49,6 +49,7 @@ pub(super) enum DecisionApiOutcome {
 pub(super) enum DecisionDisposition {
     Warmup,
     Applied,
+    Selected,
     Unchanged,
     Rejected,
     Cancelled,

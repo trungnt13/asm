@@ -1,7 +1,6 @@
 use super::ORDINARY_EFFORTS;
 use super::System1Session;
 use super::System1State;
-use super::allowed_efforts;
 use super::ordinary_agent_session;
 use crate::session::session::Session;
 use codex_features::Feature;
@@ -71,13 +70,6 @@ impl Session {
             let (config, source, thread_source, model, effort) = {
                 let state = self.state.lock().await;
                 let configuration = &state.session_configuration;
-                if crate::external_runtime::is_native_model(
-                    configuration.step_settings.collaboration_mode.model(),
-                ) {
-                    return Err(CodexErr::InvalidRequest(
-                        "Native runtimes do not support adaptive reasoning".to_string(),
-                    ));
-                }
                 if state.shutting_down {
                     return Err(CodexErr::InvalidRequest(
                         "thread is shutting down".to_string(),
@@ -142,11 +134,7 @@ impl Session {
                 ));
             }
             if active.as_ref().is_some_and(|settings| {
-                !self
-                    .services
-                    .model_client
-                    .reasoning_effort_override_enabled(&settings.model_info)
-                    || allowed_efforts(&config.system1, &settings.model_info).len() < 2
+                !self.system1_model_eligible(&config.system1, &settings.model_info)
             }) {
                 return Err(CodexErr::InvalidRequest(
                     "the active model does not support System1".to_string(),
@@ -157,14 +145,8 @@ impl Session {
                 .models_manager
                 .get_model_info(&model, &config.to_models_manager_config())
                 .await;
-            if !self
-                .services
-                .model_client
-                .reasoning_effort_override_enabled(&model_info)
-                || allowed_efforts(&config.system1, &model_info).len() < 2
-                || config.system1.update_on.is_empty()
-            {
-                return Err(CodexErr::InvalidRequest("System1 requires a supported OpenAI model, at least two allowed efforts, and a configured update trigger".to_string()));
+            if !self.system1_model_eligible(&config.system1, &model_info) {
+                return Err(CodexErr::InvalidRequest("System1 requires a supported model, at least two allowed efforts, and a compatible update trigger".to_string()));
             }
         }
         self.publish_system1_enabled(enabled, "user_toggle").await;
