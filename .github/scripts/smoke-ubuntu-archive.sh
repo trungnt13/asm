@@ -5,6 +5,11 @@ archive="${1:?absolute archive path is required}"
 version="${2:?expected Cargo version is required}"
 [[ "$archive" == /* && -f "$archive" ]] || { echo "Expected an absolute archive path: $archive" >&2; exit 1; }
 
+expected_version="asm (PGO) $version"
+if [[ "${archive##*/}" == codex-x86_64-unknown-linux-gnu-v3.tar.gz ]]; then
+  expected_version="asm (x86-64-v3, PGO) $version"
+fi
+
 # A hosted runner has extra libraries; check the archive on the minimum OS too.
 # The caller has already validated the complete package and regular executables.
 docker run --rm --platform linux/amd64 \
@@ -27,7 +32,7 @@ docker run --rm --platform linux/amd64 \
     done
     "$directory/codex-path/rg" --version
     reported_version=$("$directory/bin/codex" --version)
-    [[ "$reported_version" == "codex-cli $1" ]] || { echo "Wrong binary version: $reported_version" >&2; exit 1; }
+    [[ "$reported_version" == "$2" ]] || { echo "Wrong binary version: $reported_version" >&2; exit 1; }
     [[ "$("$directory/bin/codex-exec-server" --version)" == "codex-exec-server $1" ]]
     echo "ubuntu=22.04 version=$reported_version help=ok helper_help=ok exec_server_version=ok exec_server_help=ok resources=ok"
-  ' smoke-ubuntu-archive "$version"
+  ' smoke-ubuntu-archive "$version" "$expected_version"

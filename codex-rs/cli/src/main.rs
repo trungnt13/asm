@@ -121,6 +121,12 @@ use codex_terminal_detection::TerminalName;
 #[derive(Debug, Parser)]
 #[clap(
     author,
+    name = "asm",
+    display_name = match option_env!("ASM_BUILD_VARIANT") {
+        Some("pgo") => "asm (PGO)",
+        Some("x86-64-v3-pgo") => "asm (x86-64-v3, PGO)",
+        _ => "asm",
+    },
     version,
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,

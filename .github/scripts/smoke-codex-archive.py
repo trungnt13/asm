@@ -21,7 +21,8 @@ archive_path = Path(sys.argv[1])
 inspect_only = len(sys.argv) > 2 and sys.argv[2] == "--inspect-only"
 release_targets = {"aarch64-apple-darwin", "x86_64-unknown-linux-gnu"}
 target = archive_path.name.removeprefix("codex-").removesuffix(".tar.gz")
-if archive_path.name == "codex-x86_64-unknown-linux-gnu-v3.tar.gz":
+is_v3 = archive_path.name == "codex-x86_64-unknown-linux-gnu-v3.tar.gz"
+if is_v3:
     target = "x86_64-unknown-linux-gnu"
 if target not in release_targets:
     raise SystemExit(f"Unsupported CLI archive: {archive_path}")
@@ -150,9 +151,15 @@ with tarfile.open(archive_path, "r:gz") as archive:
         reported_version = subprocess.check_output(
             [binary_path, "--version"], text=True, timeout=30
         ).strip()
-        if reported_version != f"codex-cli {version}":
+        version_name = "asm"
+        if is_v3:
+            version_name = "asm (x86-64-v3, PGO)"
+        elif spec.is_linux:
+            version_name = "asm (PGO)"
+        expected_version = f"{version_name} {version}"
+        if reported_version != expected_version:
             raise SystemExit(
-                f"Wrong binary version: {reported_version}; expected codex-cli {version}"
+                f"Wrong binary version: {reported_version}; expected {expected_version}"
             )
         exec_server_path = package / "bin/codex-exec-server"
         exec_server_version = subprocess.check_output(
