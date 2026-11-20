@@ -10,6 +10,7 @@ use serde_json::Value;
 use serde_json::json;
 
 use super::input;
+use crate::hook_runtime::InputAdmission;
 use crate::session::TurnInput;
 use crate::session::session::Session;
 
@@ -89,8 +90,9 @@ pub(super) fn input_messages<'a>(
                 }
             }
             ResponseItem::Message { role, .. }
-                if runtime == NativeRuntime::ClaudeCode
-                    && matches!(role.as_str(), "developer" | "user") =>
+                if input::is_hook_context(item)
+                    || (runtime == NativeRuntime::ClaudeCode
+                        && matches!(role.as_str(), "developer" | "user")) =>
             {
                 let ResponseItem::Message { content, .. } = input::context_item(item)? else {
                     unreachable!("native context is a labeled plaintext message");
@@ -188,24 +190,24 @@ pub(super) fn prompt_content(messages: &[Value]) -> anyhow::Result<codex_externa
 pub(super) fn validate_pending_prompt(
     session: &Session,
     messages: &[Value],
-    pending: &[TurnInput],
+    pending: &[InputAdmission<'_>],
     boundary: Option<&str>,
     validate: impl FnOnce(&codex_external_runtime::Prompt) -> anyhow::Result<()>,
     runtime: NativeRuntime,
 ) -> anyhow::Result<()> {
     // Preview normalized pending input before recording it or advancing delivery.
-    let items = pending
-        .iter()
-        .map(|item| match item {
+    let mut messages = messages.to_vec();
+    for input in pending {
+        let item = input.input().map(|item| match item {
             TurnInput::UserInput { content, .. } => session.response_item_from_user_input(content),
             TurnInput::ResponseItem(envelope) | TurnInput::FunctionCallOutput(envelope) => {
                 envelope.item.as_ref().clone()
             }
             TurnInput::InterAgentCommunication(message) => message.to_model_input_item(),
-        })
-        .collect::<Vec<_>>();
-    let mut messages = messages.to_vec();
-    messages.extend(input_messages(&items, runtime)?);
+        });
+        let contexts = input.hook_context_messages();
+        messages.extend(input_messages(item.iter().chain(&contexts), runtime)?);
+    }
     if let Some(boundary) = boundary {
         messages.insert(/*index*/ 0, Value::String(boundary.to_owned()));
     }

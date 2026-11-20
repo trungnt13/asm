@@ -1,4 +1,8 @@
+use std::borrow::Cow;
+use std::sync::Arc;
+
 use anyhow::bail;
+use codex_async_utils::OrCancelExt;
 use codex_protocol::models::AgentMessageInputContent;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ContentItemKind;
@@ -8,13 +12,22 @@ use codex_protocol::models::ImageDetail;
 use codex_protocol::models::ImageReference;
 use codex_protocol::models::InternalChatMessageMetadataPassthrough;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::openai_models::NativeRuntime;
+use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::WarningEvent;
+use codex_thread_store::PersistContext;
 use codex_user_input::ResolvedUserInput;
 use codex_utils_image::PromptImageDecoder;
 use codex_utils_image::PromptImageMode;
 use codex_utils_image::load_data_url_for_prompt;
 use codex_utils_image::load_for_prompt_bytes;
+use tokio_util::sync::CancellationToken;
 
+use crate::hook_runtime::InputAdmission;
+use crate::hook_runtime::admit_pending_input;
 use crate::session::TurnInput;
+use crate::session::session::Session;
+use crate::session::turn_context::TurnContext;
 
 pub(super) const CONTEXT_KIND: &str = "asm.native_context";
 pub(super) const SHELL_CONTEXT_KIND: &str = "asm.native_shell_context";
@@ -103,96 +116,230 @@ fn page_context_part(item: &ResponseItem) -> Option<PageContextPart> {
     Some(PageContextPart::Snapshot(present))
 }
 
-pub(super) fn normalize_selections(input: &mut [TurnInput]) {
-    for item in input {
-        let TurnInput::UserInput { content, .. } = item else {
-            continue;
-        };
-        for part in content {
-            let text = match part {
-                ResolvedUserInput::Skill { name, path } => {
-                    format!("Selected ASM skill {name}: {}", path.display())
-                }
-                ResolvedUserInput::Mention { name, path } => {
-                    format!("Selected ASM capability {name}: {path}")
-                }
-                _ => continue,
-            };
-            *part = ResolvedUserInput::Text {
-                text,
-                text_elements: Vec::new(),
-            };
-        }
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub(super) struct InvalidQueuedInput(pub(super) anyhow::Error);
+
+pub(super) struct AdmittedInputs {
+    recorded: Vec<TurnInput>,
+    blocked: bool,
+    pub(super) pending: Vec<InputAdmission<'static>>,
+}
+
+impl AdmittedInputs {
+    pub(super) fn inputs(&self) -> impl Iterator<Item = &TurnInput> {
+        self.recorded
+            .iter()
+            .chain(self.pending.iter().filter_map(InputAdmission::input))
+    }
+
+    pub(super) fn rejected_user_turn(&self) -> bool {
+        self.blocked && !self.inputs().any(|input| {
+            matches!(input, TurnInput::UserInput { content, .. } if !content.is_empty())
+        })
     }
 }
 
-pub(super) fn prepare_input(input: &mut Vec<TurnInput>) -> anyhow::Result<usize> {
-    let mut skipped = 0;
-    let mut prepared = Vec::with_capacity(input.len());
-    for mut item in input.drain(..) {
-        match &mut item {
-            TurnInput::InterAgentCommunication(message) if message.encrypted_content.is_some() => {
-                skipped += 1;
-                continue;
-            }
-            TurnInput::ResponseItem(envelope) | TurnInput::FunctionCallOutput(envelope) => {
-                let original = envelope.item.as_ref();
-                let mut plaintext = original.clone();
-                plaintext.clear_encrypted_content();
-                if plaintext != *original || encrypted_parts(original) {
-                    skipped += 1;
-                    continue;
-                }
-                envelope.item = context_item(original)?.into();
-            }
-            TurnInput::UserInput { content, .. } => {
-                for part in content {
-                    let (encoded, detail) = match part {
-                        ResolvedUserInput::Text { .. } => continue,
-                        ResolvedUserInput::Image { image, detail } => {
-                            let ImageReference::Inline { image_url } = image.as_ref() else {
-                                bail!("Native images require a base64 data URL, not a file ID");
-                            };
-                            (
-                                load_data_url_for_prompt(
-                                    image_url,
-                                    image_mode(*detail),
-                                    PromptImageDecoder::Legacy,
-                                )?,
-                                *detail,
-                            )
-                        }
-                        ResolvedUserInput::LocalImage {
-                            path,
-                            detail,
-                            bytes,
-                        } => {
-                            let bytes =
-                                bytes.as_ref().map_err(|err| anyhow::anyhow!(err.clone()))?;
-                            (
-                                load_for_prompt_bytes(path, bytes.to_vec(), image_mode(*detail))?,
-                                *detail,
-                            )
-                        }
-                        _ => bail!(
-                            "native runtimes support text and image attachments; use native text references for other files and skills"
-                        ),
-                    };
-                    *part = ResolvedUserInput::Image {
-                        image: ImageReference::Inline {
-                            image_url: encoded.into_data_url(),
-                        }
-                        .into(),
-                        detail,
-                    };
-                }
-            }
-            TurnInput::InterAgentCommunication(_) => {}
+#[tracing::instrument(skip_all, err)]
+pub(super) async fn admit_inputs(
+    session: &Arc<Session>,
+    turn: &Arc<TurnContext>,
+    inputs: Vec<TurnInput>,
+    runtime: NativeRuntime,
+    cancellation: &CancellationToken,
+    preview: impl Fn(&[serde_json::Value], &[InputAdmission<'_>]) -> anyhow::Result<()>,
+) -> anyhow::Result<AdmittedInputs> {
+    let mut admitted = AdmittedInputs {
+        recorded: Vec::new(),
+        blocked: false,
+        pending: Vec::with_capacity(inputs.len()),
+    };
+    for input in inputs {
+        if cancellation.is_cancelled() {
+            bail!("turn interrupted");
         }
-        prepared.push(item);
+        if matches!(input, TurnInput::UserInput { .. }) && !admitted.pending.is_empty() {
+            // The next hook can inspect the actual rollout, not just its own prompt.
+            let mut pending = std::mem::take(&mut admitted.pending);
+            admitted
+                .recorded
+                .extend(pending.iter().filter_map(InputAdmission::input).cloned());
+            prepare_admitted_inputs(session, turn, &mut pending, runtime)
+                .await
+                .map_err(InvalidQueuedInput)?;
+            let messages =
+                super::input_messages(session.clone_history().await.raw_items(), runtime)?;
+            preview(&messages, &pending).map_err(InvalidQueuedInput)?;
+            if cancellation.is_cancelled() {
+                bail!("turn interrupted");
+            }
+            record_admitted_inputs(session, turn, pending).await?;
+            session.flush_rollout().await?;
+        }
+        let input = admit_pending_input(session, turn, Cow::Owned(input))
+            .or_cancel(cancellation)
+            .await
+            .map_err(|_| anyhow::anyhow!("turn interrupted"))?;
+        admitted.blocked |= input.input().is_none();
+        admitted.pending.push(input);
     }
-    *input = prepared;
-    Ok(skipped)
+    Ok(admitted)
+}
+
+#[tracing::instrument(skip_all, err)]
+pub(super) async fn prepare_admitted_inputs(
+    session: &Arc<Session>,
+    turn: &Arc<TurnContext>,
+    admitted: &mut Vec<InputAdmission<'_>>,
+    runtime: NativeRuntime,
+) -> anyhow::Result<()> {
+    let mut prepared = Vec::with_capacity(admitted.len());
+    let mut skipped = false;
+    for mut input in admitted.drain(..) {
+        let Some(item) = input.input_mut() else {
+            prepared.push(input);
+            continue;
+        };
+        if runtime == NativeRuntime::ClaudeCode {
+            normalize_selections(item);
+        }
+        if prepare_input(item)? {
+            prepared.push(input);
+        } else {
+            skipped = true;
+        }
+    }
+    *admitted = prepared;
+    if skipped {
+        session
+            .send_event(
+                turn,
+                EventMsg::Warning(WarningEvent {
+                    message: "Encrypted ASM input was ignored; the user prompt is preserved."
+                        .to_owned(),
+                }),
+            )
+            .await;
+    }
+    Ok(())
+}
+
+#[tracing::instrument(skip_all, err)]
+pub(super) async fn record_admitted_inputs(
+    session: &Arc<Session>,
+    turn: &Arc<TurnContext>,
+    admitted: Vec<InputAdmission<'_>>,
+) -> anyhow::Result<()> {
+    for input in admitted {
+        input
+            .record(
+                session,
+                turn,
+                &turn.initial_settings.model_info,
+                PersistContext::TurnStart,
+            )
+            .await?;
+    }
+    Ok(())
+}
+
+fn normalize_selections(item: &mut TurnInput) {
+    let TurnInput::UserInput { content, .. } = item else {
+        return;
+    };
+    for part in content {
+        let text = match part {
+            ResolvedUserInput::Skill { name, path } => {
+                format!("Selected ASM skill {name}: {}", path.display())
+            }
+            ResolvedUserInput::Mention { name, path } => {
+                format!("Selected ASM capability {name}: {path}")
+            }
+            _ => continue,
+        };
+        *part = ResolvedUserInput::Text {
+            text,
+            text_elements: Vec::new(),
+        };
+    }
+}
+
+// Returns false for encrypted input, which must not cross the native runtime boundary.
+fn prepare_input(item: &mut TurnInput) -> anyhow::Result<bool> {
+    match item {
+        TurnInput::InterAgentCommunication(message) if message.encrypted_content.is_some() => {
+            return Ok(false);
+        }
+        TurnInput::ResponseItem(envelope) | TurnInput::FunctionCallOutput(envelope) => {
+            let original = envelope.item.as_ref();
+            let mut plaintext = original.clone();
+            plaintext.clear_encrypted_content();
+            if plaintext != *original || encrypted_parts(original) {
+                return Ok(false);
+            }
+            envelope.item = context_item(original)?.into();
+        }
+        TurnInput::UserInput { content, .. } => {
+            for part in content {
+                let (encoded, detail) = match part {
+                    ResolvedUserInput::Text { .. } => continue,
+                    ResolvedUserInput::Image { image, detail } => {
+                        let ImageReference::Inline { image_url } = image.as_ref() else {
+                            bail!("Native images require a base64 data URL, not a file ID");
+                        };
+                        (
+                            load_data_url_for_prompt(
+                                image_url,
+                                image_mode(*detail),
+                                PromptImageDecoder::Legacy,
+                            )?,
+                            *detail,
+                        )
+                    }
+                    ResolvedUserInput::LocalImage {
+                        path,
+                        detail,
+                        bytes,
+                    } => {
+                        let bytes = bytes.as_ref().map_err(|err| anyhow::anyhow!(err.clone()))?;
+                        (
+                            load_for_prompt_bytes(path, bytes.to_vec(), image_mode(*detail))?,
+                            *detail,
+                        )
+                    }
+                    _ => bail!(
+                        "native runtimes support text and image attachments; use native text references for other files and skills"
+                    ),
+                };
+                *part = ResolvedUserInput::Image {
+                    image: ImageReference::Inline {
+                        image_url: encoded.into_data_url(),
+                    }
+                    .into(),
+                    detail,
+                };
+            }
+        }
+        TurnInput::InterAgentCommunication(_) => {}
+    }
+    Ok(true)
+}
+
+pub(super) fn is_hook_context(item: &ResponseItem) -> bool {
+    matches!(
+        item,
+        ResponseItem::Message {
+            role,
+            content,
+            internal_chat_message_metadata_passthrough: Some(metadata),
+            ..
+        } if role == "developer"
+            && !content.is_empty()
+            && content.iter().all(|part| matches!(part, ContentItem::InputText { .. }))
+            && metadata.content_item_kinds.as_ref().is_some_and(|kinds| {
+                kinds.len() == 1 && kinds[0].as_str() == "hooks.additional_context"
+            })
+    )
 }
 
 pub(crate) fn context_item(original: &ResponseItem) -> anyhow::Result<ResponseItem> {

@@ -459,6 +459,18 @@ pub(super) struct RuntimeLease<'a> {
 }
 
 impl<'a> RuntimeLease<'a> {
+    pub(super) fn pending_fork_input_count(&self) -> Option<usize> {
+        let state = self
+            .slot
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match state.fork.as_ref() {
+            Some(TemporaryFork::Pending(seed)) => Some(seed.parent.input_count),
+            Some(TemporaryFork::Started) | None => None,
+        }
+    }
+
     /// Claims the seed of a temporary fork once; its native session cannot be started again.
     pub(super) fn start_fork(&self) -> anyhow::Result<Option<ForkSeed>> {
         let mut state = self

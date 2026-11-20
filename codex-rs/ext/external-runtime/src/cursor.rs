@@ -26,6 +26,7 @@ use tokio_util::sync::CancellationToken;
 
 /// Cursor login and session setup can stall on its backend; fail instead of hanging the turn.
 const SETUP_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 60);
+const BRIDGE_INSTRUCTIONS: &str = "ASM communication: use native shell to run \"$ASM_NATIVE_EXE\" --asm-native-tools list for available tools and JSON schemas. Call a listed tool with JSON arguments on stdin: printf '%s' '<JSON>' | \"$ASM_NATIVE_EXE\" --asm-native-tools call <name>. Do not print the private descriptor or retry side-effecting calls automatically. Long calls may background; await their completion.";
 
 pub enum CursorSession {
     New,
@@ -88,7 +89,10 @@ impl CursorRuntime {
             supports_images: false,
             usable: false,
             failure_result: None,
-            bridge_instructions: options.bridge_directory.as_ref().map(|_| "ASM communication: use native shell to run \"$ASM_NATIVE_EXE\" --asm-native-tools list for available tools and JSON schemas. Call a listed tool with JSON arguments on stdin: printf '%s' '<JSON>' | \"$ASM_NATIVE_EXE\" --asm-native-tools call <name>. Do not print the private descriptor or retry side-effecting calls automatically. Long calls may background; await their completion.".to_owned()),
+            bridge_instructions: options
+                .bridge_directory
+                .as_ref()
+                .map(|_| BRIDGE_INSTRUCTIONS.to_owned()),
         };
         let setup = runtime.start_session(options).await;
         if setup.is_err() {

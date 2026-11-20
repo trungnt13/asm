@@ -6710,13 +6710,10 @@ async fn build_hooks_config(
     environment: Option<&TurnEnvironment>,
     disabled_plugin_ids: &[String],
 ) -> HooksConfig {
-    if config
+    let native = config
         .model
         .as_deref()
-        .is_some_and(crate::external_runtime::is_native_model)
-    {
-        return HooksConfig::default();
-    }
+        .is_some_and(crate::external_runtime::is_native_model);
     let (hook_shell_program, hook_shell_argv) = environment
         .and_then(|environment| environment.shell.as_ref())
         .map(|shell| {
@@ -6734,8 +6731,9 @@ async fn build_hooks_config(
     let plugin_hook_sources = plugin_outcome.effective_plugin_hook_sources();
     let plugin_hook_load_warnings = plugin_outcome.effective_plugin_hook_warnings();
     HooksConfig {
-        legacy_notify_argv: config.notify.clone(),
+        legacy_notify_argv: if native { None } else { config.notify.clone() },
         feature_enabled: config.features.enabled(Feature::CodexHooks),
+        only_event: native.then_some(codex_protocol::protocol::HookEventName::UserPromptSubmit),
         bypass_hook_trust: config.bypass_hook_trust,
         config_layer_stack: Some(config.config_layer_stack.clone()),
         plugin_hook_sources,

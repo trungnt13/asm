@@ -47,6 +47,7 @@ use tokio::process::Command;
 pub struct HooksConfig {
     pub legacy_notify_argv: Option<Vec<String>>,
     pub feature_enabled: bool,
+    pub only_event: Option<HookEventName>,
     pub bypass_hook_trust: bool,
     pub config_layer_stack: Option<ConfigLayerStack>,
     pub plugin_hook_sources: Vec<PluginHookSource>,
@@ -85,10 +86,13 @@ impl Hooks {
         let hooks = Self::from_config(config, mcp_executor, Arc::clone(&environment), |shell| {
             CommandHookRuntime::new(shell, environment, thread_id, result_sender)
         });
-        crate::engine::discovery::ensure_required_hooks_loaded(
-            hooks.engine.required_load_errors(),
-        )?;
+        hooks.ensure_required_loaded()?;
         Ok((hooks, result_receiver))
+    }
+
+    /// Reject execution if a required hook declaration could not be loaded.
+    pub fn ensure_required_loaded(&self) -> anyhow::Result<()> {
+        crate::engine::discovery::ensure_required_hooks_loaded(self.engine.required_load_errors())
     }
 
     /// Preserve in-flight background hooks while applying a refreshed configuration.
@@ -127,6 +131,11 @@ impl Hooks {
             warnings.extend(discovered.warnings);
             hooks.engine.warnings = warnings.into();
         }
+        if !discovered.required_load_errors.is_empty() {
+            let mut errors = hooks.engine.required_load_errors().to_vec();
+            errors.extend(discovered.required_load_errors);
+            hooks.engine.required_load_errors = errors.into();
+        }
         hooks
     }
 
@@ -155,7 +164,11 @@ impl Hooks {
             .hook_entries
             .last()
             .map_or(0, |entry| entry.display_order.saturating_add(1));
-        crate::engine::discovery::discover_environment_hooks(sources, display_order)
+        crate::engine::discovery::discover_environment_hooks(
+            sources,
+            display_order,
+            self.engine.discovery_mode,
+        )
     }
 
     pub fn with_executor_hooks(&self, executor_hooks: Vec<ExecutorPluginHookSource>) -> Self {
@@ -195,6 +208,10 @@ impl Hooks {
             config.plugin_hook_load_warnings.clone(),
             command_runtime,
             mcp_executor,
+            config.only_event.map_or(
+                crate::engine::discovery::DiscoveryMode::Runtime,
+                crate::engine::discovery::DiscoveryMode::RuntimeFor,
+            ),
         );
         Self {
             environment,

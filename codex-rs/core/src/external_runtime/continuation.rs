@@ -194,7 +194,7 @@ pub(super) async fn run(
                 pending_activity = None;
                 if let Some(steering) = continuation.steering.as_ref()
                     && submit_steering(session, turn, &mut runtime.checkpoint, &runtime.linkage,
-                    &runtime.checkpoint_path, runtime.page_context, SteeringSubmission::Continuation(steering)).await? {
+                    &runtime.checkpoint_path, runtime.page_context, &cancellation, SteeringSubmission::Continuation(steering)).await? {
                     submitted += 1;
                 }
             },
@@ -278,9 +278,9 @@ pub(super) async fn submit_steering(
     linkage: &super::Linkage,
     path: &std::path::Path,
     page_context: codex_config::PageContextPolicy,
+    cancellation: &CancellationToken,
     steering: SteeringSubmission<'_>,
 ) -> anyhow::Result<bool> {
-    let settings = &turn.initial_settings;
     let reserved = match &steering {
         SteeringSubmission::Continuation(steering) => {
             let Some(reserved) = steering.reserve() else {
@@ -320,22 +320,44 @@ pub(super) async fn submit_steering(
         }
         return Ok(false);
     }
-    match super::input::prepare_input(&mut pending) {
-        Ok(0) => {}
-        Ok(_) => {
-            session
-                .send_event(
-                    turn,
-                    codex_protocol::protocol::EventMsg::Warning(
-                        codex_protocol::protocol::WarningEvent {
-                            message:
-                                "Encrypted ASM input was ignored; the user prompt is preserved."
-                                    .to_owned(),
-                        },
-                    ),
-                )
-                .await
-        }
+    let preview = |messages: &[serde_json::Value],
+                   pending: &[crate::hook_runtime::InputAdmission<'_>]| {
+        super::validate_pending_prompt(
+            session,
+            messages
+                .get(checkpoint.input_count..)
+                .context("saved native input count exceeds history")?,
+            pending,
+            /*boundary*/ None,
+            codex_external_runtime::validate_claude_prompt,
+            NativeRuntime::ClaudeCode,
+        )
+    };
+    let admission = super::input::admit_inputs(
+        session,
+        turn,
+        pending,
+        NativeRuntime::ClaudeCode,
+        cancellation,
+        preview,
+    )
+    .await;
+    if cancellation.is_cancelled() {
+        return Ok(false);
+    }
+    let admitted = match admission {
+        Ok(mut admitted) => super::input::prepare_admitted_inputs(
+            session,
+            turn,
+            &mut admitted.pending,
+            NativeRuntime::ClaudeCode,
+        )
+        .await
+        .map(|()| admitted),
+        Err(error) => Err(error.downcast::<super::input::InvalidQueuedInput>()?.0),
+    };
+    let admitted = match admitted {
+        Ok(admitted) => admitted,
         Err(error) => {
             session
                 .send_event(
@@ -349,21 +371,15 @@ pub(super) async fn submit_steering(
                 .await;
             return Ok(false);
         }
-    }
-    if pending.is_empty() {
+    };
+    if admitted.pending.is_empty() {
         return Ok(false);
     }
+    let stopped = admitted.rejected_user_turn();
     let history = session.clone_history().await;
     let messages = super::input_messages(history.raw_items(), NativeRuntime::ClaudeCode)?;
     drop(history);
-    if let Err(error) = super::validate_pending_prompt(
-        session,
-        &messages[checkpoint.input_count..],
-        &pending,
-        /*boundary*/ None,
-        codex_external_runtime::validate_claude_prompt,
-        NativeRuntime::ClaudeCode,
-    ) {
+    if let Err(error) = preview(&messages, &admitted.pending) {
         session
             .send_event(
                 turn,
@@ -377,31 +393,25 @@ pub(super) async fn submit_steering(
         return Ok(false);
     }
     drop(messages);
-    for item in pending {
-        super::record_pending_input(
-            session,
-            turn,
-            &settings.model_info,
-            item,
-            Vec::new(),
-            codex_thread_store::PersistContext::TurnStart,
-        )
-        .await?;
+    if cancellation.is_cancelled() {
+        return Ok(false);
+    }
+    super::input::record_admitted_inputs(session, turn, admitted.pending).await?;
+    if stopped {
+        return Ok(false);
     }
     let messages = super::input_messages(
         session.clone_history().await.raw_items(),
         NativeRuntime::ClaudeCode,
     )?;
     let prompt = super::prompt_content(&messages[checkpoint.input_count..])?;
-    checkpoint.input_count = messages.len();
-    checkpoint.input_prefix = super::input_prefix(&messages)?;
+    let count = messages.len();
+    let prefix = super::input_prefix(&messages)?;
     drop(messages);
     session.flush_rollout().await?;
-    linkage.save(checkpoint, path)?;
-    session
-        .external_runtime
-        .queued_input_count
-        .fetch_add(/*val*/ 1, std::sync::atomic::Ordering::SeqCst);
+    if cancellation.is_cancelled() {
+        return Ok(false);
+    }
     match reserved {
         Some(reserved) => {
             reserved.send(prompt).map_err(|_| {
@@ -417,6 +427,13 @@ pub(super) async fn submit_steering(
             }
         },
     }
+    checkpoint.input_count = count;
+    checkpoint.input_prefix = prefix;
+    linkage.save(checkpoint, path)?;
+    session
+        .external_runtime
+        .queued_input_count
+        .fetch_add(/*val*/ 1, std::sync::atomic::Ordering::SeqCst);
     // A later ASM wait must not block Claude from absorbing input already queued natively.
     session.input_queue.notify_mailbox();
     Ok(true)

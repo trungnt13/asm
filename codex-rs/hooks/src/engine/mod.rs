@@ -278,12 +278,13 @@ pub struct HookListEntry {
 #[derive(Clone)]
 pub(crate) struct ClaudeHooksEngine {
     pub(crate) enabled: bool,
+    pub(crate) discovery_mode: discovery::DiscoveryMode,
     // Per-turn views share configuration; executor overlays copy handlers on mutation.
     pub(crate) handlers: Arc<Vec<ConfiguredHandler>>,
     /// Retain the session inventory without copying it for every hook dispatch.
     pub(crate) hook_entries: Arc<Vec<HookListEntry>>,
     pub(crate) warnings: Arc<[String]>,
-    required_load_errors: Arc<[String]>,
+    pub(crate) required_load_errors: Arc<[String]>,
     pub(crate) command_runtime: CommandHookRuntime,
     pub(crate) mcp_executor: Arc<dyn HookMcpExecutor>,
 }
@@ -297,10 +298,12 @@ impl ClaudeHooksEngine {
         plugin_hook_load_warnings: Vec<String>,
         command_runtime: CommandHookRuntime,
         mcp_executor: Arc<dyn HookMcpExecutor>,
+        discovery_mode: discovery::DiscoveryMode,
     ) -> Self {
         if !enabled && plugin_hook_sources.is_empty() {
             return Self {
                 enabled,
+                discovery_mode,
                 handlers: Arc::default(),
                 hook_entries: Arc::default(),
                 warnings: Arc::default(),
@@ -316,7 +319,7 @@ impl ClaudeHooksEngine {
             plugin_hook_sources,
             plugin_hook_load_warnings,
             bypass_hook_trust,
-            discovery::DiscoveryMode::Runtime,
+            discovery_mode,
         );
         if !enabled {
             discovered.handlers.retain(|handler| handler.builtin);
@@ -327,6 +330,7 @@ impl ClaudeHooksEngine {
         }
         Self {
             enabled,
+            discovery_mode,
             handlers: Arc::new(discovered.handlers),
             hook_entries: Arc::new(discovered.hook_entries),
             warnings: discovered.warnings.into(),
@@ -368,6 +372,9 @@ impl ClaudeHooksEngine {
         let mut seen_targets = HashSet::new();
         for source in executor_hooks {
             for (event_name, groups) in source.hooks.into_matcher_groups() {
+                if !self.discovery_mode.includes(event_name) {
+                    continue;
+                }
                 let Some(handler) = groups.into_iter().flat_map(|group| group.hooks).next() else {
                     continue;
                 };
