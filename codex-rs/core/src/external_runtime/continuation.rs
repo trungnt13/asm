@@ -12,6 +12,7 @@ use anyhow::Context;
 use codex_external_runtime::ClaudeContinuation;
 use codex_protocol::error::CodexErr;
 use codex_protocol::openai_models::NativeRuntime;
+use codex_user_input::ResolvedUserInput;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::mpsc;
@@ -301,6 +302,24 @@ pub(super) async fn submit_steering(
         let history = session.clone_history().await;
         super::input::filter_page_context(&mut pending, page_context, history.raw_items());
     }
+    if pending.iter().any(|item| {
+        matches!(item,
+            TurnInput::UserInput { content, .. } if content.iter().any(|part| matches!(part,
+                ResolvedUserInput::Skill { .. }
+                    | ResolvedUserInput::Mention { .. }
+            ))
+        )
+    }) {
+        if let Some(active) = session.active_turn.lock().await.as_ref() {
+            session
+                .input_queue
+                .extend_pending_input_for_turn_state(&active.turn_state, pending)
+                .await;
+        } else {
+            anyhow::bail!("Claude selection input lost its active turn before deferral");
+        }
+        return Ok(false);
+    }
     match super::input::prepare_input(&mut pending) {
         Ok(0) => {}
         Ok(_) => {
@@ -335,7 +354,7 @@ pub(super) async fn submit_steering(
         return Ok(false);
     }
     let history = session.clone_history().await;
-    let messages = super::input_messages(history.raw_items())?;
+    let messages = super::input_messages(history.raw_items(), NativeRuntime::ClaudeCode)?;
     drop(history);
     if let Err(error) = super::validate_pending_prompt(
         session,
@@ -343,6 +362,7 @@ pub(super) async fn submit_steering(
         &pending,
         /*boundary*/ None,
         codex_external_runtime::validate_claude_prompt,
+        NativeRuntime::ClaudeCode,
     ) {
         session
             .send_event(
@@ -368,13 +388,20 @@ pub(super) async fn submit_steering(
         )
         .await?;
     }
-    let messages = super::input_messages(session.clone_history().await.raw_items())?;
+    let messages = super::input_messages(
+        session.clone_history().await.raw_items(),
+        NativeRuntime::ClaudeCode,
+    )?;
     let prompt = super::prompt_content(&messages[checkpoint.input_count..])?;
     checkpoint.input_count = messages.len();
     checkpoint.input_prefix = super::input_prefix(&messages)?;
     drop(messages);
     session.flush_rollout().await?;
     linkage.save(checkpoint, path)?;
+    session
+        .external_runtime
+        .queued_input_count
+        .fetch_add(/*val*/ 1, std::sync::atomic::Ordering::SeqCst);
     match reserved {
         Some(reserved) => {
             reserved.send(prompt).map_err(|_| {
@@ -390,5 +417,7 @@ pub(super) async fn submit_steering(
             }
         },
     }
+    // A later ASM wait must not block Claude from absorbing input already queued natively.
+    session.input_queue.notify_mailbox();
     Ok(true)
 }

@@ -4667,12 +4667,17 @@ impl Session {
         turn_context: Arc<TurnContext>,
         cancellation_token: &CancellationToken,
     ) -> CodexResult<Arc<StepContext>> {
+        let routing = if turn_context.model_info().slug.starts_with("claude-code/") {
+            turn::StepToolRouting::ResponsesApi
+        } else {
+            turn::StepToolRouting::NativeMessaging
+        };
         self.capture_step_context_inner(
             turn_context,
             cancellation_token,
             /*required_servers*/ &[],
             /*required_plugins*/ &HashSet::new(),
-            turn::StepToolRouting::NativeMessaging,
+            routing,
         )
         .await
     }
@@ -5983,11 +5988,30 @@ impl Session {
         &self,
         step_context: &StepContext,
     ) -> CodexResult<Arc<WorldState>> {
+        self.record_context_updates_after(step_context, |_| std::future::ready(Ok(())))
+            .await
+    }
+
+    /// Admit the rendered input before publishing its history and context snapshots.
+    #[instrument(level = "trace", skip_all)]
+    pub(crate) async fn record_context_updates_after<E, F>(
+        &self,
+        step_context: &StepContext,
+        admit: impl FnOnce(&[ResponseItem]) -> F + Send,
+    ) -> Result<Arc<WorldState>, E>
+    where
+        E: From<CodexErr>,
+        F: std::future::Future<Output = Result<(), E>> + Send,
+    {
+        let mut admit = Some(admit);
         let previous = loop {
             if let Some(previous) = self.reference_context_item().await {
                 break previous;
             }
-            if let Some(world_state) = self.try_publish_initial_context(step_context).await? {
+            if let Some(world_state) = self
+                .try_publish_initial_context_after(step_context, &mut admit)
+                .await?
+            {
                 return Ok(world_state);
             }
             // Another publisher installed the prefix. Render this turn against its baseline.
@@ -6003,22 +6027,39 @@ impl Session {
             .render_step_world_state(&world_state);
         world_state.resolve_host_roster(&mut fragments).await;
         let items = crate::context_manager::updates::merge_world_state_updates(fragments);
-        self.state
-            .lock()
-            .await
-            .history
-            .set_world_state_baseline(snapshot);
-        self.publish_step_context(step_context, items, world_state_item, Some(&previous))
-            .await;
+        self.publish_step_context(
+            step_context,
+            items,
+            world_state_item,
+            Some(&previous),
+            snapshot,
+            admit.expect("a deferred publication retains its admission callback"),
+        )
+        .await?;
         Ok(Arc::new(world_state))
     }
 
-    /// Render before acquiring the publication permit so extension and host reads can progress concurrently.
-    /// Only the winner appends the prefix and publishes its world-state and turn checkpoints.
     async fn try_publish_initial_context(
         &self,
         step_context: &StepContext,
     ) -> CodexResult<Option<Arc<WorldState>>> {
+        self.try_publish_initial_context_after(
+            step_context,
+            &mut Some(|_: &[ResponseItem]| std::future::ready(Ok(()))),
+        )
+        .await
+    }
+
+    // Render before taking the permit so extension and host reads can proceed.
+    async fn try_publish_initial_context_after<E, F>(
+        &self,
+        step_context: &StepContext,
+        admit: &mut Option<impl FnOnce(&[ResponseItem]) -> F + Send>,
+    ) -> Result<Option<Arc<WorldState>>, E>
+    where
+        E: From<CodexErr>,
+        F: std::future::Future<Output = Result<(), E>> + Send,
+    {
         let world_state = self
             .build_world_state_for_step(step_context, /*new_window*/ true)
             .await?;
@@ -6034,28 +6075,32 @@ impl Session {
             return Ok(None);
         }
         let items = crate::context_manager::updates::merge_world_state_updates(updates);
-        self.state
-            .lock()
-            .await
-            .history
-            .set_world_state_baseline(snapshot.clone());
         self.publish_step_context(
             step_context,
             items,
-            Some(WorldStateItem::full(snapshot.into_object())),
+            Some(WorldStateItem::full(snapshot.clone().into_object())),
             /*previous*/ None,
+            snapshot,
+            admit
+                .take()
+                .expect("only the winning publisher consumes admission"),
         )
-        .await;
+        .await?;
         Ok(Some(Arc::new(world_state)))
     }
 
-    async fn publish_step_context(
+    async fn publish_step_context<E, F>(
         &self,
         step_context: &StepContext,
         mut context_items: Vec<ResponseItem>,
         world_state_item: Option<WorldStateItem>,
         previous: Option<&TurnContextItem>,
-    ) {
+        snapshot: WorldStateSnapshot,
+        admit: impl FnOnce(&[ResponseItem]) -> F + Send,
+    ) -> Result<(), E>
+    where
+        F: std::future::Future<Output = Result<(), E>> + Send,
+    {
         let turn_context = step_context.turn.as_ref();
         let turn_context_item = step_context.to_turn_context_item();
         let turn_context_changed = previous != Some(&turn_context_item);
@@ -6066,10 +6111,16 @@ impl Session {
                     .await,
             );
         }
+        admit(&context_items).await?;
+        self.state
+            .lock()
+            .await
+            .history
+            .set_world_state_baseline(snapshot);
         // A snapshot can change without producing model-visible or TurnContext updates.
         let only_world_state_changed = !turn_context_changed && context_items.is_empty();
         if only_world_state_changed && world_state_item.is_none() {
-            return;
+            return Ok(());
         }
         if !context_items.is_empty() {
             self.record_conversation_items(
@@ -6086,7 +6137,7 @@ impl Session {
         }
         // A snapshot-only change does not require a duplicate TurnContext record.
         if only_world_state_changed {
-            return;
+            return Ok(());
         }
         // Persist one `TurnContextItem` per real user turn so resume/lazy replay can recover the
         // latest durable baseline even when this turn emitted no model-visible context diffs.
@@ -6110,6 +6161,7 @@ impl Session {
         // context items.
         let mut state = self.state.lock().await;
         state.set_reference_context_item(Some(turn_context_item));
+        Ok(())
     }
 
     /// Record reported spending without changing the context baseline or estimating usage.

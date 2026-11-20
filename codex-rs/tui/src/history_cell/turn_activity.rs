@@ -27,7 +27,11 @@ impl HistoryCell for TurnActivityBoundary {
 
 impl TurnActivityBoundary {
     pub(crate) fn is_activity(cell: &dyn HistoryCell) -> bool {
-        cell.as_any().is::<AgentMarkdownCell>()
+        cell.as_any()
+            .downcast_ref::<AgentMarkdownCell>()
+            .is_some_and(|message| {
+                message.phase != Some(codex_protocol::models::MessagePhase::FinalAnswer)
+            })
             || cell.as_any().is::<AgentMessageCell>()
             || cell.as_any().is::<ReasoningSummaryCell>()
             || cell.tool_call_summary().is_some()

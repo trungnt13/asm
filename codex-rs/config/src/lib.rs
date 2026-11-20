@@ -63,7 +63,6 @@ pub mod types;
 pub use native_runtimes::ClaudeCodeConfig;
 pub use native_runtimes::NativeRuntimesConfig;
 pub use native_runtimes::PageContextPolicy;
-pub use native_runtimes::SkillVisibility;
 
 pub const CONFIG_TOML_FILE: &str = "config.toml";
 

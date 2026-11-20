@@ -13,6 +13,7 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::process::Command;
@@ -40,38 +41,36 @@ pub enum ClaudeSession {
     },
 }
 
-/// Selects ASM root or child startup policy while preserving native side sessions.
+/// Selects Claude startup policy for a chat or a spawned child.
 pub enum ClaudeSessionKind {
-    NativeDefault,
-    ManagedRoot,
-    ManagedChild,
+    Chat,
+    Child,
 }
 
-const ROOT_COMMUNICATION_INSTRUCTIONS: &str = "Assume users can't see most tool calls or thinking — only your text output. Before your first tool call, state in one sentence what you're about to do. While working, give short updates at key moments: when you find something, when you change direction, or when you hit a blocker. Brief is good — silent is not. One sentence per update is almost always enough.";
-
 pub struct ClaudeOptions {
+    /// Counts host steering submissions not yet acknowledged by native replay echoes.
+    /// Increment before enqueueing steering; the driver decrements after consumption.
+    pub queued_input_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     pub executable: PathBuf,
     pub cwd: PathBuf,
     pub model: String,
     pub effort: Option<String>,
     /// Native compaction window, not the model's maximum context capacity.
     pub auto_compact_window: Option<i64>,
-    /// Selected role instructions appended to the native system prompt, including on resume.
-    pub role_instructions: Option<String>,
+    pub system_prompt: String,
     pub session_kind: ClaudeSessionKind,
     pub session: ClaudeSession,
-    pub bridge_directory: Option<PathBuf>,
-    /// Native tool names removed from this session, such as questions for headless children.
-    pub disallowed_tools: Vec<String>,
-    pub skill_overrides: serde_json::Map<String, Value>,
+    pub bridge_directory: PathBuf,
 }
 
 pub(crate) struct ClaudeDriver {
     pub(super) process: ExternalProcess,
+    _system_prompt_file: tempfile::NamedTempFile,
     session_id: String,
     usable: bool,
     failure_result: Option<Value>,
     mid_turn_delivery: watch::Sender<bool>,
+    queued_input_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     // Native reports this level per process; live tasks can start another native turn.
     pub(super) background_work: bool,
     pub(super) first_frame: Option<Value>,
@@ -79,6 +78,7 @@ pub(crate) struct ClaudeDriver {
     // Last top-level assistant message of the latest turn, for pinned native forks.
     last_assistant_uuid: Option<String>,
     per_turn_effort_active: Option<bool>,
+    initialized: bool,
 }
 
 fn execution_abort_reason(result: &Value) -> Option<&str> {
@@ -147,7 +147,12 @@ impl ClaudeDriver {
                 "--output-format",
                 "stream-json",
             ])
-            .args(["--verbose", "--include-partial-messages"])
+            .args([
+                "--verbose",
+                "--include-partial-messages",
+                "--replay-user-messages",
+                "--await-initialize",
+            ])
             // Run in native bypass mode. Native deny rules and managed policy still apply;
             // no permission host is attached, so anything that still prompts is denied.
             .arg("--dangerously-skip-permissions")
@@ -156,73 +161,139 @@ impl ClaudeDriver {
             .arg(options.model)
             .arg(session_flag)
             .arg(&session_id);
-        if let Some(directory) = &options.bridge_directory {
-            command
-                .arg("--plugin-dir")
-                .arg(directory)
-                .env("ASM_NATIVE_DESCRIPTOR", directory.join("descriptor.json"))
-                .env("ASM_NATIVE_EXE", std::env::current_exe()?);
-        }
+        let directory = options.bridge_directory;
+        command
+            // An empty --tools also rejects plugin tools. Select, then deny, one built-in.
+            .args([
+                "--tools",
+                "ToolSearch",
+                "--disable-slash-commands",
+                "--strict-mcp-config",
+            ])
+            .args([
+                "--mcp-config",
+                r#"{"mcpServers":{}}"#,
+                "--setting-sources",
+                "",
+            ])
+            .arg("--plugin-dir")
+            .arg(&directory)
+            .env("ASM_NATIVE_DESCRIPTOR", directory.join("descriptor.json"))
+            .env("ASM_NATIVE_EXE", std::env::current_exe()?);
         let mut flag_env = serde_json::Map::new();
-        let mut flag_settings = json!({});
-        if matches!(options.session_kind, ClaudeSessionKind::ManagedChild) {
+        for name in [
+            "CLAUDE_CODE_DISABLE_CLAUDE_MDS",
+            "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+            "CLAUDE_CODE_DISABLE_BUNDLED_SKILLS",
+            "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS",
+            "DISABLE_TELEMETRY",
+        ] {
+            command.env(name, "1");
+            flag_env.insert(name.to_owned(), json!("1"));
+        }
+        let mut flag_settings = json!({
+            "disableClaudeAiConnectors": true,
+            "syncClaudeAiSkills": false,
+            "syncClaudeAiPlugins": false,
+            "autoMemoryEnabled": false,
+            "spinnerTipsEnabled": false,
+            "enabledPlugins": {
+                "cc-plugin-agents-md@builtin": false,
+                "cc-plugin-plugin-authoring@builtin": false,
+                "cc-plugin-mods-guide@builtin": false,
+                "cc-plugin-tips@builtin": false,
+                "cc-plugin-you-should-know@builtin": false,
+                "cc-plugin-privacy@builtin": false,
+                "cc-plugin-telemetry@builtin": false,
+            },
+            "attribution": {"commit": "", "pr": ""},
+        });
+        if matches!(options.session_kind, ClaudeSessionKind::Child) {
             command
                 .args(["--system-prompt-snapshot", "off"])
                 .env("FORCE_PROMPT_CACHING_5M", "1");
             flag_env.insert("FORCE_PROMPT_CACHING_5M".to_owned(), json!("1"));
-            flag_settings["disableClaudeAiConnectors"] = json!(true);
-            flag_settings["syncClaudeAiSkills"] = json!(false);
         }
-        let instructions = match options.session_kind {
-            ClaudeSessionKind::ManagedRoot => Some(ROOT_COMMUNICATION_INSTRUCTIONS.to_owned()),
-            ClaudeSessionKind::NativeDefault | ClaudeSessionKind::ManagedChild => {
-                options.role_instructions
-            }
-        };
-        if let Some(instructions) = instructions {
-            command.arg("--append-system-prompt").arg(instructions);
-        }
+        let mut system_prompt_file = tempfile::NamedTempFile::new_in(&directory)
+            .context("creating Claude system prompt file")?;
+        system_prompt_file
+            .write_all(options.system_prompt.as_bytes())
+            .context("writing Claude system prompt file")?;
+        command
+            .arg("--system-prompt-file")
+            .arg(system_prompt_file.path());
         if let Some(window) = options.auto_compact_window {
             let window = window.to_string();
             command.env("CLAUDE_CODE_AUTO_COMPACT_WINDOW", &window);
             flag_env.insert("CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_owned(), json!(window));
             command.arg("--autocompact").arg(window);
         }
-        if !options.skill_overrides.is_empty() {
-            flag_settings["skillOverrides"] = Value::Object(options.skill_overrides);
-        }
-        if !flag_env.is_empty() {
-            // Settings can reapply env after startup; flag settings beat user/project settings.
-            // Native managed policy still has precedence.
-            flag_settings["env"] = json!(flag_env);
-        }
-        if flag_settings
-            .as_object()
-            .is_some_and(|settings| !settings.is_empty())
-        {
-            command.arg("--settings").arg(flag_settings.to_string());
-        }
+        flag_settings["env"] = json!(flag_env);
+        command.arg("--settings").arg(flag_settings.to_string());
         if let Some(effort) = options.effort {
             command.arg("--effort").arg(effort);
         }
-        if !options.disallowed_tools.is_empty() {
-            command
-                .arg("--disallowedTools")
-                .arg(options.disallowed_tools.join(","));
-        }
-        Ok(Self {
+        command.args(["--disallowedTools", "ToolSearch"]);
+        options
+            .queued_input_count
+            .store(/*val*/ 0, std::sync::atomic::Ordering::SeqCst);
+        let mut driver = Self {
             process: ExternalProcess::spawn(command, frames::FramePolicy::ClaudeImages)
                 .context("starting official Claude CLI")?,
+            _system_prompt_file: system_prompt_file,
             session_id,
             usable: true,
             failure_result: None,
             mid_turn_delivery: watch::channel(false).0,
+            queued_input_count: options.queued_input_count,
             background_work: false,
             first_frame: None,
             active_agents: HashMap::new(),
             last_assistant_uuid: None,
             per_turn_effort_active: None,
+            initialized: false,
+        };
+        // Initialization runs bridge registration without submitting user input for inference.
+        let initialized = timeout(Duration::from_secs(/*secs*/ 60), async {
+            let id = Uuid::new_v4().to_string();
+            driver
+                .process
+                .write_frame(json!({
+                    "type": "control_request", "request_id": id,
+                    "request": {"subtype": "initialize"},
+                }))
+                .await?;
+            let frame = driver
+                .process
+                .frames
+                .recv()
+                .await
+                .context("Claude closed during initialization")??;
+            anyhow::ensure!(
+                frame["type"] == "control_response"
+                    && frame["response"]["request_id"] == id
+                    && frame["response"]["subtype"] == "success",
+                "Claude did not confirm isolated initialization"
+            );
+            anyhow::ensure!(
+                frame["response"]["response"]["commands"]
+                    .as_array()
+                    .is_some_and(Vec::is_empty),
+                "Claude exposed native commands or omitted its startup inventory"
+            );
+            driver
+                .process
+                .record_cli_version(&frame["response"]["response"]["claude_code_version"]);
+            Ok::<(), anyhow::Error>(())
         })
+        .await
+        .context("Claude initialization timed out")
+        .and_then(std::convert::identity);
+        if let Err(error) = initialized {
+            driver.process.kill().await;
+            return Err(error);
+        }
+        Ok(driver)
     }
 
     /// Whether native background tasks were live at the last observed frame.
@@ -377,6 +448,7 @@ impl ClaudeDriver {
         let mut latest_command_succeeded = false;
         let mut cancelled_commands = HashSet::new();
         let mut submitted_steering_count = 0;
+        let mut queued_steering = HashSet::new();
         let mut interrupt_id = None;
         let mut interrupt_deadline = None;
         let mut interrupt_acknowledged = false;
@@ -455,6 +527,7 @@ impl ClaudeDriver {
                         bail!("Claude steering was submitted without command lifecycle support");
                     }
                     let command_uuid = Uuid::new_v4().to_string();
+                    queued_steering.insert(command_uuid.clone());
                     // No Send now or interrupt: native queues the message and folds it in at
                     // its next tool boundary, so running tools finish instead of being rejected.
                     // Persisted input is never replayed if the write fails partway through.
@@ -478,6 +551,14 @@ impl ClaudeDriver {
                 } => frame?,
             };
             self.observe_session_frame(&frame)?;
+            if frame["type"] == "user"
+                && frame["uuid"]
+                    .as_str()
+                    .is_some_and(|id| queued_steering.remove(id))
+            {
+                self.queued_input_count
+                    .fetch_sub(/*val*/ 1, std::sync::atomic::Ordering::SeqCst);
+            }
             let tool_block = |block: &Value| {
                 matches!(
                     block.get("type").and_then(Value::as_str),
@@ -752,6 +833,15 @@ impl ClaudeDriver {
         if !frame.is_object() || frame.get("type").and_then(Value::as_str).is_none() {
             bail!("Claude emitted a JSON frame without an event type");
         }
+        if matches!(
+            frame["type"].as_str(),
+            Some("assistant" | "stream_event" | "result" | "tool_progress")
+        ) {
+            anyhow::ensure!(
+                self.initialized,
+                "Claude emitted model activity before its tool inventory was verified"
+            );
+        }
         if let Some(id) = frame.get("session_id").and_then(Value::as_str)
             && id != self.session_id
         {
@@ -769,6 +859,37 @@ impl ClaudeDriver {
         if frame.get("type").and_then(Value::as_str) == Some("system")
             && frame.get("subtype").and_then(Value::as_str) == Some("init")
         {
+            let tools = frame["tools"]
+                .as_array()
+                .context("Claude omitted its tool inventory")?;
+            anyhow::ensure!(
+                !tools.is_empty()
+                    && tools.iter().all(|tool| tool
+                        .as_str()
+                        .is_some_and(|name| name.starts_with("mcp__asm__"))),
+                "Claude exposed tools outside the ASM bridge or failed to register the bridge"
+            );
+            for name in ["skills", "slash_commands"] {
+                anyhow::ensure!(
+                    frame[name].as_array().is_some_and(Vec::is_empty),
+                    "Claude exposed native {name} or omitted its inventory"
+                );
+            }
+            for name in ["mcp_servers", "plugins"] {
+                anyhow::ensure!(
+                    frame[name]
+                        .as_array()
+                        .is_some_and(|items| items.len() == 1 && items[0]["name"] == "asm"),
+                    "Claude exposed non-ASM {name} or failed to register the bridge"
+                );
+            }
+            anyhow::ensure!(
+                frame["mcp_servers"][0]["source"] == "plugin"
+                    && frame["mcp_servers"][0]["status"] == "connected"
+                    && frame["plugins"][0]["source"] == "asm@inline",
+                "Claude did not load the explicit ASM bridge plugin"
+            );
+            self.initialized = true;
             self.process
                 .record_cli_version(&frame["claude_code_version"]);
             // Send now is never requested. This capability only identifies the verified
