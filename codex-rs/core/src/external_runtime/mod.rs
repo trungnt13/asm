@@ -395,7 +395,7 @@ async fn run_conversation(
         let needs_binding = lease.runtime.is_some();
         let mut prepared_context = None;
         if lease.runtime.is_none() {
-            let mut initial_context = Vec::new();
+            let mut initial_context = None;
             let role_instructions = if thread_spawn_child {
                 turn.config.role_developer_instructions.clone()
             } else {
@@ -439,7 +439,7 @@ async fn run_conversation(
                     let id = uuid::Uuid::new_v4().to_string();
                     let parent = std::mem::replace(&mut checkpoint.session_id, id.clone());
                     checkpoint.fork_point = None;
-                    initial_context.push(Value::String(TEMPORARY_FORK_BOUNDARY.to_owned()));
+                    initial_context = Some(Value::String(TEMPORARY_FORK_BOUNDARY.to_owned()));
                     let at = seed.fork_point;
                     let fork = SessionStart::Fork { parent, at, id };
                     (checkpoint, fork, Linkage::Temporary)
@@ -477,7 +477,7 @@ async fn run_conversation(
                                             namespace: Some(codex_protocol::models::ContentItemNamespace::Collaboration) })
                                     && metadata.content_item_kinds.as_ref().and_then(|kinds| kinds.get(index))
                                         .is_some_and(|kind| matches!(kind.as_str(),
-                                            "multi_agent.mode_instructions" | "multi_agent.role_instructions")))
+                                            "multi_agent.mode_instructions" | codex_prompts::MultiAgentRoleInstructions::KIND)))
                             })))
                     });
                     if !input_messages(previous_input, native_runtime)?.is_empty()
@@ -485,12 +485,9 @@ async fn run_conversation(
                     {
                         bail!("missing native session linkage for existing history; start a new chat");
                     }
-                    initial_context = portable::reference_messages(inherited, native_runtime)?;
-                    let input_count = input_messages(
-                        inherited.iter().map(|item| item.item.as_ref()),
-                        native_runtime,
-                    )?
-                    .len();
+                    let (input_count, reference) =
+                        portable::reference_message(inherited, native_runtime)?;
+                    initial_context = reference;
                     let id = if inherited.is_empty() {
                         session.thread_id().to_string()
                     } else {
@@ -712,7 +709,7 @@ async fn run_conversation(
                         session,
                         &messages[runtime.checkpoint.input_count..],
                         input,
-                        &runtime.initial_context,
+                        runtime.initial_context.as_ref(),
                         |prompt| match &runtime.runtime {
                             RuntimeProcess::Claude(_) => {
                                 codex_external_runtime::validate_claude_prompt(prompt)
@@ -788,11 +785,10 @@ async fn run_conversation(
                         }))
                     {
                         // An unsent handoff has no checkpoint to resume yet.
-                        let linkage = if runtime.initial_context.is_empty() {
-                            &runtime.linkage
-                        } else {
-                            &Linkage::Temporary
-                        };
+                        let linkage = runtime
+                            .initial_context
+                            .as_ref()
+                            .map_or(&runtime.linkage, |_| &Linkage::Temporary);
                         let changed = match &mut runtime.runtime {
                             RuntimeProcess::Claude(process) => {
                                 runtime.checkpoint.in_flight = true;
@@ -851,14 +847,16 @@ async fn run_conversation(
         let history = session.clone_history().await;
         let messages = input_messages(history.raw_items(), native_runtime)?;
         drop(history);
-        let pending = &messages[runtime.checkpoint.input_count..];
-        let prompt = match prompt_content(pending)? {
-            codex_external_runtime::Prompt::Text(text) if text.trim().is_empty() => {
-                return Ok(last_message);
-            }
-            prompt if runtime.initial_context.is_empty() => prompt,
-            _ => prompt_content(&[runtime.initial_context.as_slice(), pending].concat())?,
-        };
+        let mut pending_messages = messages[runtime.checkpoint.input_count..].to_vec();
+        let mut prompt = prompt_content(&pending_messages)?;
+        if matches!(&prompt, codex_external_runtime::Prompt::Text(text) if text.trim().is_empty()) {
+            return Ok(last_message);
+        }
+        if let Some(boundary) = &runtime.initial_context {
+            pending_messages.insert(/*index*/ 0, boundary.clone());
+            prompt = prompt_content(&pending_messages)?;
+        }
+        drop(pending_messages);
         if needs_binding && let Some(bridge) = &runtime.bridge {
             let step = match prepared_step {
                 Some(step) => step,
@@ -892,7 +890,7 @@ async fn run_conversation(
         runtime
             .linkage
             .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
-        runtime.initial_context.clear();
+        runtime.initial_context = None;
         let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(/*buffer*/ 32);
         let mut stream = events::MessageStream::default();
         let handoff_capture = active_handoff::HandoffCapture::default();

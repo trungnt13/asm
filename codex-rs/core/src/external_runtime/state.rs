@@ -138,7 +138,7 @@ enum TemporaryFork {
 }
 
 pub(crate) struct ExternalSession {
-    pub(super) initial_context: Vec<serde_json::Value>,
+    pub(super) initial_context: Option<serde_json::Value>,
     pub(super) runtime: RuntimeProcess,
     pub(super) foreground_idle: bool,
     pub(super) page_context: codex_config::PageContextPolicy,

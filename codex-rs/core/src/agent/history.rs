@@ -406,17 +406,15 @@ pub(super) async fn prepare_forked_history(
     };
     let parent = parent_thread.config_snapshot().await;
     let parent_history_mode = parent.history_mode;
-    // `record_conversation_items` only queues persistence writes asynchronously.
-    // Flush before snapshotting store history for a fork.
-    parent_thread.ensure_rollout_materialized().await;
-    parent_thread.flush_rollout().await?;
-
     let destination_history_mode = matches!(parent_history_mode, ThreadHistoryMode::Paginated)
         .then_some(ThreadHistoryMode::Paginated);
     let native_cut = options.native_fork_cut.as_ref();
     let mut forked_rollout_items = if let Some(history) = native_cut {
         history.get_rollout_items().to_vec()
     } else {
+        // Flush asynchronous rollout writes before snapshotting stored history.
+        parent_thread.ensure_rollout_materialized().await;
+        parent_thread.flush_rollout().await?;
         load_agent_model_context(state, parent_thread_id, parent_history_mode)
             .await?
             .items
@@ -434,13 +432,19 @@ pub(super) async fn prepare_forked_history(
             ));
         }
         let history = InitialHistory::Forked(forked_rollout_items);
-        let items =
-            crate::handoff::project(&history, config.handoff.max_history_bytes.get(), |item| {
-                item.child_retention() != Some(false)
-            })?;
+        let items = crate::handoff::project(
+            &history,
+            parent_history_mode,
+            config.handoff.max_history_bytes.get(),
+            |item| item.child_retention() != Some(false),
+        )?;
         let history =
             InitialHistory::Forked(items.into_iter().map(RolloutItem::ResponseItem).collect());
-        return Ok((history, destination_history_mode, Some(PortableHistory)));
+        return Ok((
+            history,
+            destination_history_mode,
+            Some(PortableHistory::Hidden),
+        ));
     }
 
     let multi_agent_v2_usage_hint_texts_to_filter: Vec<String> =

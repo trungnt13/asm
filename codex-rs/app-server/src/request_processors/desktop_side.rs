@@ -1,7 +1,6 @@
 use codex_core::config::Config;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::openai_models::NativeRuntime;
 use codex_protocol::protocol::ThreadSource;
 // Desktop 26.1027.51404 supplies these complete blocks, but no structured side marker.
 // Unknown client wording deliberately retains ordinary thread behavior.
@@ -25,15 +24,10 @@ pub(super) fn apply_defaults(
                 .then_some(offset)
             });
     let side_block_offset = side_block_offset?;
-    if matches!(
-        config.model.as_deref().and_then(NativeRuntime::for_model),
-        Some((NativeRuntime::ClaudeCode, _))
-    ) {
-        // TUI owns deletion of its Side attachments, not Desktop's.
-        *thread_source = Some(ThreadSource::Feature(
-            ThreadSource::DESKTOP_SIDE_CHAT_SOURCE.to_string(),
-        ));
-    }
+    // TUI owns deletion of its Side attachments, not Desktop's.
+    *thread_source = Some(ThreadSource::Feature(
+        ThreadSource::DESKTOP_SIDE_CHAT_SOURCE.to_string(),
+    ));
     if let Some(prompt) = config
         .side_prompt
         .as_deref()

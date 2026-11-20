@@ -34,21 +34,20 @@ pub(crate) async fn active_handoff_history(step: &StepContext) -> Result<Initial
         .get::<HandoffCapture>()
         .ok_or_else(unverified)?
         .subscribe();
-    let cut = tokio::select! {
-        biased;
-        () = invocation.active.cancelled() => None,
-        result = tokio::time::timeout(
-            Duration::from_secs(/*secs*/ 2),
-            latest.wait_for(|cut| {
-                cut.as_ref().is_some_and(|cut| {
-                    cut.tools.get(&invocation.tool_use_id) == Some(&invocation.tool_name)
-                })
-            }),
-        ) => result.ok().and_then(Result::ok),
-    };
+    let cut = tokio::time::timeout(
+        Duration::from_secs(/*secs*/ 2),
+        latest.wait_for(|cut| {
+            cut.as_ref().is_some_and(|cut| {
+                cut.tools.get(&invocation.tool_use_id) == Some(&invocation.tool_name)
+            })
+        }),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .ok_or_else(unverified)?;
     let history = &cut
-        .as_deref()
-        .and_then(Option::as_ref)
+        .as_ref()
         .filter(|_| !invocation.active.is_cancelled())
         .ok_or_else(unverified)?
         .history;

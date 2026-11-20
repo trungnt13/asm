@@ -362,7 +362,7 @@ pub(super) async fn submit_steering(
         session,
         &messages[checkpoint.input_count..],
         &pending,
-        /*prefix*/ &[],
+        /*boundary*/ None,
         codex_external_runtime::validate_claude_prompt,
         NativeRuntime::ClaudeCode,
     ) {

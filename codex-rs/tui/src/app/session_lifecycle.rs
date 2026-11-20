@@ -1766,19 +1766,13 @@ impl App {
         presentation: ThreadAttachPresentation,
         initial_user_message: Option<crate::chatwidget::UserMessage>,
     ) -> Result<()> {
-        let account = if started.session.model_provider_id != self.chat_widget.quota_provider_id() {
-            let account = app_server.read_thread_account(&started.session).await;
-            Some(account.unwrap_or_default())
-        } else {
-            None
-        };
         self.replace_chat_widget_with_account(
             tui,
             app_server,
             started,
             presentation,
             initial_user_message,
-            account,
+            /*account*/ None,
             /*source_thread*/ None,
         )
         .await
@@ -1874,6 +1868,9 @@ impl App {
             self.chatwidget_init_for_forked_or_resumed_thread(tui, config, initial_user_message);
         if let Some(account) = account {
             self.apply_session_account(&mut init, account);
+        } else if started.session.model_provider_id != self.chat_widget.quota_provider_id() {
+            let account = app_server.read_thread_account(&started.session).await;
+            self.apply_session_account(&mut init, account.unwrap_or_default());
         }
         self.replace_chat_widget_for_provider(
             ChatWidget::new_with_app_event(init),

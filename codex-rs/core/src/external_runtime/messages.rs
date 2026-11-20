@@ -189,7 +189,7 @@ pub(super) fn validate_pending_prompt(
     session: &Session,
     messages: &[Value],
     pending: &[TurnInput],
-    prefix: &[Value],
+    boundary: Option<&Value>,
     validate: impl FnOnce(&codex_external_runtime::Prompt) -> anyhow::Result<()>,
     runtime: NativeRuntime,
 ) -> anyhow::Result<()> {
@@ -204,7 +204,10 @@ pub(super) fn validate_pending_prompt(
             TurnInput::InterAgentCommunication(message) => message.to_model_input_item(),
         })
         .collect::<Vec<_>>();
-    let mut messages = [prefix, messages].concat();
+    let mut messages = messages.to_vec();
     messages.extend(input_messages(&items, runtime)?);
+    if let Some(boundary) = boundary {
+        messages.insert(/*index*/ 0, boundary.clone());
+    }
     validate(&prompt_content(&messages)?)
 }

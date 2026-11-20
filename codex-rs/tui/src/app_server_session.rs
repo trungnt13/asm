@@ -215,7 +215,8 @@ enum ForkPresentation {
     SideConversation(SideChatStorage),
 }
 
-pub(crate) const ATTACHED_SIDE_CHAT_SOURCE: &str = codex_context_fragments::SIDE_CHAT_SOURCE;
+pub(crate) const ATTACHED_SIDE_CHAT_SOURCE: &str =
+    codex_protocol::protocol::ThreadSource::TUI_SIDE_CHAT_SOURCE;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SideChatStorage {

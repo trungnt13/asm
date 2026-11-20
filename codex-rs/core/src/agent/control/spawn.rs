@@ -628,7 +628,7 @@ impl LocalAgentControl {
                         requires_handoff(parent.model.as_deref(), &parent.model_provider, &config)
                     })
             };
-            portable.then_some(PortableHistory)
+            portable.then_some(PortableHistory::Hidden)
         } else {
             None
         };

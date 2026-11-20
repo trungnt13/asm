@@ -258,6 +258,8 @@ pub struct RevertThreadParams {
 pub struct PreparedFork {
     /// Immediate source thread, even when the normalized history base names an ancestor.
     pub source_thread_id: ThreadId,
+    /// Requested boundary, even if the resolved position is the current tip.
+    pub boundary: ForkBoundary,
     /// Frozen physical rollout prefix inherited by the child.
     pub history_base: Option<HistoryPosition>,
     /// Bounded model context selected by the requested fork boundary.
@@ -282,6 +284,7 @@ impl PreparedFork {
     ) -> Self {
         Self {
             source_thread_id,
+            boundary: ForkBoundary::Latest,
             history_base,
             model_context,
             preview_before_compaction: None,
@@ -298,6 +301,7 @@ impl PreparedFork {
     ) -> Self {
         Self {
             source_thread_id,
+            boundary: ForkBoundary::Latest,
             history_base,
             model_context,
             preview_before_compaction: None,

@@ -565,7 +565,7 @@ mod rollout_payload;
 pub use guardian_history::GuardianHistoryCheckpoint;
 pub use guardian_history::GuardianRetainedOmissions;
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CompactedItem {
     pub message: String,
     pub replacement_history: Option<Vec<ResponseItemEnvelope>>,

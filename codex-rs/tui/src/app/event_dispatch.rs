@@ -803,8 +803,16 @@ impl App {
                     fork_config.model = Some(self.chat_widget.current_model().to_string());
                     fork_config.model_reasoning_effort =
                         self.chat_widget.current_reasoning_effort();
-                    let continuation = if let Some((model, effort, service_tier)) = model_selection {
-                        fork_config.model_provider_id.clone_from(&self.config.model_provider_id);
+                    if let Some((model, effort, service_tier)) = model_selection {
+                        match crate::boxed_future!(self.load_new_session_config(app_server, Some(&model))).await {
+                            Ok((config, _)) => fork_config.model_provider_id = config.model_provider_id,
+                            Err(err) => {
+                                self.chat_widget.fork_in_progress = false;
+                                self.chat_widget.add_error_message(err.to_string());
+                                self.chat_widget.maybe_send_next_queued_input();
+                                return Ok(AppRunControl::Continue);
+                            }
+                        }
                         fork_config.model = Some(model);
                         fork_config.model_reasoning_effort = effort;
                         fork_config.service_tier = service_tier;
@@ -815,6 +823,8 @@ impl App {
                             self.chat_widget.maybe_send_next_queued_input();
                             return Ok(AppRunControl::Continue);
                         }
+                    }
+                    let continuation = if switching_model && !fork_config.ephemeral {
                         ForkGoalContinuation::DeferUntilNextTurn
                     } else {
                         ForkGoalContinuation::StartIfIdle

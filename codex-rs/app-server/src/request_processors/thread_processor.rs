@@ -6085,7 +6085,11 @@ impl ThreadRequestProcessor {
         } else {
             self.thread_manager
                 .fork_thread_from_history(
-                    ForkSnapshot::Interrupted,
+                    if last_turn_id.is_some() || before_turn_id.is_some() {
+                        ForkSnapshot::Historical
+                    } else {
+                        ForkSnapshot::Interrupted
+                    },
                     fork_options,
                     InitialHistory::Resumed(ResumedHistory {
                         history_revision: None,

@@ -57,7 +57,6 @@ use codex_attachment_store::AttachmentStore;
 use codex_attachment_store::InlineAttachmentStore;
 use codex_code_mode::CodeModeSessionProvider;
 use codex_code_mode::DisabledCodeModeSessionProvider;
-use codex_context_fragments::SIDE_CHAT_SOURCE;
 use codex_context_fragments::SideConversationPolicy;
 use codex_core_plugins::PluginsManager;
 use codex_exec_server::EnvironmentManager;
@@ -255,6 +254,7 @@ pub enum ForkSnapshot {
     /// already at a turn boundary, this returns the current persisted history
     /// unchanged.
     Interrupted,
+    Historical,
 }
 
 struct ForkHistory {
@@ -1943,7 +1943,14 @@ impl ThreadManager {
             .fork_thread_with_initial_history(
                 options,
                 ForkHistory {
-                    snapshot: ForkSnapshot::Interrupted,
+                    snapshot: if matches!(
+                        prepared.boundary,
+                        codex_thread_store::ForkBoundary::Latest
+                    ) {
+                        ForkSnapshot::Interrupted
+                    } else {
+                        ForkSnapshot::Historical
+                    },
                     initial_history: history,
                     persistence: fork_persistence,
                 },
@@ -1970,16 +1977,11 @@ impl ThreadManager {
             InitialHistory::Forked(_) => history.forked_from_id(),
             InitialHistory::New | InitialHistory::Cleared => None,
         };
-        let source_settings = crate::session::history_thread_settings(&history);
-        let source_provider = source_settings
-            .map(|settings| settings.model_provider_id.as_str())
-            .or_else(|| {
-                history
-                    .get_session_meta()
-                    .filter(|meta| Some(meta.id) == source_thread_id)
-                    .and_then(|meta| meta.model_provider.as_deref())
-            });
-        let native_source = crate::session::history_native_runtime(&history);
+        let source_provider = history
+            .get_session_meta()
+            .filter(|meta| Some(meta.id) == source_thread_id)
+            .and_then(|meta| meta.model_provider.as_deref());
+        let native_source = crate::session::history_native_model(&history);
         let native_target = options
             .config
             .model
@@ -1987,21 +1989,19 @@ impl ThreadManager {
             .and_then(NativeRuntime::for_model)
             .map(|(runtime, _)| runtime);
         let side = matches!(options.thread_source.as_ref(), Some(ThreadSource::Feature(source))
-            if matches!(source.as_str(), SIDE_CHAT_SOURCE | ThreadSource::DESKTOP_SIDE_CHAT_SOURCE));
+            if matches!(source.as_str(), ThreadSource::TUI_SIDE_CHAT_SOURCE | ThreadSource::DESKTOP_SIDE_CHAT_SOURCE));
         let native_side = side
             && options.config.ephemeral
-            && native_source == Some(NativeRuntime::ClaudeCode)
-            && native_source == native_target
-            && source_settings.is_none_or(|source| {
-                options.config.model.as_deref() == Some(source.model.as_str())
+            && native_source.is_some_and(|(slug, runtime)| {
+                runtime == NativeRuntime::ClaudeCode
+                    && options.config.model.as_deref() == Some(slug)
             })
             && matches!(snapshot, ForkSnapshot::Interrupted)
             && !snapshot_turn_state(&history).ends_mid_turn;
         let portable = !native_side
             && (native_source.is_some()
                 || native_target.is_some()
-                || source_provider
-                    .is_some_and(|provider| provider != options.config.model_provider_id));
+                || source_provider != Some(options.config.model_provider_id.as_str()));
         if portable
             && options
                 .thread_extension_init
@@ -2010,13 +2010,6 @@ impl ThreadManager {
         {
             return Err(CodexErr::InvalidRequest(
                 "A prediction fork cannot change its inherited runtime context".to_owned(),
-            ));
-        }
-        if native_target == Some(NativeRuntime::CursorAgent)
-            && (side || options.config.ephemeral)
-        {
-            return Err(CodexErr::InvalidRequest(
-                "Cursor does not support this Side conversation".to_owned(),
             ));
         }
         let native_fork = if native_side {
@@ -2067,42 +2060,33 @@ impl ThreadManager {
             &options.config,
             multi_agent_version,
         );
-        let source_history_mode = history.get_history_mode(ThreadHistoryMode::Legacy);
+        let source_history_mode = history.get_history_mode(match fork_persistence {
+            ForkPersistence::Referenced { .. } => ThreadHistoryMode::Paginated,
+            ForkPersistence::Copied | ForkPersistence::CopiedDeferred => ThreadHistoryMode::Legacy,
+        });
         options.initial_history = fork_history_from_snapshot(snapshot, history, interrupted_marker);
         if portable {
             options.history_mode = Some(source_history_mode);
             let projected = crate::handoff::project(
                 &options.initial_history,
+                source_history_mode,
                 options.config.handoff.max_history_bytes.get(),
                 |_| true,
             )?;
-            if let ForkPersistence::Referenced {
-                inherited_item_count,
-                ..
-            } = &mut fork_persistence
-            {
-                *inherited_item_count = 0;
-                options.history_mode = Some(ThreadHistoryMode::Paginated);
-                options.initial_history = InitialHistory::Forked(vec![RolloutItem::Compacted(
-                    Box::new(codex_history::CompactedItem {
-                        replacement_history: Some(projected),
-                        window_number: Some(0),
-                        ..Default::default()
-                    }),
-                )]);
-            } else {
-                let items = projected.into_iter().flat_map(|envelope| {
-                    let events = crate::event_mapping::parse_turn_item(&envelope.item)
-                        .map(|item| item.as_legacy_events(/*show_raw_agent_reasoning*/ false))
-                        .unwrap_or_default();
-                    std::iter::once(RolloutItem::ResponseItem(envelope))
-                        .chain(events.into_iter().map(RolloutItem::EventMsg))
-                });
-                options.initial_history = InitialHistory::Forked(items.collect());
-            }
+            fork_persistence = ForkPersistence::Copied;
+            options.initial_history = InitialHistory::Forked(
+                projected
+                    .into_iter()
+                    .map(RolloutItem::ResponseItem)
+                    .collect(),
+            );
             options
                 .thread_extension_init
-                .insert(crate::handoff::PortableHistory);
+                .insert(if options.attached_thread {
+                    crate::handoff::PortableHistory::Hidden
+                } else {
+                    crate::handoff::PortableHistory::Visible
+                });
         }
         if options
             .thread_extension_init
@@ -2826,14 +2810,23 @@ impl ThreadManagerState {
         if prevent_daybreak_program_propagation_enrollment {
             thread_extension_init.insert(crate::agent::helper_daybreak::PreventRootEnrollment);
         }
-        if matches!(thread_source.as_ref(), Some(ThreadSource::Feature(source))
-            if matches!(source.as_str(), SIDE_CHAT_SOURCE | ThreadSource::DESKTOP_SIDE_CHAT_SOURCE))
-            && config
-                .model
-                .as_deref()
-                .and_then(NativeRuntime::for_model)
-                .is_some_and(|(runtime, _)| runtime == NativeRuntime::ClaudeCode)
+        let side = matches!(
+            thread_source.as_ref().map(ThreadSource::as_str),
+            Some(ThreadSource::TUI_SIDE_CHAT_SOURCE | ThreadSource::DESKTOP_SIDE_CHAT_SOURCE)
+        );
+        let native_runtime = config
+            .model
+            .as_deref()
+            .and_then(NativeRuntime::for_model)
+            .map(|(runtime, _)| runtime);
+        if native_runtime == Some(NativeRuntime::CursorAgent)
+            && (side || config.ephemeral && matches!(initial_history, InitialHistory::Forked(_)))
         {
+            return Err(CodexErr::InvalidRequest(
+                "Cursor does not support this Side conversation".into(),
+            ));
+        }
+        if side && native_runtime == Some(NativeRuntime::ClaudeCode) {
             let policy = if config.ephemeral {
                 SideConversationPolicy::Temporary
             } else {
@@ -3715,7 +3708,7 @@ pub(crate) fn fork_history_from_snapshot(
         ForkSnapshot::TruncateBeforeNthUserMessage(nth_user_message) => {
             truncate_before_nth_user_message(history, nth_user_message, &snapshot_state)
         }
-        ForkSnapshot::Interrupted => {
+        ForkSnapshot::Interrupted | ForkSnapshot::Historical => {
             let mut history = match history {
                 InitialHistory::New => InitialHistory::New,
                 InitialHistory::Cleared => InitialHistory::Cleared,
