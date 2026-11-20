@@ -1,3 +1,6 @@
+use super::super::decision_log::DecisionApiOutcome;
+use super::super::decision_log::DecisionDisposition;
+use super::super::decision_log::DecisionPurpose;
 use super::System1Session;
 use super::System1State;
 use crate::config::Config;
@@ -58,7 +61,7 @@ pub(super) fn permanent_error(error: System1Error) -> bool {
 
 impl Session {
     pub(in crate::session) fn initialize_system1_health(
-        &self,
+        self: &Arc<Self>,
         config: &Config,
         source: &super::super::session::SessionConfiguration,
     ) {
@@ -84,6 +87,18 @@ impl Session {
         if self.system1_warmup_eligible(config, source)
             && let Err(error) = state.client(config)
         {
+            if let Some(log) = self.system1_decision_log(config) {
+                log.start(
+                    /*turn_id*/ None,
+                    DecisionPurpose::Warmup,
+                    source.step_settings.collaboration_mode.reasoning_effort(),
+                )
+                .finish(
+                    DecisionApiOutcome::Error(error),
+                    DecisionDisposition::Warmup,
+                    /*selected*/ None,
+                );
+            }
             self.update_system1_error(
                 System1HealthUpdate::Decision(Some(classify_error(error))),
                 /*generation*/ None,

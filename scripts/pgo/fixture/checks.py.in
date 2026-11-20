@@ -1,0 +1,36 @@
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from eventlog import read_events, summarize
+
+
+class EventlogTests(unittest.TestCase):
+    def test_sum(self):
+        self.assertEqual(summarize([{"tool": "shell", "duration_ms": 4}, {"tool": "shell", "duration_ms": 6}]), {"shell": 10})
+
+    def test_invalid_durations(self):
+        rows = [{"tool": "shell", "duration_ms": value} for value in [-2, None, "3", True]]
+        self.assertEqual(summarize(rows + [{"tool": "shell", "duration_ms": 5}]), {"shell": 5})
+
+    def test_missing_fields(self):
+        self.assertEqual(summarize([{}, {"tool": "shell"}, {"duration_ms": 5}]), {})
+
+    def test_blank_lines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.jsonl"
+            path.write_text('\n{"tool":"shell","duration_ms":5}\n\n')
+            self.assertEqual(read_events(path), [{"tool": "shell", "duration_ms": 5}])
+
+    def test_bad_json(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.jsonl"
+            path.write_text("not json\n")
+            with self.assertRaises(json.JSONDecodeError):
+                read_events(path)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -2826,6 +2826,17 @@ impl ThreadManagerState {
                 thread.session.services.mcp_runtime.revoke_ema();
             }
         }
+        if matches!(
+            &session_source,
+            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+        ) {
+            config.apply_subagent_tools().map_err(|err| {
+                CodexErr::InvalidRequest(format!("invalid subagent_tools policy: {err}"))
+            })?;
+            if config.subagent_mcp_disabled {
+                thread_extension_init.insert(crate::mcp::SubagentMcpDisabled);
+            }
+        }
         if !session_source.is_internal()
             && let Err(error) = runtime
                 .shutdown

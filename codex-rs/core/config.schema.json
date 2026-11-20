@@ -5415,6 +5415,75 @@
       ],
       "description": "An explicit default overrides an MCP provider from a lower configuration layer."
     },
+    "SubagentToolsToml": {
+      "additionalProperties": false,
+      "description": "Tool settings for spawned ASM agents. Feature switches set to true inherit the parent. Set false to disable them.",
+      "properties": {
+        "apps": {
+          "default": true,
+          "type": "boolean"
+        },
+        "browser_use": {
+          "default": true,
+          "description": "Flag override only. Does not remove tools supplied by the client.",
+          "type": "boolean"
+        },
+        "browser_use_external": {
+          "default": true,
+          "description": "Flag override only. Does not remove tools supplied by the client.",
+          "type": "boolean"
+        },
+        "computer_use": {
+          "default": true,
+          "description": "Flag override only. Does not remove tools supplied by the client.",
+          "type": "boolean"
+        },
+        "disable_mcp": {
+          "default": false,
+          "description": "Exclude all MCP servers from the child.",
+          "type": "boolean"
+        },
+        "image_generation": {
+          "default": true,
+          "type": "boolean"
+        },
+        "in_app_browser": {
+          "default": true,
+          "description": "Flag override only. Does not remove tools supplied by the client.",
+          "type": "boolean"
+        },
+        "plugin_sharing": {
+          "default": true,
+          "type": "boolean"
+        },
+        "plugins": {
+          "default": true,
+          "type": "boolean"
+        },
+        "remote_plugin": {
+          "default": true,
+          "type": "boolean"
+        },
+        "request_permissions_tool": {
+          "default": true,
+          "type": "boolean"
+        },
+        "skill_mcp_dependency_install": {
+          "default": true,
+          "type": "boolean"
+        },
+        "skill_search": {
+          "default": true,
+          "type": "boolean"
+        },
+        "web_search": {
+          "default": true,
+          "description": "Set false to disable ASM search, not search tools supplied by third parties.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "System1Backend": {
       "enum": [
         "openai",
@@ -5439,14 +5508,6 @@
           "minimum": 1.0,
           "type": "integer"
         },
-        "decision_model": {
-          "default": null,
-          "type": "string"
-        },
-        "decision_model_api_env": {
-          "default": null,
-          "type": "string"
-        },
         "decision_timeout_ms": {
           "default": 200,
           "format": "uint64",
@@ -5459,11 +5520,11 @@
           "type": "boolean"
         },
         "high_effort_description": {
-          "default": "Difficult debugging, multiple interacting constraints, conflicting evidence, or substantial uncertainty. Use max only for exceptionally difficult problems.",
+          "default": "Substantive work within the model’s normal range, including implementation or interpretation that requires care.",
           "type": "string"
         },
         "low_effort_description": {
-          "default": "Straightforward coding, focused searches, and bounded analysis.",
+          "default": "Direct execution or reporting a verified result when no judgment remains.",
           "type": "string"
         },
         "max_context_bytes": {
@@ -5486,7 +5547,7 @@
           "type": "string"
         },
         "medium_effort_description": {
-          "default": "Ordinary substantive work, including moderately complex coding.",
+          "default": "Settled work that still needs care: make a scoped edit or verify a result.",
           "type": "string"
         },
         "min_effort": {
@@ -5523,7 +5584,7 @@
           "type": "array"
         },
         "xhigh_effort_description": {
-          "default": "Extensive reasoning for exceptionally difficult problems, deep investigations, and demanding long-horizon planning.",
+          "default": "Distinguishing plausible causes, reconciling interacting constraints, or catching subtle, consequential errors.",
           "type": "string"
         }
       },
@@ -5539,6 +5600,11 @@
         "endpoint": {
           "default": null,
           "type": "string"
+        },
+        "include_images": {
+          "default": false,
+          "description": "Allow this endpoint to receive current-turn user images.",
+          "type": "boolean"
         },
         "model": {
           "type": "string"
@@ -9806,6 +9872,30 @@
       "default": {},
       "description": "Child-only routing overrides, keyed by model and reasoning effort.",
       "type": "object"
+    },
+    "subagent_tools": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/SubagentToolsToml"
+        }
+      ],
+      "default": {
+        "apps": true,
+        "browser_use": true,
+        "browser_use_external": true,
+        "computer_use": true,
+        "disable_mcp": false,
+        "image_generation": true,
+        "in_app_browser": true,
+        "plugin_sharing": true,
+        "plugins": true,
+        "remote_plugin": true,
+        "request_permissions_tool": true,
+        "skill_mcp_dependency_install": true,
+        "skill_search": true,
+        "web_search": true
+      },
+      "description": "Disable selected tool capabilities in native spawned agents."
     },
     "suppress_unstable_features_warning": {
       "description": "Suppress warnings about unstable (under development) features.",

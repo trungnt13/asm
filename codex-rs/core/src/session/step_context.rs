@@ -41,6 +41,8 @@ pub(crate) struct StepContext {
     pub(crate) realtime: RealtimeConversationSnapshot,
     /// One immutable settings version captured before request preparation.
     pub(crate) settings: Arc<ResolvedStepSettings>,
+    /// Retains the captured turn settings if service tier inheritance replaced them.
+    pub(super) settings_before_tier_inheritance: Option<Arc<ResolvedStepSettings>>,
     /// Frozen turn preferences resolved against this step's captured model.
     pub(crate) token_budget: Option<TokenBudgetConfig>,
     /// Telemetry context tagged with this sampling request's model.

@@ -51,29 +51,18 @@ impl AppsRequestProcessor {
         let reload = params.force_refetch;
         let thread = if let Some(thread_id) = params.thread_id.as_deref() {
             let (_, loaded_thread) = self.load_thread(thread_id).await?;
+            if loaded_thread.subagent_mcp_disabled() {
+                record_legacy_apps_installed_duration(installed_start, reload);
+                return Ok(Some(AppsListResponse {
+                    data: Vec::new(),
+                    next_cursor: None,
+                }));
+            }
             Some(loaded_thread)
         } else {
             None
         };
-        let fallback_cwd = match thread.as_ref() {
-            Some(thread) => Some(thread.config_snapshot().await.cwd().to_path_buf()),
-            None => None,
-        };
-        let mut config = self.load_latest_config(fallback_cwd).await?;
-
-        if let Some(thread) = thread.as_ref() {
-            let _ = config
-                .features
-                .set_enabled(Feature::Apps, thread.enabled(Feature::Apps));
-        }
-
-        let mcp_manager = thread
-            .as_ref()
-            .map(|thread| thread.mcp_manager())
-            .unwrap_or_else(|| self.thread_manager.mcp_manager());
-        self.thread_manager
-            .runtime_auth_for_mcp_manager(&config, &mcp_manager)
-            .map_err(|error| internal_error(error.to_string()))?;
+        let (config, mcp_manager) = self.load_apps_config(thread.as_deref()).await?;
         let auth_manager = mcp_manager.auth_manager();
         if params.force_refetch && !auth_manager.has_external_auth() {
             auth_manager
@@ -391,16 +380,15 @@ impl AppsRequestProcessor {
 
     async fn load_apps_config(
         &self,
-        thread_id: Option<&str>,
+        thread: Option<&codex_core::CodexThread>,
     ) -> Result<(Config, Arc<McpManager>), JSONRPCErrorError> {
-        let Some(thread_id) = thread_id else {
+        let Some(thread) = thread else {
             let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
             self.thread_manager
                 .runtime_auth_for_config(&config)
                 .map_err(|error| internal_error(error.to_string()))?;
             return Ok((config, self.thread_manager.mcp_manager()));
         };
-        let (_, thread) = self.load_thread(thread_id).await?;
         let thread_config = thread.config().await;
         let config = self
             .config_manager

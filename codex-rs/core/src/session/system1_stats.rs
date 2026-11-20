@@ -21,7 +21,7 @@ impl Session {
             }
             .to_string(),
             model: profile.settings.model.clone(),
-            profile: profile.name.clone(),
+            profile: Some(profile.name.clone()),
             client_initialized: state.client.get().is_some(),
         })
     }

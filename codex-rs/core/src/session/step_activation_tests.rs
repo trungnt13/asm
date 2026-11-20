@@ -714,20 +714,6 @@ async fn submitted_sparse_updates_preserve_captured_steps_and_ordering() {
         .capture_step_context(Arc::clone(&turn), &CancellationToken::new())
         .await
         .expect("capture initial step");
-    let (submission, first_reply) = settings_submission(
-        "activate-model",
-        &turn.sub_id,
-        TurnSettingsUpdate {
-            model: Some(MODEL_B.to_string()),
-            effort: Some(Some(ReasoningEffort::Low)),
-            ..Default::default()
-        },
-    );
-    submissions
-        .send(Box::new(submission))
-        .await
-        .expect("submit model update");
-    lookup.wait_until_blocked().await;
     let refresh = session
         .mcp_refresh
         .acquire()
@@ -743,6 +729,20 @@ async fn submitted_sparse_updates_preserve_captured_steps_and_ordering() {
         let mut context = std::task::Context::from_waker(futures::task::noop_waker_ref());
         assert!(std::future::Future::poll(during.as_mut(), &mut context).is_pending());
     }
+    let (submission, first_reply) = settings_submission(
+        "activate-model",
+        &turn.sub_id,
+        TurnSettingsUpdate {
+            model: Some(MODEL_B.to_string()),
+            effort: Some(Some(ReasoningEffort::Low)),
+            ..Default::default()
+        },
+    );
+    submissions
+        .send(Box::new(submission))
+        .await
+        .expect("submit model update");
+    lookup.wait_until_blocked().await;
     let priority = ServiceTier::Fast.request_value();
     let mut replies = vec![first_reply];
     for (id, update) in [

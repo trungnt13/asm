@@ -4733,6 +4733,7 @@ impl Session {
                     .then(|| self.services.turn_environments.configured_snapshot_now()),
             )
         };
+        let mut settings_before_tier_inheritance = None;
         if self.inherits_root_service_tier(&turn_context.session_source)
             || matches!(
                 &turn_context.session_source,
@@ -4761,7 +4762,10 @@ impl Session {
                 );
                 inherited_settings.mcp_approvals_reviewer_override =
                     settings.mcp_approvals_reviewer_override;
-                settings = Arc::new(inherited_settings);
+                settings_before_tier_inheritance = Some(std::mem::replace(
+                    &mut settings,
+                    Arc::new(inherited_settings),
+                ));
             }
         }
         let dynamic_tools = self.dynamic_tools().await;
@@ -4874,8 +4878,9 @@ impl Session {
                 extension_data.insert(messages.clone());
             }
             let mut required_servers = required_servers.to_vec();
-            if settings.model_info.web_search_provider
-                == Some(codex_protocol::openai_models::WebSearchProvider::SearchMcp)
+            if !turn_context.config.subagent_web_search_disabled
+                && settings.model_info.web_search_provider
+                    == Some(codex_protocol::openai_models::WebSearchProvider::SearchMcp)
                 && turn_context.apps_enabled()
                 && !turn_context.config.requires_native_search()
                 && (turn_context.config.web_search_mode.value()
@@ -5044,6 +5049,7 @@ impl Session {
                 .then(CancellationToken::new),
             realtime: self.conversation.snapshot().await,
             settings,
+            settings_before_tier_inheritance,
             token_budget,
             session_telemetry,
             turn: turn_context,

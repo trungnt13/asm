@@ -140,6 +140,8 @@ For syncs or saved-cache/wire-format changes, apply this gate even after conflic
 
 #### Known upstream cold-history limitation
 
+For PR #226, the owner accepted the stock cold-history limitation through `2f0374456fd5cd280ee76de54220ab8315a0f8d0` only. ASM passed cold search, timeline, turn, and item reads. Stock alpha.11 found the thread but needed resume to read both saved items. Warm reopening preserved the original rollout bytes. This exception does not cover voice history or waive other checks.
+
 For PR #224, the owner accepted the stock cold-history limitation through `39c29c3bb620f91e84a3bb266bb496dfb697c101` only. ASM passed cold search, timeline, turn, and item reads. Stock alpha.11 found the thread but needed one resume to read both saved items. Warm reopening preserved the items and original rollout bytes. This exception does not cover voice history or waive other checks.
 
 For the sync through `ca21fe65d18a9b6326759fb4263c65dfbb645aa5`, the owner accepted the unchanged stock cold-history limitation for this target only. ASM cold timeline, search, turn and item reads passed. Independent stock finds the thread through search but cannot read its cold history; resume and reopening restore exact items and permissions without changing canonical bytes.
@@ -215,6 +217,16 @@ Use standard GitHub-hosted runners; paid larger runners need explicit approval. 
 
 Before release operations, use [asm-release](../.agents/skills/asm-release/SKILL.md). Require an explicit release request. Publication grants no installation or shared-server-restart authority. The procedure covers preparation, CI recovery, live smoke, dispatch, and finishing.
 
+A release request includes Linux v3. Check v3 support on the machine running
+the release procedure. Start or resume the standard GitHub Actions release
+after its normal checks. Do not wait for the local v3 build or a skip decision.
+
+If the machine supports v3, build the exact tagged candidate locally while CI
+runs. If any v3 prerequisite or check blocks progress, report the blocker and ask
+for approval to skip v3 for this tag. Keep CI running. Do not report the release
+complete until all required checks pass and v3 is published or the owner
+approves the skip. Report an approved skip explicitly.
+
 6. **Recover:** after interruption, rerun failed jobs. For a new resume dispatch, use `main`, `publish_release=true`, and `resume_run_id=<original run ID>`. Preserve original version/commit despite upstream advances. Never invent versions or replace tags. Report failures needing owner decisions. Only with explicit approval, supersede a source-defective failed unpublished candidate with a new immutable candidate. Record old run/source/tag and draft assets in `.github/scripts/superseded-fork-releases.json`. Preparation must verify that record and reject publication or asset drift. Preserve old candidate/tag/assets and occupied version. Never apply this exception to published or partially ready releases. The owner separately approved superseding cancelled run `42465703649` on 2026-11-09 to release current main. Preserve draft `v0.169.1-alpha.3.1`, its tag, candidate and installer unchanged; verify its recorded cancelled state before creating the new candidate.
 7. **Verify:** a platform is ready after its checked archive and platform checksum manifest are published. Candidate completion requires `release`, both `verify_native` jobs, and `sync_main` success for that candidate. Legacy `v*` pushes/dispatches require publication and both native checks, not `sync_main`. Inspect recorded checks/current metadata; do not repeat successful checks on unchanged artifacts. Builds, tag pushes, and version labels do not prove publication.
 
@@ -241,15 +253,22 @@ Keep fork/upstream release workflows separate. Use GitHub-hosted runners:
 | Platform | Target | Runner | Build timeout |
 | --- | --- | --- | --- |
 | macOS ARM64 | `aarch64-apple-darwin` | `macos-15` | 300 minutes |
-| Linux x86_64 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` | 90 minutes |
+| Linux x86_64 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` | 330 minutes |
 
-- Candidates allow build limit plus 15 publication minutes: 315 total on macOS. Preserve optimization, flags, runner, and candidate; allow needed time rather than weakening builds. Concurrency experiments retain 180-minute builds. Resume candidates; never replace ready platform assets.
+- Except for legacy tag jobs, allow 15 minutes beyond the build for setup,
+  packaging, smoke checks, and uploads. Normal job limits are 315 minutes on
+  macOS and 345 on Linux. For macOS postmerge and concurrency experiments, allow
+  180 minutes to build and 195 minutes per job. Preserve optimization, flags,
+  runner, and candidate on retries. Do not replace ready assets.
 - Legacy lookup allows 190 minutes; wait guards are macOS 150/Linux 185. Timeout fails; do not duplicate builds. Only legacy tag jobs allow 360 total minutes. Actual builds retain table limits; fresh candidates do not wait for postmerge.
 - Keep Ubuntu 22.04 / glibc 2.35 as the Linux minimum and build/native-smoke baseline. A GNU triple on newer runners is insufficient. Before April 2027 retirement, use an Ubuntu 22.04 container on supported runners. Never raise the minimum.
 - Use optimized `--release` and `CARGO_PROFILE_RELEASE_STRIP=debuginfo`, not `dev-small`. Retain function symbols/optimization. Fix timeouts without weakening profiles. Upstream tests do not justify more symbol/dependency removal. Keep shell commands compatible with macOS Bash 3.2, including `set -u` array expansion.
 - Build `codex`, `codex-code-mode-host`, and `codex-exec-server` from one commit/target/profile. Pass all three prebuilt executables to canonical packaging. `codex-<target>.tar.gz` contains `bin/codex`, `bin/codex-code-mode-host`, `bin/codex-exec-server`, `codex-package.json`, and `codex-path/rg`. Linux also contains `codex-resources/bwrap`, built from matching source/release profile; embed its final SHA-256 in the CLI before packaging.
 - Keep canonical layout/pinned ripgrep manifest. Include only required resources as regular executables with matching version/target metadata, including `execServer: "bin/codex-exec-server"`. Shared-server startup must recognize/validate the package without host helpers.
-- Publish six final assets: two archives, two `SHA256SUMS-<target>`, aggregate `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh). Each platform manifest covers its archive and pinned installer. No source trees/diagnostics.
+- Publish six required assets: two archives, two `SHA256SUMS-<target>` files,
+  aggregate `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh).
+  Each platform checksum file covers its archive and pinned installer. Do not
+  publish source trees or logs.
 - Detect candidate contract from pinned smoke's required `codex-package.json`, not optional resource flags. Pass `--no-zsh` only if supported. Preserve older candidates' original contracts.
 - Pin builds, packaging, installer bytes, checks, and reuse to candidate SHA. Pin orchestration to dispatch SHA; save controls before checkout. Never fetch newer controls mid-run. Legacy uses verified exact tagged SHA. Candidate packaging may precede tagging.
 - Before upload, run [native smoke](../.github/scripts/smoke-codex-archive.py). CLI/exec-server versions match Cargo; all three help commands succeed with usage; manifest/resources and bundled ripgrep/Bubblewrap pass. Code-mode-host `--version` is not required. Record binary/archive sizes.
@@ -258,6 +277,106 @@ Keep fork/upstream release workflows separate. Use GitHub-hosted runners:
 - Fork Linux uses native GNU and [`install-gnu-build-tools.sh`](../.github/scripts/install-gnu-build-tools.sh), not Zig/MUSL wrappers. Preserve inherited MUSL tooling. Retain `AWS_LC_SYS_NO_JITTER_ENTROPY` and verified V8 through [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml). Install Python 3.11+ explicitly on Ubuntu 22.04.
 - Preserve upstream GNU system allocator, locale, and PTY choices; do not mimic MUSL in Rust conditions. Use system OpenSSL 3; system liblzma is permitted. Match [`smoke-ubuntu-archive.sh`](../.github/scripts/smoke-ubuntu-archive.sh) libraries to ELF dependencies. Do not add ALSA/GStreamer requirements for GNU migration.
 - Agree intent before adding platforms, DMGs, optional resources, npm, R2, WinGet, or website/OpenAI-only publishing.
+
+#### Release PGO
+
+Profile-guided optimization (PGO) uses execution data to guide the compiler.
+LTO means link-time optimization.
+
+| Build | CPU | LTO | Codegen units | PGO |
+| --- | --- | --- | --- | --- |
+| Linux CI | Portable x86-64 | Thin | 4 | Yes |
+| Linux local | x86-64-v3 | Fat | 1 | Yes |
+| macOS CI | Apple Silicon | Upstream | Upstream | No |
+
+Leave Cargo profiles unchanged. Use one Cargo job for Linux PGO. Build Bubblewrap
+separately without PGO. CI does not need training credentials or histories. Publish the indexed
+profile as a dependency, not as a CLI release.
+
+[`setup.py`](../scripts/pgo/setup.py) fetches the profile pinned in
+[`agent-linux.json`](../scripts/pgo/agent-linux.json). Use Python 3.11+ and
+`llvm-tools-preview` from the consuming compiler. Fail if the selected profile
+is missing or incompatible. Training versions record provenance; they do not
+gate reuse. Keep compiler matching logs and verify the package and real-provider
+behavior. Recheck after compiler or source changes. Refresh the profile if
+matching or performance declines. A readable profile does not prove a speedup.
+
+For local use, run from `codex-rs`. Omit `--env-file` to validate only:
+
+```bash
+pgo_dir=$(mktemp -d)
+python3 ../scripts/pgo/setup.py --target x86_64-unknown-linux-gnu \
+  --output "$pgo_dir" --env-file "$pgo_dir/cargo.env" &&
+  while IFS= read -r setting; do export "$setting"; done < "$pgo_dir/cargo.env"
+```
+
+Load assignments without evaluating shell code. Pass the same target to Cargo.
+Keep the profile until the build ends.
+
+#### Linux v3 package
+
+Check glibc for full v3 support on the current machine. Do not infer support
+from AVX2 alone. When CI assigns the tag, build from that exact tag in a clean
+checkout. Use Ubuntu 22.04, natively or in a local container. Install the candidate toolchain, CI build tools,
+`llvm-tools-preview`, and Python 3.11+ (set `PYTHON` if needed). Use absolute
+paths. For `v8_dir`, supply the archive, bindings, checksum file, and
+`release.json` from the release used by
+[`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml). The build uses
+only tracked Cargo configuration and a private Cargo cache in `output`.
+It ignores host compiler flags and uses the tag's Bubblewrap source.
+
+```bash
+just build-release-v3 "$tag" "$output" "$v8_dir"
+```
+
+Keep the archive and its `.provenance` file together. Run the release-source
+live check before uploading. Before the first v3 upload, update and validate
+`tngo-workflow`: its verification and rollback assume the portable directory.
+
+After the base release is complete, upload v3 as part of the release request.
+Use Docker and a `GH_TOKEN` with Actions read and Contents write access. Set `base_run_id` to
+the successful release or resume run for this exact tag. Run this from the
+same tagged checkout:
+
+```bash
+GITHUB_REPOSITORY=trungnt13/asm RELEASE_TAG="$tag" RELEASE_SHA="$(git rev-parse HEAD)" \
+  python3 .github/scripts/publish-fork-release.py publish-v3 --base-run-id "$base_run_id" \
+    --archive "$output/codex-x86_64-unknown-linux-gnu-v3.tar.gz"
+```
+
+Upload the archive first and its verified checksum file last. Do not replace
+base assets or change Latest. The installer selects v3 only if glibc reports
+full support and the selected release has the uploaded v3 checksum file.
+Otherwise use the portable package. If an advertised v3 package fails
+verification, stop. Install the variants in separate directories.
+
+#### Train the PGO profile
+
+Use Linux with working Bubblewrap mount and PID namespaces. Use Python 3.11+,
+authorized Codex sign-in, and an instrumented CLI with its matching helper.
+Set `CODEX_HOME` to the source home and `PGO_INSTRUMENTED_BIN` to the CLI.
+Set `PGO_TRAINING_DIR` to an empty, private directory outside tracked sources.
+Run `python3 scripts/pgo/train.py`. Do not run it in release CI.
+
+The harness copies feature settings and disables System1. Bubblewrap makes
+host files read-only and permits writes to private session and profile paths.
+It does not restrict host reads or network access. The harness checks the
+effective SQLite and log paths before starting a turn. If managed settings
+change either path, stop. The monitor checks these limits: 890 completions, 19.9M input
+tokens, 245K output tokens, 60 minutes, or $4.90 API-equivalent. Actual charges
+are unknown. Never publish training homes, histories, or credentials.
+
+Verify 10/15/20 root turns and parallel child peaks of 4/3/2. Check the cheap
+model, fixture results, and streaming. Merge only that run's
+`profiles/*.profraw` with matching `llvm-profdata`. Publish the indexed result
+and update both hashes and provenance. Keep failed runs separate.
+
+The selected run peaked at eight simultaneous children. It does not cover all
+production paths. The local Fat LTO build reached about 30 GiB of proportional
+resident memory. The CI trial timed out at 330 minutes with about 22 GiB swap
+in use. Keep runner
+disk and swap checks. Require a successful full build before claiming runner
+feasibility.
 
 #### V8 dependency release
 
@@ -509,10 +628,9 @@ Accept former `[adaptive_reasoning]` config, including deny-only roles, and form
 | Setting | Default | Validation |
 | --- | --- | --- |
 | `enabled` | `false` | Opt-in only |
-| `profile` | Absent: legacy OpenAI configuration | Name in `profiles`; cannot mix with legacy model/key settings |
+| `profile` | Absent | Must select a named entry in `profiles` before enabling System1 |
 | `profiles.<name>` | Empty map | Explicit `protocol` (`openai` or `typesafe`), nonblank `model`, ASCII identifier `api_key_env`; optional full `endpoint` URL |
-| `decision_model` | `"gpt-6-luna"` | Nonblank |
-| `decision_model_api_env` | `"DECISION_API_KEY"` | ASCII environment-variable identifier, not a secret |
+| `profiles.<name>.include_images` | `false` | Allow this endpoint to receive current-turn user images. |
 | `min_effort` / `max_effort` | `"low"` / `"max"` | Ordinary levels; `min_effort <= max_effort` |
 | `decision_timeout_ms` | `200` | 1–5000 ms |
 | `max_context_bytes` | `8192` | 128–32768 UTF-8 bytes across all Decisions input items |
@@ -521,42 +639,53 @@ Accept former `[adaptive_reasoning]` config, including deny-only roles, and form
 | `low_effort_description` / `medium_effort_description` / `high_effort_description` / `xhigh_effort_description` / `max_effort_description` | Built-in text below | Nonblank; each at most 4096 UTF-8 bytes |
 | `rubric_instructions` | Built-in rubric | Nonblank; at most 4096 UTF-8 bytes |
 
-**Connections.** Profiles select connection settings, not adaptation policies. Share bounds, cadence, evidence limits, timeout, and rubric. Profile names have no built-in meaning. Do not infer protocol from names, endpoints, or credentials. Accept `backend` as an alias for `protocol`; reject both together. Validate every profile. Reject unknown profiles/protocols without fallback. Without `profile`, retain legacy OpenAI defaults and explicit overrides. Reject a selected profile with either legacy model/key setting, even when it equals its default.
+**Connections.** Profiles select connection settings, not adaptation policies. Share bounds, cadence, evidence limits, timeout, and rubric. Profile names have no built-in meaning. Do not infer protocol from names, endpoints, or credentials. Accept `backend` as an alias for `protocol`; reject both together. Validate every profile. Reject unknown profiles/protocols without fallback. With System1 disabled, the selection can be omitted; neither startup nor runtime activation may infer a connection.
+
+For example, an explicit OpenAI Decisions connection is:
+
+```toml
+[system1]
+profile = "decision_api"
+
+[system1.profiles.decision_api]
+protocol = "openai"
+model = "gpt-6-luna"
+api_key_env = "DECISION_API_KEY"
+```
 
 Resolve the connection once per session on first use, including failed credential attempts. Keep protocol/endpoint/model fixed across warmup, decisions, and config reloads. Both adapters share cancellation, deadline, allowed-choice validation, and recovery. Do not use automatic failover or adapter-internal retries.
 
 Without `endpoint`, use the protocol's official HTTPS endpoint. Overrides are full destination URLs, not format selectors; append no path. Require HTTPS except loopback HTTP. Reject URL credentials and fragments. Reject blank endpoints during config validation. Reject other invalid URLs during client construction without exposing them in errors.
 
-The endpoint receives bounded conversation evidence and the `api_key_env` credential. A custom endpoint need not belong to OpenAI or TypeSafe. Choose it deliberately. Keep authentication separate from the main model and sanitize diagnostics. Read only the profile's `api_key_env` or legacy named variable, default `DECISION_API_KEY`. Retain explicit variable-name overrides. Never fall back to `OPENAI_API_KEY`, provision credentials, or log keys/evidence. Do not route Decisions through Guardian.
+The endpoint receives bounded conversation evidence and the `api_key_env` credential. A custom endpoint need not belong to OpenAI or TypeSafe. Choose it deliberately. Keep authentication separate from the main model and sanitize diagnostics. Read only the profile's `api_key_env`. Never fall back to `OPENAI_API_KEY`, provision credentials, or log keys/evidence. Do not route Decisions through Guardian.
 
 **Choices.** Adapt ordinary roots and spawned subagents, not internal workers. Use the selected backend to choose supported effort within bounds. Keep Ultra/Persistent, models, service tiers, execution modes, permissions, and saved defaults unchanged. With fewer than two efforts, skip Decisions and warmup; retain current effort.
 
-Generate selection guidance from the supported model default before applying bounds. Use that default as the normal-work reference. For a `max` default, use the preceding catalog-supported ordinary effort instead. Do not change the task baseline. Model meaning remains catalog-owned.
+Match each allowed effort to its named selection guidance without shifting descriptions by model default. Keep supported choices model-specific; retain fixed direct-execution descriptions for `none` and `minimal`.
 
-Use low/medium/high/xhigh descriptions for one-below-reference/at-reference/one-above-reference/further-above-reference choices. Use fixed mechanical-execution guidance further below reference. Always use `max_effort_description` for max and fixed direct-execution descriptions for `none`/`minimal`. Without a supported default, keep effort-labeled guidance.
-
-Keep choice descriptions separate from the selection/safety rubric. Send only allowed main choices; warmup retains its synthetic low/medium pair. A replacement rubric must not remove or duplicate descriptions. Default description text:
+Keep choice descriptions separate from the selection/safety rubric. The built-in rubric refers to the offered range rather than naming tiers that may be unavailable. Send only allowed main choices; warmup retains its synthetic low/medium pair. A replacement rubric must not remove or duplicate descriptions. Default description text:
 
 ```toml
 [system1]
-low_effort_description = "Straightforward coding, focused searches, and bounded analysis."
-medium_effort_description = "Ordinary substantive work, including moderately complex coding."
-high_effort_description = "Difficult debugging, multiple interacting constraints, conflicting evidence, or substantial uncertainty. Use max only for exceptionally difficult problems."
-xhigh_effort_description = "Extensive reasoning for exceptionally difficult problems, deep investigations, and demanding long-horizon planning."
+low_effort_description = "Direct execution or reporting a verified result when no judgment remains."
+medium_effort_description = "Settled work that still needs care: make a scoped edit or verify a result."
+high_effort_description = "Substantive work within the model’s normal range, including implementation or interpretation that requires care."
+xhigh_effort_description = "Distinguishing plausible causes, reconciling interacting constraints, or catching subtle, consequential errors."
 max_effort_description = "Exceptionally difficult problems requiring the maximum supported reasoning budget."
 ```
 
 If configured, replace the built-in rubric with unchanged `rubric_instructions`. In both backends, prefix decision instructions with trusted baseline context, separate from evidence:
 
-- Report separate `model_default_effort`, `task_baseline_effort`, and `current_effort`; use unspecified for absent values. Do not infer baseline provenance.
-- Use the turn's configured effort as baseline. Refresh it on accepted manual effort/model changes, never adaptive selections. The model default is its normal operating point; the baseline indicates task difficulty. Weigh both with next-step evidence. Neither is a floor or ceiling. Current effort is state, not independent difficulty evidence.
-- Add the next step's canonical model name and catalog description as JSON-quoted metadata. Trim descriptions to 1024 UTF-8 bytes at character boundaries. Use `unavailable` for missing, blank, or fallback metadata. Keep the decision-service model and warmup unchanged.
-- For each allowed choice, send labeled `Model meaning` and `Selection guidance` sections. Trim catalog meaning to 1024 UTF-8 bytes; use `unavailable` for missing, blank, or fallback metadata. Preserve full configured guidance, capped at 4096 bytes. The API caps each combined description at 8192 UTF-8 bytes.
-- The built-in rubric reassesses each next step. For equal reasoning demands, favor lower effort for more capable models and higher effort for less capable models. Treat baseline as guidance, not a ceiling. Enforce choices and runtime limits in code. Keep instructions/results outside the main conversation.
+- Use the trusted task baseline as the anchor. Refresh it on accepted manual changes to the baseline, never adaptive selections. Supply `task_baseline_effort` and `last_effort`; the latter is the effective effort captured for the previous ordinary model step in this turn. Report absent values as `unspecified`; do not substitute the model default.
+- Use the header `Model: "<name>" - "<description>"` with both values JSON-quoted. Trim descriptions to 1024 UTF-8 bytes at character boundaries. Use `unavailable` for missing, blank, or fallback metadata. Keep the decision-service model and warmup unchanged.
+- Send only the selection guidance for each allowed choice, capped at 4096 UTF-8 bytes. Do not send catalog effort descriptions.
+- Reassess the whole next response against the task baseline. Use the model’s capabilities for this work, without a fixed adjustment by name. Enforce allowed choices and runtime limits in code. Keep classifier instructions/results outside the main conversation.
 
-**Evidence.** Collect genuine user, assistant, and tool evidence, newest first. Exclude injected user instructions, compaction output, images, and encrypted reasoning. Scale scan limits with the budget: at least 128 history/input items and 32 content parts, up to 512 items and 128 parts at 32768 bytes. Older history can remain omitted; do not promise a complete transcript.
+**Evidence.** Collect genuine user, assistant, and tool evidence, newest first. Exclude injected user instructions, compaction output, and encrypted reasoning. Reserve the first evidence slot for the most recent hook-accepted user message in this turn, within the text budget. Preserve the original task separately when different, before recent tool output. Do not repeat either as a user history row or label inter-agent assignments as user corrections. Never borrow another turn’s prompt as the current task. By default Decisions receives no images. To send a current-turn user attachment to a named endpoint, set `include_images = true` in that profile. This permission belongs to the session-fixed connection. Model capability is not permission to send attachments to a second endpoint. No top-level image permission is accepted. Scale scan limits with the budget: at least 128 history/input items and 32 content parts, up to 512 items and 128 parts at 32768 bytes. Older history can remain omitted; do not promise a complete transcript.
 
-**P0 manual review:** combined choice descriptions can exceed 1000 tokens. Review both sections and their bounds. Meaning, guidance, and labels must fit the API cap above. Bound evidence and rubric separately. Split larger evidence into ordered OpenAI messages or TypeSafe state-array strings, each at most 8192 UTF-8 bytes. Prefer line boundaries. Preserve text and the default single-message request. TypeSafe uses a string state when one chunk suffices. The 4096-byte rubric cap excludes the bounded description/baseline prefix. Items can exceed 1000 tokens but must remain below the 10K-token item limit through their byte caps. Keep evidence outside the main conversation.
+With opt-in, allow at most one accepted inline PNG or JPEG per decision, including resolved local images, bounded to a 4 MiB encoded data URL separately from the text evidence limit. Do not fetch URLs or forward file IDs, tool images, previous-turn attachments, or images rejected by input hooks. Skip an image-only decision if no eligible image is available; keep main-model input unchanged. Select the first image that sanitizes successfully within the existing scan/deadline and an 8 MiB aggregate candidate budget; transmit at most one. Strip metadata, and reduce oversized dimensions. For JEV, pad short sides without stretching the image to meet its 280–1568 pixel limits. Malformed media does not block subsequent decisions. OpenAI uses a low-detail image content part; TypeSafe uses its experimental image header and multipart asset format. Never log the attachment in Decisions diagnostics. Image requests can increase cost and exceed the default 200 ms deadline. To allow up to five seconds for visual decisions, set `decision_timeout_ms = 5000` under `[system1]`; that deadline also applies to text decisions.
+
+**P0 manual review:** individual choice descriptions can exceed 1000 tokens. Review their 4096-byte bound. Bound evidence and rubric separately. Split larger evidence into ordered OpenAI messages or TypeSafe state-array strings, each at most 8192 UTF-8 bytes. Prefer line boundaries. Preserve text and the default single-message request. TypeSafe uses a string state when one chunk suffices. The 4096-byte rubric cap excludes the bounded description/baseline prefix. Items can exceed 1000 tokens but must remain below the 10K-token item limit through their byte caps. Keep evidence outside the main conversation.
 
 **Execution.** Ingest tasks and steering before skipped checks; invalidate stale decisions. Apply cadence, trigger, and recovery gates before bounded evidence rendering. Keep the original deadline; finish rendering before client setup.
 
@@ -568,13 +697,13 @@ If configured, replace the built-in rubric with unchanged `rubric_instructions`.
 
 **Mode and display.** Manual model/effort changes invalidate pending decisions but retain adaptation mode. Refresh baseline on effort changes and active-turn baseline on persistent thread settings. Keep captured requests and the live-step contract unchanged. Unsupported models skip adaptation without disabling it. Log mode transitions. Ordinary turn-start/spawn settings do not disable it. `/system1` toggles only the current runtime, not saved defaults; keep mode separate from captured settings.
 
-Spawned children copy parent mode once, not later toggles or parent errors. Preserve child mode across live eviction/reload, not backend restart. Internal workers remain unchanged. For encrypted assignments without readable tasks, log fallback and retain effort; do not forward ciphertext or guess tasks.
+Spawned children copy parent mode once, not later toggles or parent errors. Preserve child mode across live eviction/reload, not backend restart. Internal workers remain unchanged. Keep the triggering child assignment separate from queued mailbox updates. Queued notes cannot replace it or unlock an encrypted assignment; only a readable replacement task can. For encrypted assignments without readable tasks, log fallback and retain effort; do not forward ciphertext or guess tasks.
 
 Report mode/revision at attachment and transitions; ignore older revisions. Report errors through backend runtime state, independently of diagnostics. Include health at attachment and live child reload. Show `<effort>·auto` when enabled without an error, including startup/decision waits; show `<effort>·err` after errors, without disabling adaptation. When off, show effort alone. Before the first captured step, use baseline. Markers show health, not promised changes. Unsupported steps retain effort without Decisions. Before eligible main requests, send captured effort through `turn/reasoningEffortUpdated`, including fallbacks. Toggles do not change running steps.
 
 Keep captured effort/turn identity in live TUI snapshots, outside saved history. Restore on view switches without stale history settings. Clear on a new turn or manual change. Send transient effort notifications directly to clients, without rollout persistence before the main request.
 
-**Status.** `/system1 status` reads current mode, selected/last captured effort, health, and session-fixed connection identity. Show backend/protocol, model, captured profile name or legacy config, and client initialization. Do not present reloaded config as the active connection. Before resolution, show unresolved identity. Initialization does not prove a successful request. Do not change settings, send a turn, resolve profiles, inspect credentials, or start warmup.
+**Status.** `/system1 status` reads current mode, selected/last captured effort, health, and session-fixed connection identity. Show backend/protocol, model, captured profile name, and client initialization. Do not present reloaded config as the active connection. Before resolution, show unresolved identity. Initialization does not prove a successful request. Do not change settings, send a turn, resolve profiles, inspect credentials, or start warmup.
 
 Read fixed-size in-memory totals only for the loaded runtime. Exclude warmup, cadence/backoff skips, and incomplete tasks. Accepted includes unchanged decisions; effort changes count only applied changes. Count client setup failures separately. Show total/last completed-decision wall time, not estimated net overhead, cost, or savings. Totals reset on unload/restart; children have separate totals. Do not scan rollouts, persist totals, add per-step notifications, expose credentials/endpoints, or resume unloaded threads. Older servers show unavailable stats.
 

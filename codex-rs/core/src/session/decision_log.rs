@@ -38,6 +38,8 @@ pub(super) enum DecisionPurpose {
 pub(super) enum DecisionApiOutcome {
     Success,
     Error(DecisionsError),
+    InvalidImage,
+    ImagePreparationFailed,
     Timeout,
     Cancelled,
 }
@@ -242,6 +244,14 @@ impl DecisionAttempt {
             DecisionApiOutcome::Success => "success",
             DecisionApiOutcome::Timeout => "timeout",
             DecisionApiOutcome::Cancelled => "cancelled",
+            DecisionApiOutcome::InvalidImage => {
+                self.record.error = Some("invalid_image");
+                "error"
+            }
+            DecisionApiOutcome::ImagePreparationFailed => {
+                self.record.error = Some("image_preparation_failed");
+                "error"
+            }
             DecisionApiOutcome::Error(error) => {
                 self.record.error = Some(match error {
                     DecisionsError::Credentials => {

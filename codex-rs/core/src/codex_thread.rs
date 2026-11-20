@@ -1503,6 +1503,15 @@ impl CodexThread {
         Arc::clone(&self.session.services.mcp_manager)
     }
 
+    /// Returns whether this child thread disables MCP server connections.
+    pub fn subagent_mcp_disabled(&self) -> bool {
+        self.session
+            .services
+            .mcp_thread_init
+            .get::<crate::mcp::SubagentMcpDisabled>()
+            .is_some()
+    }
+
     pub async fn config(&self) -> Arc<crate::config::Config> {
         self.session.get_config().await
     }

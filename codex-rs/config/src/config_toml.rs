@@ -32,6 +32,7 @@ use crate::types::ToolSuggestConfig;
 use crate::types::Tui;
 use crate::types::UriBasedFileOpener;
 use crate::types::WindowsToml;
+use codex_features::Feature;
 use codex_features::FeaturesToml;
 use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
 use codex_model_provider_info::AMAZON_BEDROCK_RUNTIME_PROVIDER_ID;
@@ -169,6 +170,81 @@ pub struct RolloutTraceToml {
     pub max_payload_bytes: Option<usize>,
     /// Maximum bytes for the manifest, event log, and compressed payload shards. Defaults to 256 MiB.
     pub max_bytes: Option<u64>,
+}
+
+/// Tool settings for spawned ASM agents.
+/// Feature switches set to true inherit the parent. Set false to disable them.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct SubagentToolsToml {
+    /// Exclude all MCP servers from the child.
+    pub disable_mcp: bool,
+    pub apps: bool,
+    pub plugins: bool,
+    pub remote_plugin: bool,
+    pub plugin_sharing: bool,
+    /// Flag override only. Does not remove tools supplied by the client.
+    pub browser_use: bool,
+    /// Flag override only. Does not remove tools supplied by the client.
+    pub browser_use_external: bool,
+    /// Flag override only. Does not remove tools supplied by the client.
+    pub computer_use: bool,
+    pub image_generation: bool,
+    /// Flag override only. Does not remove tools supplied by the client.
+    pub in_app_browser: bool,
+    pub skill_search: bool,
+    pub skill_mcp_dependency_install: bool,
+    pub request_permissions_tool: bool,
+    /// Set false to disable ASM search, not search tools supplied by third parties.
+    pub web_search: bool,
+}
+
+impl Default for SubagentToolsToml {
+    fn default() -> Self {
+        Self {
+            disable_mcp: false,
+            apps: true,
+            plugins: true,
+            remote_plugin: true,
+            plugin_sharing: true,
+            browser_use: true,
+            browser_use_external: true,
+            computer_use: true,
+            image_generation: true,
+            in_app_browser: true,
+            skill_search: true,
+            skill_mcp_dependency_install: true,
+            request_permissions_tool: true,
+            web_search: true,
+        }
+    }
+}
+
+impl SubagentToolsToml {
+    pub fn disabled_features(&self) -> impl Iterator<Item = Feature> + '_ {
+        [
+            (self.apps, Feature::Apps),
+            (self.plugins, Feature::Plugins),
+            (self.remote_plugin, Feature::RemotePlugin),
+            (self.plugin_sharing, Feature::PluginSharing),
+            (self.browser_use, Feature::BrowserUse),
+            (self.browser_use_external, Feature::BrowserUseExternal),
+            (self.computer_use, Feature::ComputerUse),
+            (self.image_generation, Feature::ImageGeneration),
+            (self.in_app_browser, Feature::InAppBrowser),
+            (self.skill_search, Feature::SkillSearch),
+            (
+                self.skill_mcp_dependency_install,
+                Feature::SkillMcpDependencyInstall,
+            ),
+            (
+                self.request_permissions_tool,
+                Feature::RequestPermissionsTool,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(inherit, feature)| (!inherit).then_some(feature))
+    }
 }
 
 /// Base config deserialized from ~/.codex/config.toml.
@@ -489,6 +565,10 @@ pub struct ConfigToml {
     /// Explicit spawn efforts and role efforts take precedence.
     #[serde(default)]
     pub subagent_default_reasoning: HashMap<String, ReasoningEffort>,
+
+    /// Disable selected tool capabilities in native spawned agents.
+    #[serde(default)]
+    pub subagent_tools: SubagentToolsToml,
 
     /// Base URL for requests to ChatGPT (as opposed to the OpenAI API).
     pub chatgpt_base_url: Option<String>,

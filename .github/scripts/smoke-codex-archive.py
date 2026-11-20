@@ -21,6 +21,8 @@ archive_path = Path(sys.argv[1])
 inspect_only = len(sys.argv) > 2 and sys.argv[2] == "--inspect-only"
 release_targets = {"aarch64-apple-darwin", "x86_64-unknown-linux-gnu"}
 target = archive_path.name.removeprefix("codex-").removesuffix(".tar.gz")
+if archive_path.name == "codex-x86_64-unknown-linux-gnu-v3.tar.gz":
+    target = "x86_64-unknown-linux-gnu"
 if target not in release_targets:
     raise SystemExit(f"Unsupported CLI archive: {archive_path}")
 spec = TARGET_SPECS[target]

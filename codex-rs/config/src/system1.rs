@@ -2,7 +2,6 @@
 
 use std::collections::BTreeMap;
 
-use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -25,6 +24,9 @@ pub enum System1Backend {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct System1Profile {
+    /// Allow this endpoint to receive current-turn user images.
+    #[serde(default)]
+    pub include_images: bool,
     #[serde(rename = "protocol", alias = "backend")]
     pub backend: System1Backend,
     #[serde(default)]
@@ -48,8 +50,6 @@ pub struct System1Config {
     pub decision_every_n_steps: u64,
     pub profile: Option<String>,
     pub profiles: BTreeMap<String, System1Profile>,
-    pub decision_model: Option<String>,
-    pub decision_model_api_env: Option<String>,
     pub min_effort: ReasoningEffort,
     pub max_effort: ReasoningEffort,
     #[schemars(range(min = 1, max = 5000))]
@@ -73,17 +73,15 @@ impl Default for System1Config {
             decision_every_n_steps: 1,
             profile: None,
             profiles: BTreeMap::new(),
-            decision_model: None,
-            decision_model_api_env: None,
             min_effort: ReasoningEffort::Low,
             max_effort: ReasoningEffort::Max,
             decision_timeout_ms: 200,
             max_context_bytes: 8192,
             update_on: vec![System1Trigger::TurnStart, System1Trigger::ToolResult],
-            low_effort_description: "Straightforward coding, focused searches, and bounded analysis.".to_string(),
-            medium_effort_description: "Ordinary substantive work, including moderately complex coding.".to_string(),
-            high_effort_description: "Difficult debugging, multiple interacting constraints, conflicting evidence, or substantial uncertainty. Use max only for exceptionally difficult problems.".to_string(),
-            xhigh_effort_description: "Extensive reasoning for exceptionally difficult problems, deep investigations, and demanding long-horizon planning.".to_string(),
+            low_effort_description: "Direct execution or reporting a verified result when no judgment remains.".to_string(),
+            medium_effort_description: "Settled work that still needs care: make a scoped edit or verify a result.".to_string(),
+            high_effort_description: "Substantive work within the model’s normal range, including implementation or interpretation that requires care.".to_string(),
+            xhigh_effort_description: "Distinguishing plausible causes, reconciling interacting constraints, or catching subtle, consequential errors.".to_string(),
             max_effort_description: "Exceptionally difficult problems requiring the maximum supported reasoning budget.".to_string(),
             rubric_instructions: None,
         }
@@ -111,94 +109,15 @@ impl System1Config {
         }
     }
 
-    /// Calibrates shared difficulty guidance against the model's default effort.
-    /// A maximum default uses the preceding supported ordinary effort as its reference.
-    /// Configured bounds do not shift this reference.
-    pub fn calibrated_effort_description(
-        &self,
-        effort: &ReasoningEffort,
-        model: &ModelInfo,
-    ) -> Option<&str> {
-        let ordinary = [
-            ReasoningEffort::None,
-            ReasoningEffort::Minimal,
-            ReasoningEffort::Low,
-            ReasoningEffort::Medium,
-            ReasoningEffort::High,
-            ReasoningEffort::XHigh,
-            ReasoningEffort::Max,
-        ];
-        let supported: Vec<_> = ordinary
-            .iter()
-            .filter(|effort| {
-                model
-                    .supported_reasoning_levels
-                    .iter()
-                    .any(|preset| &preset.effort == *effort)
-            })
-            .collect();
-        let Some(index) = supported
-            .iter()
-            .position(|effort| Some(*effort) == model.default_reasoning_level.as_ref())
-        else {
-            return self.effort_description(effort);
-        };
-        let reference = if model.default_reasoning_level == Some(ReasoningEffort::Max) {
-            index.saturating_sub(/*rhs*/ 1)
-        } else {
-            index
-        };
-        let position = supported
-            .iter()
-            .position(|supported| *supported == effort)?;
-        match effort {
-            ReasoningEffort::None | ReasoningEffort::Minimal => self.effort_description(effort),
-            ReasoningEffort::Max => Some(&self.max_effort_description),
-            ReasoningEffort::Low
-            | ReasoningEffort::Medium
-            | ReasoningEffort::High
-            | ReasoningEffort::XHigh => Some(if position + 1 < reference {
-                "Mechanical execution, settled decisions, and simple responses."
-            } else if position < reference {
-                &self.low_effort_description
-            } else if position == reference {
-                &self.medium_effort_description
-            } else if position == reference + 1 {
-                &self.high_effort_description
-            } else {
-                &self.xhigh_effort_description
-            }),
-            ReasoningEffort::Ultra | ReasoningEffort::Persistent | ReasoningEffort::Custom(_) => {
-                None
-            }
-        }
-    }
-
-    pub fn resolved_profile(&self) -> Result<System1Profile, String> {
-        let profile = if let Some(name) = &self.profile {
-            if self.decision_model.is_some() || self.decision_model_api_env.is_some() {
-                return Err("system1.profile cannot be combined with decision_model or decision_model_api_env".to_string());
-            }
-            self.profiles
-                .get(name)
-                .cloned()
-                .ok_or_else(|| format!("system1.profile references unknown profile {name:?}"))?
-        } else {
-            System1Profile {
-                backend: System1Backend::Openai,
-                endpoint: None,
-                model: self
-                    .decision_model
-                    .clone()
-                    .unwrap_or_else(|| "gpt-6-luna".to_string()),
-                api_key_env: self
-                    .decision_model_api_env
-                    .clone()
-                    .unwrap_or_else(|| "DECISION_API_KEY".to_string()),
-            }
-        };
-        profile.validate()?;
-        Ok(profile)
+    pub fn selected_profile(&self) -> Result<(&str, &System1Profile), String> {
+        let name = self.profile.as_deref().ok_or_else(|| {
+            "System1 requires system1.profile to select a named entry in system1.profiles"
+                .to_string()
+        })?;
+        self.profiles
+            .get(name)
+            .map(|profile| (name, profile))
+            .ok_or_else(|| format!("system1.profile references unknown profile {name:?}"))
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -226,7 +145,9 @@ impl System1Config {
         if min > max {
             return Err("system1.min_effort must not exceed max_effort".to_string());
         }
-        self.resolved_profile()?;
+        if self.enabled || self.profile.is_some() {
+            self.selected_profile()?;
+        }
         for (name, profile) in &self.profiles {
             if name.trim().is_empty() {
                 return Err("system1 profile names must not be blank".to_string());
