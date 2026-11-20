@@ -2,7 +2,6 @@
 
 use super::*;
 use anyhow::Context;
-use codex_history::CodexHarnessMetadata;
 use codex_history::RolloutItem;
 use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::openai_models::WebSearchProvider;
@@ -115,25 +114,6 @@ fn model_search_builder(apps: &AppsTestServer, tool_mode: ToolMode) -> TestCodex
         })
 }
 
-fn rewrite_rollout_response_metadata(
-    path: &std::path::Path,
-    mut rewrite: impl FnMut(&mut CodexHarnessMetadata),
-) -> Result<()> {
-    let mut rollout = Vec::new();
-    for original in std::fs::read_to_string(path)?.lines() {
-        let mut line = codex_rollout::parse_rollout_line(original)?;
-        if let RolloutItem::ResponseItem(item) = &mut line.item
-            && let Some(metadata) = item.metadata.as_mut()
-        {
-            rewrite(metadata);
-        }
-        rollout.push(serde_json::to_string(&line)?);
-    }
-    let rollout = rollout.join("\n");
-    std::fs::write(path, format!("{rollout}\n"))?;
-    Ok(())
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn metadata_free_history_withholds_native_fallback() -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -162,10 +142,18 @@ async fn metadata_free_history_withholds_native_fallback() -> Result<()> {
     let rollout_path = test.codex.rollout_path().context("rollout path")?;
     test.codex.shutdown_and_wait().await?;
     let mut removed_checkpoint = false;
-    rewrite_rollout_response_metadata(&rollout_path, |metadata| {
-        removed_checkpoint |= metadata.model_search_state.take().is_some();
-        metadata.mcp_attribution = None;
-    })?;
+    let mut rollout = Vec::new();
+    for original in std::fs::read_to_string(&rollout_path)?.lines() {
+        let mut line = codex_rollout::parse_rollout_line(original)?;
+        if let RolloutItem::ResponseItem(item) = &mut line.item
+            && let Some(metadata) = item.metadata.as_mut()
+        {
+            removed_checkpoint |= metadata.model_search_state.take().is_some();
+        }
+        rollout.push(serde_json::to_string(&line)?);
+    }
+    let rollout = rollout.join("\n");
+    std::fs::write(&rollout_path, format!("{rollout}\n"))?;
     assert!(
         removed_checkpoint,
         "first turn should persist model search state"

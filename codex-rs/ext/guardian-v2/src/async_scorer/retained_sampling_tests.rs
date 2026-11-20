@@ -44,6 +44,7 @@ async fn retained_websocket_requests_preserve_model_output_and_ids() -> Result<(
                 })
                 .collect(),
             input_tokens,
+            max_input_tokens: sampler.max_input_tokens(),
             existing_context_tokens: 0,
             cursor: TranscriptCursor {
                 parent_history_version: 0,
@@ -156,6 +157,7 @@ async fn retention_overflow_or_incomplete_stream_keeps_early_score() -> Result<(
                 .map(|item| ResponseItemEnvelope { item, metadata: None })
                 .collect(),
             input_tokens,
+            max_input_tokens: sampler.max_input_tokens(),
             existing_context_tokens: 0,
             cursor: TranscriptCursor {
                 parent_history_version: 0,

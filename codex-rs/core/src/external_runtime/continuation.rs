@@ -255,11 +255,12 @@ pub(super) async fn run(
     if cancellation.is_cancelled() {
         return Err(super::ConfirmedInterrupt.into());
     }
-    let (mut pending, _) = session
+    let (pending, _) = session
         .input_queue
         .get_pending_input(&session.active_turn)
         .await;
     if !pending.is_empty() {
+        let mut pending = super::materialize_native_inputs(session, turn, pending).await;
         return super::run_conversation(session, turn, &mut pending, cancellation).await;
     }
     Ok(last_message)
@@ -294,16 +295,12 @@ pub(super) async fn submit_steering(
         .input_queue
         .accept_mailbox_delivery_for_current_turn(&session.active_turn, &turn.sub_id)
         .await;
-    let (mut pending, _) = session
+    let (pending, _) = session
         .input_queue
         .get_pending_input(&session.active_turn)
         .await;
-    if page_context != codex_config::PageContextPolicy::Inherit {
-        let history = session.clone_history().await;
-        super::input::filter_page_context(&mut pending, page_context, history.raw_items());
-    }
-    if pending.iter().any(|item| {
-        matches!(item,
+    if pending.iter().any(|entry| {
+        matches!(&entry.input,
             TurnInput::UserInput { content, .. } if content.iter().any(|part| matches!(part,
                 ResolvedUserInput::Skill { .. }
                     | ResolvedUserInput::Mention { .. }
@@ -319,6 +316,11 @@ pub(super) async fn submit_steering(
             anyhow::bail!("Claude selection input lost its active turn before deferral");
         }
         return Ok(false);
+    }
+    let mut pending = super::materialize_native_inputs(session, turn, pending).await;
+    if page_context != codex_config::PageContextPolicy::Inherit {
+        let history = session.clone_history().await;
+        super::input::filter_page_context(&mut pending, page_context, history.raw_items());
     }
     match super::input::prepare_input(&mut pending) {
         Ok(0) => {}

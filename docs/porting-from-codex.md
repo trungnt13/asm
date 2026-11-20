@@ -206,7 +206,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `2f0374456fd5cd280ee76de54220ab8315a0f8d0`, 2026-11-19. Subject: Render LaTeX underbraces in TUI display math (#62577).
+Last incorporated commit: `9f2b87495bf979f6c1953cf00c98143981664914`, 2026-11-20. Subject: Recover server replies after Responses WebSocket write failures (#62749).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 
