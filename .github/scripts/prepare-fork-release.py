@@ -517,6 +517,11 @@ def output(revision, tag="", candidate_ref="", complete=False, publish=False):
     print(
         f"Release source: {revision}; tag: {tag or '(build only)'}; candidate: {candidate_ref or '(none)'}"
     )
+    installer = git_file(revision, "scripts/install/install.sh") if publish else ""
+    staged = (
+        "SHA256SUMS-$vendor_target" in installer
+        or "SHA256SUMS-$asset_target" in installer
+    )
     with open(os.environ["GITHUB_OUTPUT"], "a") as stream:
         for key, value in {
             "sha": revision,
@@ -524,11 +529,7 @@ def output(revision, tag="", candidate_ref="", complete=False, publish=False):
             "candidate_ref": candidate_ref,
             "complete": str(complete).lower(),
             "publish": str(publish).lower(),
-            "staged": str(
-                publish
-                and "SHA256SUMS-$vendor_target"
-                in git_file(revision, "scripts/install/install.sh")
-            ).lower(),
+            "staged": str(staged).lower(),
         }.items():
             print(f"{key}={value}", file=stream)
 
