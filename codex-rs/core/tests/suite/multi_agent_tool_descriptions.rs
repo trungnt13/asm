@@ -49,8 +49,7 @@ const EXPECTED_CATALOG_PARAMETERS: &str = r#"{
     "$defs": {"unused": {"type": "string"}}
 }"#;
 
-const EXPECTED_FORK_TURNS_DESCRIPTION: &str =
-    "Parent history to inherit. Use `none` for no history or `all` for full history.";
+const EXPECTED_FORK_TURNS_DESCRIPTION: &str = "Use `none` to skip the parent transcript or `all` to fork it. The selected role may force `none`.";
 
 #[derive(Clone, Copy)]
 enum Exposure {
@@ -162,6 +161,7 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                         description: Some("Research the assigned question.".to_string()),
                         config_file: None,
                         nickname_candidates: None,
+                        fork_turns: None,
                     },
                 );
             })

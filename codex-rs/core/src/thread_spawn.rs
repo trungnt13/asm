@@ -9,6 +9,8 @@ use crate::agent::child_config::prepare_agent_spawn_config;
 use crate::agent::exceeds_thread_spawn_depth_limit;
 use crate::agent::helper_daybreak::turn::explicit_program_for_spawn;
 use crate::agent::next_thread_spawn_depth;
+use crate::agent::role::DEFAULT_ROLE_NAME;
+use crate::agent::role::resolve_role_config;
 use crate::agent::types::AgentMessage;
 use crate::agent::types::LiveAgent;
 use crate::agent::types::MessageDeliveryMode;
@@ -20,6 +22,8 @@ use crate::config::Config;
 use crate::session::multi_agents::resolve_usage_hints;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
+use crate::tools::handlers::multi_agents_common::record_collab_spawn_failure;
+use codex_config::config_toml::AgentRoleForkTurns;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::AgentPath;
 use codex_protocol::error::CodexErr;
@@ -111,6 +115,7 @@ pub(crate) async fn spawn(
     };
     let (mut settings, task_name) = prepare(session, step_context, call_id, request).await?;
     settings.options.spawn_arguments = Some(spawn_arguments);
+    let fork_mode = settings.options.fork_mode.clone();
     let request = SpawnRequest {
         caller: session.thread_id,
         config: settings.config,
@@ -126,7 +131,24 @@ pub(crate) async fn spawn(
         source: settings.source,
         options: settings.options,
     };
-    let (agent, config) = session.services.agent_control.spawn(request).await?;
+    let (agent, config) = session
+        .services
+        .agent_control
+        .spawn(request)
+        .await
+        .map_err(|err| {
+            let turn = &step_context.turn;
+            record_collab_spawn_failure(
+                &turn.session_telemetry,
+                turn.config.apps_mcp_product_sku.as_deref(),
+                &err,
+                call_id,
+                &turn.sub_id,
+                fork_mode.as_ref(),
+                MultiAgentVersion::V2,
+            );
+            ThreadSpawnError::Backend(err)
+        })?;
     step_context
         .turn
         .session_telemetry
@@ -178,6 +200,12 @@ pub(crate) async fn prepare(
         .as_deref()
         .map(str::trim)
         .filter(|role| !role.is_empty());
+    let fork_mode = match resolve_role_config(&turn.config, role_name.unwrap_or(DEFAULT_ROLE_NAME))
+        .and_then(|role| role.fork_turns)
+    {
+        Some(AgentRoleForkTurns::None) => None,
+        None => fork_mode,
+    };
     let prepared = prepare_agent_spawn_config(
         session,
         step_context,

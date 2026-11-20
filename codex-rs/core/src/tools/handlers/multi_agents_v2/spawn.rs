@@ -10,7 +10,6 @@ use crate::tools::handlers::multi_agents_spec::create_spawn_agent_tool_v2;
 use crate::tools::handlers::multi_agents_v2::message_tool::message_content;
 use crate::turn_timing::now_unix_timestamp_ms;
 use codex_protocol::ThreadId;
-use codex_protocol::protocol::MultiAgentVersion;
 use codex_tools::ToolSpec;
 use std::num::NonZeroUsize;
 
@@ -134,7 +133,7 @@ async fn handle_spawn_agent(
             task_name: args.task_name,
             spawn_arguments,
             message: AgentMessage::Plaintext(message),
-            fork_mode: fork_mode.clone(),
+            fork_mode,
             agent_type: args.agent_type.clone(),
             model: args.model,
             reasoning_effort: args.reasoning_effort,
@@ -143,18 +142,7 @@ async fn handle_spawn_agent(
     .await
     .map_err(|err| match err {
         ThreadSpawnError::Preparation(message) => FunctionCallError::RespondToModel(message),
-        ThreadSpawnError::Backend(err) => {
-            record_collab_spawn_failure(
-                &turn.session_telemetry,
-                turn.config.apps_mcp_product_sku.as_deref(),
-                &err,
-                &call_id,
-                &turn.sub_id,
-                fork_mode.as_ref(),
-                MultiAgentVersion::V2,
-            );
-            collab_spawn_error(err)
-        }
+        ThreadSpawnError::Backend(err) => collab_spawn_error(err),
     })?;
     let spawned_agent = spawned.agent;
     let agent_snapshot = spawned.config;

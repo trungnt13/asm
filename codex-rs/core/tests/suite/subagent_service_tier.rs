@@ -86,6 +86,7 @@ fn configure_priority_role(config: &mut Config) {
             description: Some("Role with a configured priority tier".to_string()),
             config_file: Some(role_path.to_path_buf()),
             nickname_candidates: None,
+            fork_turns: None,
         },
     );
 }
