@@ -553,6 +553,12 @@ impl Session {
             done_clone.notify_waiters();
         }
         .instrument(task_span);
+        if task_kind == TaskKind::Regular {
+            crate::agent::turn_metrics::record_start(
+                &self.services.thread_extension_data,
+                &turn_context,
+            );
+        }
         let handle = tokio::spawn(storage_originator.scope(task_future));
         let timer = turn_context
             .session_telemetry
@@ -619,9 +625,12 @@ impl Session {
             return;
         }
 
-        let Some((turn_state, previous_options)) = self.reserve_pending_work_turn().await else {
+        let Some(reservation) = self.reserve_pending_work_turn().await else {
             return;
         };
+        let _admission = reservation.admission;
+        let turn_state = reservation.turn_state;
+        let previous_options = reservation.previous_options;
 
         let helper_admission = HelperTurnAdmission::capture(self);
         self.services

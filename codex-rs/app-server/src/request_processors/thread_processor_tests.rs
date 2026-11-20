@@ -1332,6 +1332,7 @@ mod thread_processor_behavior_tests {
         ensure_conversation_listener(
             ListenerTaskContext {
                 thread_manager: test.thread_manager.clone(),
+                thread_store: test.thread_store.clone(),
                 thread_state_manager,
                 outgoing: outgoing.clone(),
                 pending_thread_unloads: Default::default(),

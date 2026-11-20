@@ -140,6 +140,8 @@ For syncs or saved-cache/wire-format changes, apply this gate even after conflic
 
 #### Known upstream cold-history limitation
 
+For PR #226, the owner accepted the stock cold-history limitation through `2f0374456fd5cd280ee76de54220ab8315a0f8d0` only. ASM passed cold search, timeline, turn, and item reads. Stock alpha.11 found the thread but needed resume to read both saved items. Warm reopening preserved the original rollout bytes. This exception does not cover voice history or waive other checks.
+
 For PR #224, the owner accepted the stock cold-history limitation through `39c29c3bb620f91e84a3bb266bb496dfb697c101` only. ASM passed cold search, timeline, turn, and item reads. Stock alpha.11 found the thread but needed one resume to read both saved items. Warm reopening preserved the items and original rollout bytes. This exception does not cover voice history or waive other checks.
 
 For the sync through `ca21fe65d18a9b6326759fb4263c65dfbb645aa5`, the owner accepted the unchanged stock cold-history limitation for this target only. ASM cold timeline, search, turn and item reads passed. Independent stock finds the thread through search but cannot read its cold history; resume and reopening restore exact items and permissions without changing canonical bytes.
@@ -194,7 +196,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `39c29c3bb620f91e84a3bb266bb496dfb697c101`, 2026-11-19. Subject: Add Statsig counters for `exec_command` latency (#62507).
+Last incorporated commit: `2f0374456fd5cd280ee76de54220ab8315a0f8d0`, 2026-11-19. Subject: Render LaTeX underbraces in TUI display math (#62577).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 
