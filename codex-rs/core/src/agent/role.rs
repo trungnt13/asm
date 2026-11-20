@@ -408,6 +408,7 @@ mod built_in {
                         description: Some("Default agent.".to_string()),
                         config_file: None,
                         nickname_candidates: None,
+                        fork_turns: None,
                     },
                 ),
                 (
@@ -425,6 +426,7 @@ Rules:
                         ),
                         config_file: Some("explorer.toml".to_string().parse().unwrap_or_default()),
                         nickname_candidates: None,
+                        fork_turns: None,
                     },
                 ),
                 (
@@ -444,6 +446,7 @@ Rules:
                         ),
                         config_file: None,
                         nickname_candidates: None,
+                        fork_turns: None,
                     },
                 ),
                 // Awaiter is temp removed

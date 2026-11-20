@@ -785,6 +785,10 @@ Optional `allowed_agent_roles` in `[[skills.config]]` restricts normal catalog v
 
 ### Role configuration restrictions
 
+Set `fork_turns = "none"` in a role TOML file or its `[agents.<role>]` table to prevent a transcript fork. The table still needs a description or a role file that supplies it. Start a new parent chat after changing the policy.
+
+Apply the policy before preparing a multi-agent V2 child, even when the parent requests `all`. Omission keeps the spawn request. This does not disable items explicitly retained for fresh children or restrict the task message.
+
 Role TOML can explicitly disable web search with `web_search = "disabled"` or System1 with `[system1] enabled = false`. Apply only explicit disabling. Omission keeps inheritance, including the parent's live System1 toggle. Roles cannot enable either against parent restrictions. Keep System1 restrictions through child spawn/reload.
 
 Roles can independently override `[system1] min_effort` and `max_effort`; omitted bounds inherit. Validate the merged ordinary-effort range. Intersect it with model-supported efforts; fewer than two choices skips Decisions. Keep role bounds through model changes/reload. New children resolve their own role, without ancestor role bounds. Other System1 settings inherit. Bounds constrain decision choices, not manual effort or fallback.

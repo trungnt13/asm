@@ -173,6 +173,7 @@ fn configure_multi_agent_v2_with_role(
             description: Some("Durable worker role".to_string()),
             config_file: Some(role_path.to_path_buf()),
             nickname_candidates: None,
+            fork_turns: None,
         },
     );
 }

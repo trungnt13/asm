@@ -1,3 +1,4 @@
+use codex_config::config_toml::AgentRoleForkTurns;
 use codex_config::config_toml::ConfigToml;
 use codex_utils_absolute_path::AbsolutePathBufGuard;
 use serde::Deserialize;
@@ -15,6 +16,7 @@ pub struct AgentRoleConfig {
     pub config_file: Option<PathBuf>,
     /// Candidate nicknames for agents spawned with this role.
     pub nickname_candidates: Option<Vec<String>>,
+    pub fork_turns: Option<AgentRoleForkTurns>,
 }
 
 #[derive(Deserialize, Debug, Clone, Default, PartialEq)]
@@ -23,6 +25,7 @@ struct RawAgentRoleFileToml {
     name: Option<String>,
     description: Option<String>,
     nickname_candidates: Option<Vec<String>>,
+    fork_turns: Option<AgentRoleForkTurns>,
     #[serde(flatten)]
     config: ConfigToml,
 }
@@ -32,6 +35,7 @@ pub struct ResolvedAgentRoleFile {
     pub role_name: String,
     pub description: Option<String>,
     pub nickname_candidates: Option<Vec<String>>,
+    pub fork_turns: Option<AgentRoleForkTurns>,
     pub config: TomlValue,
 }
 
@@ -108,11 +112,13 @@ pub fn parse_agent_role_file_contents(
     config_table.remove("name");
     config_table.remove("description");
     config_table.remove("nickname_candidates");
+    config_table.remove("fork_turns");
 
     Ok(ResolvedAgentRoleFile {
         role_name,
         description,
         nickname_candidates,
+        fork_turns: parsed.fork_turns,
         config,
     })
 }

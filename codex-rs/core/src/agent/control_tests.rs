@@ -4881,6 +4881,7 @@ async fn spawn_thread_subagent_uses_role_specific_nickname_candidates() {
             description: Some("Research role".to_string()),
             config_file: None,
             nickname_candidates: Some(vec!["Atlas".to_string()]),
+            fork_turns: None,
         },
     );
     let (parent_thread_id, _parent_thread) = harness.start_thread().await;
@@ -4931,6 +4932,7 @@ async fn resume_thread_subagent_restores_stored_metadata() {
             description: None,
             config_file: None,
             nickname_candidates: None,
+            fork_turns: None,
         },
     );
     let thread_store = Arc::new(InMemoryThreadStore::default());
