@@ -108,6 +108,7 @@ def main():
                 f"CARGO_PROFILE_RELEASE_LTO={args.lto}\n"
                 f"CARGO_PROFILE_RELEASE_CODEGEN_UNITS={codegen_units}\n"
                 "CARGO_BUILD_JOBS=1\n"
+                "ASM_BUILD_VARIANT=pgo\n"
             )
     return 0
 

@@ -68,7 +68,7 @@ def test_cli_version_matches_release_sources(package: SmokePackage) -> None:
     )
     manifest = tomllib.loads((root / "codex-rs/Cargo.toml").read_text())
     version = manifest["workspace"]["package"]["version"]
-    assert package.run("--version").stdout == f"codex-cli {version}\n"
+    assert package.run("--version").stdout == f"asm {version}\n"
 
 
 @pytest.mark.parametrize("variant", ["cli_root", "app_server_root"])

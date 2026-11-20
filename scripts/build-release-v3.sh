@@ -89,7 +89,7 @@ echo "Building $tag at $sha: $target, x86-64-v3, Fat LTO, 1 codegen unit, PGO"
 release_dir="$output/target/$target/release"
 digest=$(sha256sum "$release_dir/bwrap")
 mapfile -t pgo_env < "$output/pgo.env"
-"${build_env[@]}" "${pgo_env[@]}" "CODEX_BWRAP_SHA256=${digest%% *}" \
+"${build_env[@]}" "${pgo_env[@]}" ASM_BUILD_VARIANT=x86-64-v3-pgo "CODEX_BWRAP_SHA256=${digest%% *}" \
   "$python" ../scripts/local-cargo.py build --locked --release --target "$target" \
   --bin codex --bin codex-code-mode-host --bin codex-exec-server --timings 2>&1 | tee "$output/build.log"
 
