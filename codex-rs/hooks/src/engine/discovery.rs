@@ -60,7 +60,6 @@ pub(crate) fn ensure_required_hooks_loaded(errors: &[String]) -> anyhow::Result<
 }
 
 struct HookHandlerSource<'a> {
-    mode: DiscoveryMode,
     path: &'a AbsolutePathBuf,
     key_source: String,
     source: HookSource,
@@ -100,14 +99,7 @@ struct NormalizedHandler {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DiscoveryMode {
     Runtime,
-    RuntimeFor(HookEventName),
     Listing,
-}
-
-impl DiscoveryMode {
-    pub(crate) fn includes(self, event: HookEventName) -> bool {
-        !matches!(self, Self::RuntimeFor(selected) if selected != event)
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -166,7 +158,6 @@ pub(crate) fn discover_handlers(
             let (hook_source, is_managed) = hook_metadata_for_config_layer_source(&layer.name);
             let policy_path = config_toml_source_path(layer);
             let policy_source = HookHandlerSource {
-                mode: DiscoveryMode::Runtime,
                 path: &policy_path,
                 key_source: policy_path.display().to_string(),
                 source: hook_source,
@@ -210,7 +201,6 @@ pub(crate) fn discover_handlers(
                     &mut warnings,
                     &mut display_order,
                     HookHandlerSource {
-                        mode: DiscoveryMode::Runtime,
                         path: &source_path,
                         key_source: source_path.display().to_string(),
                         source: hook_source,
@@ -269,7 +259,6 @@ fn append_managed_requirement_handlers(
         warnings,
         display_order,
         HookHandlerSource {
-            mode: DiscoveryMode::Runtime,
             path: &source_path,
             key_source: source_path.display().to_string(),
             source: hook_source_for_requirement_source(managed_hooks.source.as_ref()),
@@ -335,7 +324,6 @@ fn append_plugin_hook_sources(
             warnings,
             display_order,
             HookHandlerSource {
-                mode: DiscoveryMode::Runtime,
                 path: &source_path,
                 key_source: crate::declarations::plugin_hook_key_source(
                     plugin_id.as_str(),
@@ -516,11 +504,10 @@ fn escape_xml_text(value: &str) -> String {
 pub(crate) fn discover_environment_hooks(
     sources: Vec<crate::EnvironmentHookSource>,
     mut display_order: i64,
-    mode: DiscoveryMode,
 ) -> DiscoveryResult {
     let mut discovered = DiscoveryResult::default();
     for source in sources {
-        append_environment_hooks(&mut discovered, source, &mut display_order, mode);
+        append_environment_hooks(&mut discovered, source, &mut display_order);
     }
     discovered
 }
@@ -539,11 +526,7 @@ pub fn validate_environment_hooks(
         cwd: cwd.clone(),
         hooks: hooks.clone(),
     };
-    let discovered = discover_environment_hooks(
-        vec![source],
-        /*display_order*/ 0,
-        DiscoveryMode::Runtime,
-    );
+    let discovered = discover_environment_hooks(vec![source], /*display_order*/ 0);
     ensure_required_hooks_loaded(&discovered.required_load_errors)
 }
 
@@ -551,7 +534,6 @@ fn append_environment_hooks(
     discovered: &mut DiscoveryResult,
     mut source: crate::EnvironmentHookSource,
     display_order: &mut i64,
-    mode: DiscoveryMode,
 ) {
     let path = synthetic_layer_path(&format!(
         "<environment:{}>/requirements.toml",
@@ -580,7 +562,6 @@ fn append_environment_hooks(
         &mut discovered.warnings,
         display_order,
         HookHandlerSource {
-            mode: DiscoveryMode::Runtime,
             path: &path,
             key_source: path.display().to_string(),
             source: HookSource::System,
@@ -597,7 +578,7 @@ fn append_environment_hooks(
         source.hooks,
         HookDiscoveryPolicy {
             config_layer_stack: None,
-            mode,
+            mode: DiscoveryMode::Runtime,
             allow_managed_hooks_only: true,
             bypass_hook_trust: false,
         },
@@ -627,11 +608,7 @@ fn append_hook_events(
         return;
     }
 
-    source.mode = policy.mode;
     for (event_name, groups) in hook_events.into_matcher_groups() {
-        if !policy.mode.includes(event_name) {
-            continue;
-        }
         append_matcher_groups(
             handlers,
             hook_entries,
@@ -689,13 +666,6 @@ fn append_matcher_groups(
                     status_message,
                     additional_context_limit,
                 } => {
-                    if r#async && matches!(source.mode, DiscoveryMode::RuntimeFor(_)) {
-                        source.record_load_failure(
-                            format!("Async {event_name:?} hooks are not supported by native runtimes: {}", source.path.display()),
-                            warnings,
-                        );
-                        continue;
-                    }
                     let command = if cfg!(windows) {
                         command_windows.unwrap_or(command)
                     } else {
@@ -1149,7 +1119,6 @@ mod tests {
         hook_states: &'a std::collections::HashMap<String, HookStateToml>,
     ) -> super::HookHandlerSource<'a> {
         super::HookHandlerSource {
-            mode: super::DiscoveryMode::Runtime,
             path,
             key_source: path.display().to_string(),
             source: hook_source(),
@@ -1171,7 +1140,6 @@ mod tests {
         bypass_hook_trust: bool,
     ) -> super::HookHandlerSource<'a> {
         super::HookHandlerSource {
-            mode: super::DiscoveryMode::Runtime,
             path,
             key_source: path.display().to_string(),
             source: HookSource::User,

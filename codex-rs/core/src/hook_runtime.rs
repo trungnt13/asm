@@ -1,9 +1,6 @@
-mod admission;
 mod executor;
 pub(crate) mod sampling;
 
-pub(crate) use admission::InputAdmission;
-pub(crate) use admission::admit_pending_input;
 pub(crate) use executor::prepare_executor_hook_sources;
 
 use std::future::Future;
@@ -711,7 +708,7 @@ pub(crate) async fn run_legacy_after_agent_hook(
     true
 }
 
-async fn inspect_pending_input(
+pub(crate) async fn inspect_pending_input(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
     pending_input_item: &TurnInput,
@@ -737,19 +734,6 @@ async fn inspect_pending_input(
                 turn_context,
                 &turn_context.initial_environments.refresh_readiness(),
             );
-            if let Err(error) = hooks.ensure_required_loaded() {
-                sess.send_event(
-                    turn_context,
-                    EventMsg::Warning(WarningEvent {
-                        message: error.to_string(),
-                    }),
-                )
-                .await;
-                return HookRuntimeOutcome {
-                    should_stop: true,
-                    additional_contexts: Vec::new(),
-                };
-            }
             let preview_runs = hooks.preview_user_prompt_submit(&request);
             run_context_injecting_hook(
                 sess,

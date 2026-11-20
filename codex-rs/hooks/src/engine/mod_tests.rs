@@ -91,7 +91,6 @@ fn permission_request_timeout_only_counts_synchronous_handlers() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
     let command = "echo synchronous permission hook";
     let synchronous_handler = ConfiguredHandler {
@@ -622,7 +621,6 @@ with Path(r"{log_path}").open("a", encoding="utf-8") as handle:
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     assert!(engine.warnings().is_empty());
@@ -634,7 +632,6 @@ with Path(r"{log_path}").open("a", encoding="utf-8") as handle:
     let listed = crate::list_hooks(crate::HooksConfig {
         legacy_notify_argv: None,
         feature_enabled: true,
-        only_event: None,
         bypass_hook_trust: false,
         config_layer_stack: Some(config_layer_stack.clone()),
         plugin_hook_sources: Vec::new(),
@@ -737,7 +734,6 @@ async fn requirements_managed_hooks_execute_windows_command_override() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     let outcome = engine
@@ -820,7 +816,6 @@ fn unknown_requirement_source_hooks_stay_managed() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     assert_eq!(engine.handlers.len(), 1);
@@ -906,7 +901,6 @@ fn user_disablement_filters_non_managed_hooks_but_not_managed_hooks() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     assert_eq!(engine.handlers.len(), 1);
@@ -975,7 +969,6 @@ fn user_disablement_does_not_filter_managed_layer_hooks() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     assert_eq!(engine.handlers.len(), 1);
@@ -1143,7 +1136,6 @@ fn requirements_managed_hooks_load_when_managed_dir_is_missing() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     assert!(engine.warnings().is_empty());
@@ -1211,7 +1203,6 @@ fn allow_managed_hooks_only_false_keeps_unmanaged_hooks() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     assert!(engine.warnings().is_empty());
@@ -1271,7 +1262,6 @@ fn allow_managed_hooks_only_in_config_toml_does_not_enable_policy() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     assert!(engine.warnings().is_empty());
@@ -1347,7 +1337,6 @@ fn allow_managed_hooks_only_skips_unmanaged_json_and_toml_hooks() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     assert!(engine.handlers.is_empty());
@@ -1388,7 +1377,6 @@ fn allow_managed_hooks_only_skips_unmanaged_plugin_hooks() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     assert!(engine.handlers.is_empty());
@@ -1462,7 +1450,6 @@ fn allow_managed_hooks_only_keeps_managed_requirement_and_config_layer_hooks() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     assert!(engine.warnings().is_empty());
@@ -1578,7 +1565,6 @@ fn discovers_hooks_from_json_and_toml_in_the_same_layer() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     assert!(engine.warnings().iter().any(|warning| {
@@ -1682,7 +1668,6 @@ fn profile_user_layers_load_shared_hooks_json_once() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     assert!(engine.warnings().is_empty());
@@ -1762,7 +1747,6 @@ fn malformed_hooks_json_is_reported_as_startup_warning() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     assert!(engine.handlers.is_empty());
@@ -2074,7 +2058,6 @@ fn builtin_cleanup_ignores_disablement_but_preserves_managed_only_policy() {
                 args: Vec::new(),
             }),
             mcp_executor(),
-            super::discovery::DiscoveryMode::Runtime,
         );
         assert_eq!(feature_disabled.handlers.as_ref(), &expected);
     }
@@ -2114,7 +2097,6 @@ fn disabled_hooks_feature_keeps_builtin_cleanup_but_not_trusted_plugin_hooks() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
     assert_eq!(
         engine.handlers.as_slice(),
@@ -2182,7 +2164,6 @@ print(json.dumps({
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     let preview = engine.preview_pre_tool_use(&PreToolUseRequest {
@@ -2208,7 +2189,6 @@ print(json.dumps({
     let listed = crate::list_hooks(crate::HooksConfig {
         legacy_notify_argv: None,
         feature_enabled: true,
-        only_event: None,
         bypass_hook_trust: false,
         config_layer_stack: None,
         plugin_hook_sources,
@@ -2311,7 +2291,6 @@ fn plugin_hook_sources_expand_plugin_placeholders() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     assert_eq!(
@@ -2357,7 +2336,6 @@ fn plugin_hook_load_warnings_are_startup_warnings() {
             args: Vec::new(),
         }),
         mcp_executor(),
-        super::discovery::DiscoveryMode::Runtime,
     );
 
     assert_eq!(engine.warnings(), &["failed plugin hook".to_string()]);
@@ -2415,7 +2393,6 @@ fn executor_stop_hook_fixture() -> (
             args: Vec::new(),
         }),
         executor,
-        super::discovery::DiscoveryMode::Runtime,
     );
     let source = ExecutorPluginHookSource {
         plugin_id: PluginId::parse("computer-use@openai-bundled").expect("valid plugin ID"),
@@ -2989,7 +2966,6 @@ async fn mcp_tool_hooks_expand_event_input_and_apply_pre_tool_decisions() {
             args: Vec::new(),
         }),
         Arc::new(executor),
-        super::discovery::DiscoveryMode::Runtime,
     );
     let outcome = engine.run_pre_tool_use(request).await;
 
@@ -3084,7 +3060,6 @@ async fn mcp_interrupt_hooks_expand_event_input_and_bound_timeout() {
             args: Vec::new(),
         }),
         Arc::new(executor),
-        super::discovery::DiscoveryMode::Runtime,
     );
     let outcome = engine
         .run_interrupt(InterruptRequest {

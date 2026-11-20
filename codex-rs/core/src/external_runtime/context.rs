@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::context::ContextualUserFragment;
 use crate::context::DeveloperInstructions;
+use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::session::turn;
@@ -23,11 +24,11 @@ pub(super) struct PreparedContext {
 pub(super) async fn capture(
     session: &Arc<Session>,
     turn: Arc<TurnContext>,
-    input: &super::input::AdmittedInputs,
+    input: &[TurnInput],
     restored_role: Option<&str>,
     cancellation: &CancellationToken,
 ) -> anyhow::Result<PreparedContext> {
-    let user_input = turn::input_for_extensions(input.inputs());
+    let user_input = turn::input_for_extensions(input);
     let (required_servers, mentioned_plugins) =
         turn::required_mcp_servers_for_input(session, &turn, &user_input)
             .or_cancel(cancellation)

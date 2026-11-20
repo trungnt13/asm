@@ -23,9 +23,11 @@ use crate::context_manager::rejected_audio;
 use crate::cyber_access_program;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::feedback_tags;
-use crate::hook_runtime::admit_pending_input;
 use crate::hook_runtime::drain_async_hook_results;
+use crate::hook_runtime::inspect_pending_input;
 use crate::hook_runtime::legacy_notify_input_messages;
+use crate::hook_runtime::record_additional_contexts;
+use crate::hook_runtime::record_pending_input;
 use crate::hook_runtime::run_legacy_after_agent_hook;
 use crate::hook_runtime::run_pending_session_start_hooks;
 use crate::hook_runtime::run_turn_stop_hooks;
@@ -1241,40 +1243,51 @@ pub(crate) async fn run_hooks_and_record_inputs(
     let mut input_error = None;
     for input_item in recordable_inputs(sess, model_info, input) {
         let input_item = input_item?;
-        // Owned inputs were stripped of unsupported audio and cannot lead to a model step.
-        let decision_input = match &input_item {
-            Cow::Borrowed(
-                item @ (TurnInput::UserInput { .. } | TurnInput::InterAgentCommunication(_)),
-            ) => Some(*item),
+        let hook_outcome = inspect_pending_input(sess, turn_context, &input_item).await;
+        let realtime_handoff_id = match input_item.as_ref() {
+            TurnInput::UserInput { metadata, .. } => metadata.realtime_handoff_id,
             _ => None,
         };
-        let admitted = admit_pending_input(sess, turn_context, input_item).await;
-        if admitted.input().is_none() {
+        if hook_outcome.should_stop {
+            if let Some(id) = realtime_handoff_id {
+                sess.reject_realtime_handoff(id).await;
+            }
             blocked_input = true;
-            admitted
-                .record(sess, turn_context, model_info, persist_context)
-                .await?;
-            continue;
-        }
-        // Tool outputs retain their durability barrier, including in mixed input batches.
-        let input_persist_context = if persist_context == PersistContext::SteeredUserInput
-            && matches!(admitted.input(), Some(TurnInput::FunctionCallOutput(_)))
-        {
-            PersistContext::Standard
+            record_additional_contexts(sess, turn_context, hook_outcome.additional_contexts).await;
         } else {
-            persist_context
-        };
-        let is_user_input = matches!(admitted.input(), Some(TurnInput::UserInput { content, .. }) if !content.is_empty());
-        if let Err(error) = admitted
-            .record(sess, turn_context, model_info, input_persist_context)
+            // Tool outputs retain their durability barrier, including in mixed input batches.
+            let input_persist_context = if persist_context == PersistContext::SteeredUserInput
+                && matches!(input_item.as_ref(), TurnInput::FunctionCallOutput(_))
+            {
+                PersistContext::Standard
+            } else {
+                persist_context
+            };
+            let is_user_input = matches!(input_item.as_ref(), TurnInput::UserInput { content, .. } if !content.is_empty());
+            // Owned inputs were stripped of unsupported audio and cannot lead to a model step.
+            let decision_input = match &input_item {
+                Cow::Borrowed(
+                    item @ (TurnInput::UserInput { .. } | TurnInput::InterAgentCommunication(_)),
+                ) => Some(*item),
+                _ => None,
+            };
+            if let Err(error) = record_pending_input(
+                sess,
+                turn_context,
+                model_info,
+                input_item.into_owned(),
+                hook_outcome.additional_contexts,
+                input_persist_context,
+            )
             .await
-        {
-            // The batch has left the queue. Persist its unrelated siblings before failing.
-            input_error.get_or_insert(error);
-        } else {
-            accepted_user_input |= is_user_input;
-            if let Some(item) = decision_input {
-                sess.record_system1_input(turn_context, item);
+            {
+                // The batch has left the queue. Persist its unrelated siblings before failing.
+                input_error.get_or_insert(error);
+            } else {
+                accepted_user_input |= is_user_input;
+                if let Some(item) = decision_input {
+                    sess.record_system1_input(turn_context, item);
+                }
             }
         }
     }
@@ -1338,11 +1351,9 @@ fn unsupported_uploaded_audio_error() -> CodexErr {
 }
 
 /// Extensions and telemetry consume the protocol view, including the original mention and path labels.
-pub(crate) fn input_for_extensions<'a>(
-    input: impl IntoIterator<Item = &'a TurnInput>,
-) -> Vec<UserInput> {
+pub(crate) fn input_for_extensions(input: &[TurnInput]) -> Vec<UserInput> {
     input
-        .into_iter()
+        .iter()
         .filter_map(|item| match item {
             TurnInput::UserInput { content, .. } => Some(content.as_slice()),
             TurnInput::ResponseItem(_)

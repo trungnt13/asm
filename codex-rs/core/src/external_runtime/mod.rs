@@ -54,7 +54,7 @@ use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::WarningEvent;
 use tokio_util::sync::CancellationToken;
 
-use crate::hook_runtime::InputAdmission;
+use crate::hook_runtime::record_pending_input;
 use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
@@ -373,46 +373,8 @@ async fn run_conversation(
             input::filter_page_context(input, page_context, history.raw_items());
         }
         let original_history = session.clone_history().await;
+        let messages = input_messages(original_history.raw_items(), native_runtime)?;
         let mut lease = RuntimeLease::take(&session.external_runtime)?;
-        let preview = |messages: &[Value], admitted: &[InputAdmission<'_>]| {
-            validate_retained_inputs(
-                session,
-                turn,
-                &lease,
-                native_runtime,
-                messaging,
-                messages,
-                admitted,
-            )
-        };
-        let mut admitted = input::admit_inputs(
-            session,
-            turn,
-            std::mem::take(input),
-            native_runtime,
-            cancellation,
-            preview,
-        )
-        .await?;
-        let messages = input_messages(session.clone_history().await.raw_items(), native_runtime)?;
-        if admitted.rejected_user_turn() {
-            input::prepare_admitted_inputs(session, turn, &mut admitted.pending, native_runtime)
-                .await?;
-            let validation = preview(&messages, &admitted.pending);
-            if let Err(error) = validation {
-                session
-                    .send_event(
-                        turn,
-                        EventMsg::Warning(WarningEvent {
-                            message: format!("Native hook context was not retained: {error}"),
-                        }),
-                    )
-                    .await;
-            } else {
-                input::record_admitted_inputs(session, turn, admitted.pending).await?;
-            }
-            return Ok(last_message);
-        }
         let needs_binding = lease.runtime.is_some();
         let mut fork_boundary = None;
         let mut prepared_context = None;
@@ -473,13 +435,13 @@ async fn run_conversation(
                     (checkpoint, resume, Linkage::Saved)
                 }
                 (None, Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-                    // A rejected first prompt can leave unsent hook or host context, not native history.
+                    // Unsent generated context can survive rejected first-input admission.
+                    // Only host-attributed text and shell context are safe without native linkage.
                     let previous_input = original_history.raw_items().filter(|item| {
-                        !input::is_hook_context(item) && !matches!(item, ResponseItem::Message {
+                        !matches!(item, ResponseItem::Message {
                             role, content, internal_chat_message_metadata_passthrough: Some(metadata), ..
                         } if metadata.content_item_kinds.as_ref().is_some_and(|kinds| {
-                            kinds.len() == 1
-                                && matches!(kinds[0].as_str(), input::CONTEXT_KIND | input::SHELL_CONTEXT_KIND)
+                            kinds.len() == 1 && kinds[0].as_str() == input::SHELL_CONTEXT_KIND
                         }) || (native_runtime == NativeRuntime::ClaudeCode
                             && matches!(role.as_str(), "user" | "developer")
                             && !content.is_empty()
@@ -532,7 +494,7 @@ async fn run_conversation(
                 messaging,
                 &messages,
             )?;
-            if admitted.pending.is_empty()
+            if input.is_empty()
                 && messages[checkpoint.input_count..]
                     .iter()
                     .all(|message| message.as_str().is_some_and(|text| text.trim().is_empty()))
@@ -544,7 +506,7 @@ async fn run_conversation(
                     let prepared = context::capture(
                         session,
                         Arc::clone(turn),
-                        &admitted,
+                        input,
                         restored_role.as_deref(),
                         cancellation,
                     )
@@ -650,15 +612,27 @@ async fn run_conversation(
                 context::capture(
                     session,
                     Arc::clone(turn),
-                    &admitted,
+                    input,
                     /*restored_role*/ None,
                     cancellation,
                 )
                 .await?,
             );
         }
-        input::prepare_admitted_inputs(session, turn, &mut admitted.pending, native_runtime)
-            .await?;
+        if native_runtime == NativeRuntime::ClaudeCode {
+            input::normalize_selections(input);
+        }
+        if input::prepare_input(input)? > 0 {
+            session
+                .send_event(
+                    turn,
+                    EventMsg::Warning(WarningEvent {
+                        message: "Encrypted ASM input was ignored; the user prompt is preserved."
+                            .to_owned(),
+                    }),
+                )
+                .await;
+        }
         drop(original_history);
         drop(messages);
         let runtime = lease
@@ -670,7 +644,7 @@ async fn run_conversation(
             .map(|prepared| Arc::clone(&prepared.step));
         {
             let runtime = &mut *runtime;
-            let admitted = &admitted;
+            let input = input.as_slice();
             let effort = &effort;
             let decision_effort = &mut decision_effort;
             let decision_eligible = &mut decision_eligible;
@@ -698,7 +672,7 @@ async fn run_conversation(
                     validate_pending_prompt(
                         session,
                         &messages[runtime.checkpoint.input_count..],
-                        &admitted.pending,
+                        input,
                         fork_boundary,
                         |prompt| match &runtime.runtime {
                             RuntimeProcess::Claude(_) => {
@@ -733,7 +707,7 @@ async fn run_conversation(
                         if *decision_eligible
                             && session.system1_enabled(turn.config.system1.enabled)
                         {
-                            for item in admitted.inputs().filter(|item| {
+                            for item in input.iter().filter(|item| {
                                 matches!(
                                     item,
                                     TurnInput::UserInput { .. }
@@ -817,7 +791,18 @@ async fn run_conversation(
                 None => admit(/*context_items*/ &[], /*injections*/ &[]).await?,
             }
         }
-        input::record_admitted_inputs(session, turn, admitted.pending).await?;
+        for item in input.drain(..) {
+            // Reject native setup or effort changes before recording input for later delivery.
+            record_pending_input(
+                session,
+                turn,
+                &settings.model_info,
+                item,
+                Vec::new(),
+                codex_thread_store::PersistContext::TurnStart,
+            )
+            .await?;
+        }
         let history = session.clone_history().await;
         let messages = input_messages(history.raw_items(), native_runtime)?;
         drop(history);
@@ -912,7 +897,7 @@ async fn run_conversation(
                     }, if steering && *mid_turn_delivery.borrow() && steering_tx.capacity() > 0 && !cancellation.is_cancelled() => {
                         pending_activity = None;
                         if continuation::submit_steering(session, turn, &mut runtime.checkpoint,
-                            &runtime.linkage, &runtime.checkpoint_path, page_context, cancellation, continuation::SteeringSubmission::Foreground(&steering_tx)).await? {
+                            &runtime.linkage, &runtime.checkpoint_path, page_context, continuation::SteeringSubmission::Foreground(&steering_tx)).await? {
                             submitted_steering_count += 1;
                         }
                     }
@@ -924,13 +909,14 @@ async fn run_conversation(
                     }, if native_runtime == NativeRuntime::CursorAgent && !cancellation.is_cancelled() => {
                         if reply.is_closed() { continue; }
                         if let Some(turn_state) = &turn_state {
-                            let pending = session.input_queue.take_current_turn_mail(turn_state).await;
-                            let mut admitted = input::admit_inputs(
-                                session, turn, pending, native_runtime, cancellation,
-                                |_, _| Ok(()),
-                            ).await?;
-                            input::prepare_admitted_inputs(session, turn, &mut admitted.pending, native_runtime).await?;
-                            input::record_admitted_inputs(session, turn, admitted.pending).await?;
+                            let mut pending = session.input_queue.take_current_turn_mail(turn_state).await;
+                            if input::prepare_input(&mut pending)? > 0 {
+                                session.send_event(turn, EventMsg::Warning(WarningEvent { message: "Encrypted ASM input was ignored; the user prompt is preserved.".to_owned() })).await;
+                            }
+                            for item in pending {
+                                record_pending_input(session, turn, &settings.model_info, item, Vec::new(),
+                                    codex_thread_store::PersistContext::TurnStart).await?;
+                            }
                         }
                         let messages = input_messages(session.clone_history().await.raw_items(), native_runtime)?;
                         let mut delivered = messages[runtime.checkpoint.input_count..].iter()
@@ -1024,63 +1010,6 @@ async fn run_conversation(
         }
         *input = pending;
     }
-}
-
-fn validate_retained_inputs(
-    session: &Session,
-    turn: &TurnContext,
-    lease: &RuntimeLease<'_>,
-    native_runtime: NativeRuntime,
-    messaging: bool,
-    messages: &[Value],
-    admitted: &[InputAdmission<'_>],
-) -> anyhow::Result<()> {
-    let fork_input_count = lease.pending_fork_input_count();
-    let saved = if lease.runtime.is_none() && fork_input_count.is_none() {
-        let path = turn
-            .config
-            .codex_home
-            .join("claude-runtime")
-            .join(format!("{}.json", session.thread_id()));
-        match std::fs::read(path) {
-            Ok(bytes) => Some(serde_json::from_slice::<Checkpoint>(&bytes)?),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error.into()),
-        }
-    } else {
-        None
-    };
-    let checkpoint = lease
-        .runtime
-        .as_ref()
-        .map(|runtime| &runtime.checkpoint)
-        .or(saved.as_ref());
-    let input_count = fork_input_count
-        .or(checkpoint.map(|checkpoint| checkpoint.input_count))
-        .unwrap_or(0);
-    let pending = messages
-        .get(input_count..)
-        .context("saved native input count exceeds history")?;
-    validate_pending_prompt(
-        session,
-        pending,
-        admitted,
-        fork_input_count.map(|_| TEMPORARY_FORK_BOUNDARY),
-        |prompt| match lease.runtime.as_ref().map(|runtime| &runtime.runtime) {
-            Some(RuntimeProcess::Cursor(process)) => process.validate_prompt(prompt),
-            _ if native_runtime == NativeRuntime::CursorAgent => {
-                let id = checkpoint.map_or_else(
-                    || session.thread_id().to_string(),
-                    |checkpoint| checkpoint.session_id.clone(),
-                );
-                codex_external_runtime::CursorRuntime::validate_retained_prompt(
-                    prompt, &id, messaging,
-                )
-            }
-            _ => codex_external_runtime::validate_claude_prompt(prompt),
-        },
-        native_runtime,
-    )
 }
 
 async fn record_frame(
