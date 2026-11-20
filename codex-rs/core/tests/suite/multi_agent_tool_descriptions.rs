@@ -49,8 +49,7 @@ const EXPECTED_CATALOG_PARAMETERS: &str = r#"{
     "$defs": {"unused": {"type": "string"}}
 }"#;
 
-const EXPECTED_FORK_TURNS_DESCRIPTION: &str =
-    "Parent history to inherit. Use `none` for no history or `all` for full history.";
+const EXPECTED_FORK_TURNS_DESCRIPTION: &str = "Use `none` to skip the parent transcript or `all` to fork it. The selected role may force `none`.";
 
 #[derive(Clone, Copy)]
 enum Exposure {
