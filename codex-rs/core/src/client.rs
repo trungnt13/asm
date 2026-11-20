@@ -1423,7 +1423,7 @@ impl ModelClient {
         let mut prefix = Vec::new();
         let tools = if model_info.use_responses_lite {
             if !prompt.tools.is_empty() {
-                let tools = create_tools_json_for_responses_lite(&prompt.tools)?;
+                let tools = create_tools_json_for_responses_lite(prompt.tools.iter())?;
                 prefix.push(Arc::new(ResponseItem::AdditionalTools {
                     id: Some(request_ids.id_by_content("at", &serde_json::to_vec(&tools)?)),
                     role: "developer".to_string(),

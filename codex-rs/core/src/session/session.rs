@@ -42,6 +42,7 @@ use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::models::ProfileWorkspaceRoot;
 use codex_protocol::openai_models::CatalogModel;
 use codex_protocol::protocol::EnvironmentConfig;
+use codex_protocol::protocol::GuardianRetentionPolicy;
 use codex_protocol::protocol::HookCompletedEvent;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::ThreadHistoryMode;
@@ -168,6 +169,8 @@ pub(crate) struct SessionConfiguration {
     pub(super) thread_name: Option<String>,
     /// Thread-owned plugin selection inherited by future turns.
     pub(super) disabled_plugin_ids: Vec<String>,
+    /// Recorder policy resolved at startup and shared with persisted settings.
+    pub(super) guardian_retention: Option<GuardianRetentionPolicy>,
 
     // TODO(pakrym): Remove config from here
     pub(super) original_config_do_not_use: Arc<Config>,
@@ -356,6 +359,7 @@ impl SessionConfiguration {
             personality: self.step_settings.personality,
             collaboration_mode: self.step_settings.collaboration_mode.clone(),
             disabled_plugin_ids: self.disabled_plugin_ids.clone(),
+            guardian_retention: self.guardian_retention,
         }
     }
 
@@ -1140,7 +1144,6 @@ impl Session {
             thread_extension_data.insert(crate::agent::helper_daybreak::Enrollment::Root);
         }
         thread_extension_data.insert(crate::context::GuardianReviewEvidence::default());
-        crate::model_search::SearchOwner::restore(&thread_extension_data, &initial_history);
         // Kick off independent async setup tasks in parallel to reduce startup latency.
         //
         // - initialize thread persistence with new or resumed session info
@@ -1337,6 +1340,9 @@ impl Session {
                 error!("failed to initialize thread persistence: {e:#}");
                 e
             })?;
+        let retention = session_configuration
+            .guardian_retention
+            .map(|policy| codex_history::MessageRetention { thread_id, policy });
         // Keep the large initialization future out of callers' stack frames.
         let session_result: anyhow::Result<Arc<Self>> = Box::pin(async {
             if let InitialHistory::Resumed(resumed) = &mut initial_history {
@@ -1657,6 +1663,7 @@ impl Session {
                     config.guardian_reuses_parent_compaction(),
                     config.guardian_context_budgeting(),
                     context_ids.clone(),
+                    retention,
                 ),
             );
             if matches!(initial_history, InitialHistory::Resumed(_)) {

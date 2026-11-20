@@ -2287,11 +2287,6 @@ async fn run_sampling_request(
         if first_attempt && turn_context.config.notify.is_some() {
             notify_messages = legacy_notify_input_messages(prompt.input.iter().map(Arc::as_ref));
         }
-        let _native_search = crate::model_search::SearchOwner::reserve_server_fallback(
-            &step_context.extension_data,
-            &sess.services.thread_extension_data,
-            &mut prompt.tools,
-        );
         let (submitted_audio, pending_audio) = {
             let model = &step_context.settings.model_info.slug;
             let provider = &turn_context.config.model_provider_id;
@@ -3292,13 +3287,13 @@ async fn try_run_sampling_request(
     let mut response_completed = false;
     let mut includes_reasoning = step_context.settings.model_info.use_responses_lite;
     let accept_actor_assessments = turn_context.config.guardian_model_provider.is_none();
-    let mut resampling = crate::guardian::ResponseResampling::new(&sess);
     let prompt = Arc::new(prompt);
+    let mut resampling = crate::guardian::ResponseResampling::new(&sess, &prompt);
     let interrupt_at_boundary = SamplingInterrupt::enabled(&turn_context);
-    let mut stream_request = async |prompt: &Arc<Prompt>| {
+    let mut stream_request = async |prompt: Arc<Prompt>| {
         let send = client_session
             .open_model_response(
-                prompt,
+                &prompt,
                 &step_context.settings.model_info,
                 &step_context.session_telemetry,
                 SamplingOptions {
@@ -3326,7 +3321,7 @@ async fn try_run_sampling_request(
             )
             .await
     };
-    let mut stream = match stream_request(&prompt)
+    let mut stream = match stream_request(prompt)
         .or_cancel(&cancellation_token)
         .await?
     {
@@ -3885,17 +3880,19 @@ async fn try_run_sampling_request(
                 end_turn,
                 ..
             } => {
+                let retry_prompt = resampling.finish_response(end_turn, token_usage.is_some());
                 output_tokens_per_second = token_usage
                     .as_ref()
                     .zip(generation_duration_ms)
                     .filter(|(usage, duration)| {
-                        usage_metadata
-                            .as_ref()
-                            .and_then(|usage| usage.metadata.as_ref())
-                            .and_then(|usage| {
-                                usage["output_tokens_details"]["reasoning_tokens"].as_i64()
-                            })
-                            .is_some()
+                        retry_prompt.is_none()
+                            && usage_metadata
+                                .as_ref()
+                                .and_then(|usage| usage.metadata.as_ref())
+                                .and_then(|usage| {
+                                    usage["output_tokens_details"]["reasoning_tokens"].as_i64()
+                                })
+                                .is_some()
                             && usage.reasoning_output_tokens >= 0
                             && usage.output_tokens >= usage.reasoning_output_tokens
                             && *duration > 0
@@ -3947,7 +3944,7 @@ async fn try_run_sampling_request(
                             provider: token_usage,
                             charge: hook_output,
                         },
-                        if resampling.retry_pending {
+                        if retry_prompt.is_some() {
                             super::TokenUsageContext::SpendingOnly
                         } else {
                             super::TokenUsageContext::Sampling {
@@ -3968,17 +3965,15 @@ async fn try_run_sampling_request(
                         last_agent_message,
                     });
                 }
-                if resampling.retry_pending {
+                if let Some(prompt) = retry_prompt {
                     response_completed = false;
                     response_id_for_assessment = None;
                     pending_assessment = None;
                     includes_reasoning = step_context.settings.model_info.use_responses_lite;
-                    stream = match resampling
-                        .retry(stream_request(&prompt), &cancellation_token)
-                        .await
-                    {
-                        Ok(stream) => stream,
-                        Err(error) => break Err(error),
+                    stream = match stream_request(prompt).or_cancel(&cancellation_token).await {
+                        Ok(Ok(stream)) => stream,
+                        Ok(Err(error)) => break Err(error),
+                        Err(error) => break Err(error.into()),
                     };
                     continue;
                 }

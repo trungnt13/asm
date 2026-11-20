@@ -1248,9 +1248,6 @@
             "hooks": {
               "type": "boolean"
             },
-            "hosted_search_policy": {
-              "type": "boolean"
-            },
             "image_detail_original": {
               "type": "boolean"
             },
@@ -2723,6 +2720,13 @@
         }
       ]
     },
+    "HookFailurePolicy": {
+      "enum": [
+        "continue",
+        "block"
+      ],
+      "type": "string"
+    },
     "HookHandlerConfig": {
       "oneOf": [
         {
@@ -2743,6 +2747,14 @@
             "commandWindows": {
               "default": null,
               "type": "string"
+            },
+            "onFailure": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/HookFailurePolicy"
+                }
+              ],
+              "description": "Failure policy for synchronous hooks that support blocking. Defaults to continue; block applies the event's blocking behavior on failure."
             },
             "statusMessage": {
               "default": null,
@@ -2773,6 +2785,14 @@
               "additionalProperties": true,
               "default": {},
               "type": "object"
+            },
+            "onFailure": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/HookFailurePolicy"
+                }
+              ],
+              "description": "Failure policy for MCP hooks that support blocking. Defaults to continue; block applies the event's blocking behavior on failure."
             },
             "server": {
               "type": "string"
@@ -5795,14 +5815,6 @@
     "ToolsToml": {
       "additionalProperties": false,
       "properties": {
-        "client_search_provider": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/WebSearchProvider"
-            }
-          ],
-          "description": "Client provider preference when the model does not select a provider."
-        },
         "experimental_request_user_input": {
           "$ref": "#/definitions/ExperimentalRequestUserInput"
         },
@@ -8347,14 +8359,6 @@
       ],
       "type": "string"
     },
-    "WebSearchProvider": {
-      "description": "Provider preference selected by the resolved model catalog entry.",
-      "enum": [
-        "standalone",
-        "search_mcp"
-      ],
-      "type": "string"
-    },
     "WebSearchToolConfig": {
       "additionalProperties": false,
       "properties": {
@@ -8921,9 +8925,6 @@
           "$ref": "#/definitions/FeatureToml_for_GuardianV3ConfigToml"
         },
         "hooks": {
-          "type": "boolean"
-        },
-        "hosted_search_policy": {
           "type": "boolean"
         },
         "image_detail_original": {
