@@ -686,9 +686,13 @@ async fn run_conversation(
                     if first_prompt {
                         let cursor_efforts;
                         let supported = match &runtime.runtime {
-                            RuntimeProcess::Claude(_) => {
+                            RuntimeProcess::Claude(process)
+                                if !process.has_background_work()
+                                    && !process.has_unprojected_activity() =>
+                            {
                                 &["low", "medium", "high", "xhigh", "max"][..]
                             }
+                            RuntimeProcess::Claude(_) => &[],
                             RuntimeProcess::Cursor(process)
                                 if runtime
                                     .checkpoint
