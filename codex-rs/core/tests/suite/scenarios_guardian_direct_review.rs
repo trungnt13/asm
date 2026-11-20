@@ -26,13 +26,13 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
-async fn direct_patch_review_skips_writable_file_without_writes() -> Result<()> {
+async fn direct_patch_review_assesses_writable_file_without_writes() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let builder = test_codex().with_model("gpt-5.5").with_config(|config| {
         super::configure_scenario_catalog(config);
         config.approvals_reviewer = ApprovalsReviewer::AutoReview;
         config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
-        // Writable patches can bypass review only when a sandbox is available.
+        // A sandbox would allow the live patch without review.
         config.permissions.windows_sandbox_mode =
             Some(codex_config::types::WindowsSandboxModeToml::Unelevated);
         config
@@ -45,9 +45,18 @@ async fn direct_patch_review_skips_writable_file_without_writes() -> Result<()> 
     harness
         .write_file("guardian-skipped.txt", "before\n")
         .await?;
-    let mock = responses::mount_sse_once(
+    let assessment = json!({
+        "outcome": "allow",
+        "risk_level": "low",
+        "user_authorization": "high",
+        "rationale": "The writable patch is authorized."
+    });
+    responses::mount_sse_once(
         harness.server(),
-        sse(vec![ev_completed("unexpected-review")]),
+        sse(vec![
+            ev_assistant_message("review", &assessment.to_string()),
+            ev_completed("review"),
+        ]),
     )
     .await;
 
@@ -65,10 +74,9 @@ async fn direct_patch_review_skips_writable_file_without_writes() -> Result<()> 
             .await?,
         GuardianReviewResult {
             call_id: "patch-skip".to_owned(),
-            assessment: None,
+            assessment: serde_json::from_value(assessment)?,
         }
     );
-    assert!(mock.requests().is_empty());
     assert_eq!(
         harness.read_file_text("guardian-skipped.txt").await?,
         "before\n"
@@ -86,7 +94,7 @@ async fn direct_patch_review_skips_writable_file_without_writes() -> Result<()> 
     skill_approval: true,
 }); "granular")]
 #[tokio::test]
-async fn direct_permissions_review_skips_when_policy_disallows_requests(
+async fn direct_permissions_review_returns_assessment_when_policy_disallows_requests(
     policy: AskForApproval,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -102,11 +110,23 @@ async fn direct_permissions_review_skips_when_policy_disallows_requests(
         });
     let harness = TestCodexHarness::with_auto_env_builder(builder).await?;
     let test = harness.test();
-    let mock =
-        responses::mount_sse_once(harness.server(), sse(vec![ev_completed("unexpected")])).await;
+    let assessment = json!({
+        "outcome": "allow",
+        "risk_level": "low",
+        "user_authorization": "high",
+        "rationale": "The network request is authorized."
+    });
+    responses::mount_sse_once(
+        harness.server(),
+        sse(vec![
+            ev_assistant_message("review", &assessment.to_string()),
+            ev_completed("review"),
+        ]),
+    )
+    .await;
     test.codex
         .inject_response_items(vec![serde_json::from_value(json!({
-            "type": "function_call", "name": "request_permissions", "call_id": "permissions-skip",
+            "type": "function_call", "name": "request_permissions", "call_id": "permissions-review",
             "arguments": r#"{"permissions":{"network":{"enabled":true}}}"#,
         }))?])
         .await?;
@@ -115,16 +135,18 @@ async fn direct_permissions_review_skips_when_policy_disallows_requests(
             .guardian_review(&CancellationToken::new())
             .await?,
         GuardianReviewResult {
-            call_id: "permissions-skip".into(),
-            assessment: None,
+            call_id: "permissions-review".into(),
+            assessment: serde_json::from_value(assessment)?,
         }
     );
-    assert!(mock.requests().is_empty());
     test.codex.shutdown_and_wait().await?;
     Ok(())
 }
 
-pub(super) fn model_input(request: &ResponsesRequest, parent: ThreadId) -> Result<String> {
+pub(in crate::suite) fn model_input(
+    request: &ResponsesRequest,
+    parent: ThreadId,
+) -> Result<String> {
     let mut input = request.input();
     for item in &mut input {
         item.as_object_mut().expect("response item").remove("id");
@@ -203,7 +225,7 @@ prefix_rule(pattern=["git", "init", "guardian-rewritten"], decision="prompt")
             .await?,
         GuardianReviewResult {
             call_id: "hook-review".to_owned(),
-            assessment: Some(serde_json::from_value(assessment)?),
+            assessment: serde_json::from_value(assessment)?,
         }
     );
 
@@ -248,7 +270,7 @@ prefix_rule(pattern=["git", "init", "guardian-rewritten"], decision="prompt")
 
 #[cfg(not(target_os = "windows"))]
 #[tokio::test]
-async fn direct_exec_review_honors_hook_denial_before_policy_skip() -> Result<()> {
+async fn direct_exec_review_honors_hook_denial_before_assessment() -> Result<()> {
     use codex_protocol::protocol::EventMsg;
     use core_test_support::wait_for_event;
 
@@ -294,7 +316,7 @@ async fn direct_exec_review_honors_hook_denial_before_policy_skip() -> Result<()
         .codex
         .guardian_review(&CancellationToken::new())
         .await
-        .expect_err("hook must reject the call before policy can skip review");
+        .expect_err("hook must reject the call before Guardian can assess it");
     assert!(matches!(
         error.details(),
         codex_protocol::error::CodexErrorDetails::InvalidRequest(_)

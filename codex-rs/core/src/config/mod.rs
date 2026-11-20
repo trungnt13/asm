@@ -689,7 +689,6 @@ pub struct Config {
     pub(crate) subagent_tools: SubagentToolsToml,
     // Unlike the policy table, this flag applies to the current thread only.
     pub(crate) subagent_mcp_disabled: bool,
-    pub(crate) subagent_web_search_disabled: bool,
 
     /// Model used specifically for review sessions.
     pub review_model: Option<String>,
@@ -1835,6 +1834,22 @@ impl Config {
         } else {
             codex_guardian_context::ContextBudgeting::Fixed
         }
+    }
+
+    /// Resolves recorder limits from the Sync Elastic retained-instruction entry budget.
+    pub(crate) fn guardian_retention_policy(
+        &self,
+    ) -> Option<codex_protocol::protocol::GuardianRetentionPolicy> {
+        let entry_tokens = self
+            .guardian_sync_elastic_budget
+            .as_ref()?
+            .section_limits(codex_guardian_context::ElasticSection::RetainedUserInstructions)
+            .max_section_entry_tokens();
+        let record_bytes = codex_utils_output_truncation::approx_bytes_for_tokens(entry_tokens);
+        Some(codex_protocol::protocol::GuardianRetentionPolicy {
+            assistant_record_bytes: Some(record_bytes),
+            user_record_bytes: Some(record_bytes),
+        })
     }
 
     pub fn sqlite_config(&self) -> &codex_state::SqliteConfig {
@@ -4946,7 +4961,6 @@ impl Config {
             subagent_default_reasoning: cfg.subagent_default_reasoning,
             subagent_tools: cfg.subagent_tools,
             subagent_mcp_disabled: false,
-            subagent_web_search_disabled: false,
             review_model,
             model_context_window: cfg.model_context_window,
             role_model_context_window: None,

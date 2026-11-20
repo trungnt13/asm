@@ -27,8 +27,7 @@ impl Config {
         }
 
         self.subagent_mcp_disabled = self.subagent_tools.disable_mcp;
-        self.subagent_web_search_disabled = !self.subagent_tools.web_search;
-        if self.subagent_web_search_disabled {
+        if !self.subagent_tools.web_search {
             self.web_search_mode.set(WebSearchMode::Disabled)?;
             session_overrides.insert(
                 "web_search".to_owned(),

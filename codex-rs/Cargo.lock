@@ -5228,6 +5228,7 @@ dependencies = [
  "codex-utils-output-truncation",
  "codex-utils-path-uri",
  "codex-utils-string",
+ "divan",
  "jsonptr",
  "pretty_assertions",
  "rmcp",

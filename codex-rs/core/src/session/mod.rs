@@ -1247,6 +1247,7 @@ impl Session {
             codex_home: config.codex_home.clone(),
             thread_name: None,
             disabled_plugin_ids,
+            guardian_retention: config.guardian_retention_policy(),
             original_config_do_not_use: Arc::clone(&config),
             metrics_service_name,
             app_server_client_name: None,
@@ -3303,24 +3304,6 @@ impl Session {
     }
 
     pub(crate) async fn emit_turn_item_started(&self, turn_context: &TurnContext, item: &TurnItem) {
-        if matches!(
-            item,
-            TurnItem::WebSearch(_)
-                | TurnItem::Extension(codex_extension_items::ExtensionItem::WebSearch(_))
-        ) && let Some(usage) = turn_context
-            .extension_data
-            .get::<crate::model_search::SearchTurnUsage>()
-        {
-            // This turn selected Search MCP. Pin native only when a fallback call starts.
-            crate::model_search::SearchOwner::admit(
-                &self.services.thread_extension_data,
-                codex_protocol::openai_models::WebSearchProvider::Standalone,
-            );
-            usage.record(
-                turn_context,
-                codex_protocol::openai_models::WebSearchProvider::Standalone,
-            );
-        }
         let started_at_ms = turn_context
             .turn_timing_state
             .record_item_started(item.id(), now_unix_timestamp_ms())
@@ -4348,10 +4331,6 @@ impl Session {
         // Preserve any existing tool-specific override.
         let policy: codex_utils_output_truncation::TruncationPolicy =
             model_info.truncation_policy.into();
-        crate::model_search::SearchOwner::checkpoint(
-            &self.services.thread_extension_data,
-            &mut items,
-        );
         for envelope in &mut items {
             if matches!(
                 envelope.item.as_ref(),
@@ -4818,6 +4797,8 @@ impl Session {
                 session_telemetry.clone(),
             ));
             extension_data.insert_arc(Arc::clone(&settings.model_info.model));
+            // Standalone and hosted search must use the same turn-scoped permission mode.
+            extension_data.insert(turn_context.config.web_search_mode.value());
             extension_data.insert_arc(
                 self.host_skills_for_step(&turn_context, &environments)
                     .await,
@@ -4869,21 +4850,6 @@ impl Session {
             if let Some(messages) = model_messages.notes() {
                 extension_data.insert(messages.clone());
             }
-            let mut required_servers = required_servers.to_vec();
-            if !turn_context.config.subagent_web_search_disabled
-                && settings.model_info.web_search_provider
-                    == Some(codex_protocol::openai_models::WebSearchProvider::SearchMcp)
-                && turn_context.apps_enabled()
-                && !turn_context.config.requires_native_search()
-                && (turn_context.config.web_search_mode.value()
-                    != codex_protocol::config_types::WebSearchMode::Disabled
-                    || turn_context
-                        .config
-                        .features
-                        .enabled(codex_features::Feature::HostedSearchPolicy))
-            {
-                required_servers.push(codex_mcp::CODEX_APPS_MCP_SERVER_NAME.to_owned());
-            }
             let captured_executor_discovery_v2 = executor_capability_discovery_v2.as_deref();
             let catalogs = self.lock_cloud_catalogs().await;
             let (mcp, prepared_recommendations) = tokio::join!(
@@ -4892,7 +4858,7 @@ impl Session {
                     turn_context.as_ref(),
                     &selected_capability_roots,
                     captured_executor_discovery_v2,
-                    &required_servers,
+                    required_servers,
                     required_plugins,
                 )),
                 async {
@@ -4908,27 +4874,6 @@ impl Session {
             let mut plugin_config = turn_context.config.as_ref().clone();
             plugin_config.plugins = mcp.config().plugins.clone();
             plugin_config.config_layer_stack = mcp.config().config_layer_stack.clone();
-            let search = crate::model_search::resolve(
-                turn_context.as_ref(),
-                &settings,
-                &mcp,
-                &self.services,
-            )
-            .await;
-            extension_data.insert(match &search {
-                Some(crate::model_search::ModelSearch::Native { mode, .. }) => *mode,
-                _ => turn_context.config.web_search_mode.value(),
-            });
-            let mcp = if let Some(search) = search {
-                let binding = match &search {
-                    crate::model_search::ModelSearch::Hosted { binding, .. } => Arc::clone(binding),
-                    _ => mcp,
-                };
-                extension_data.insert(search);
-                binding
-            } else {
-                mcp
-            };
             extension_data.insert(selected_capability_roots);
             let selected_environments = environments.all_selections();
             let select_plugins = |discovery, discovery_v2| {
@@ -5270,10 +5215,6 @@ impl Session {
             }
             CompactedHistoryInstallation::Prefix(prefix) => (&prefix.model_info.comp_hash, None),
         };
-        crate::model_search::SearchOwner::checkpoint(
-            &self.services.thread_extension_data,
-            &mut items,
-        );
         if let Some(checkpoint) = items.iter_mut().rev().find(|envelope| {
             matches!(
                 envelope.item.as_ref(),
