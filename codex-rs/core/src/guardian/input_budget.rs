@@ -259,7 +259,7 @@ pub(crate) async fn finalize(
     // margin covers IDs and timestamps assigned when recording the message.
     let mut framing = session.response_item_from_user_input(content);
     if let ResponseItem::Message { content, .. } = &mut framing {
-        content.clear();
+        *content = Default::default();
     }
     let budget = RequestBudget {
         max_input_tokens: effective_input_token_limit(model, step.turn.config.model_context_window)

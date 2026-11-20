@@ -98,7 +98,8 @@ async fn thread_inject_items_adds_raw_response_items_to_thread_history(
             annotations: None,
             logprobs: None,
             text: injected_text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -109,7 +110,8 @@ async fn thread_inject_items_adds_raw_response_items_to_thread_history(
         role: "developer".to_string(),
         content: vec![ContentItem::InputText {
             text: text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -641,7 +643,8 @@ async fn thread_inject_items_adds_raw_response_items_after_a_turn() -> Result<()
         role: "developer".to_string(),
         content: vec![ContentItem::InputText {
             text: "Injected after first turn".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };

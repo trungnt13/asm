@@ -876,7 +876,7 @@ mod tests {
             Ok(ResponseEvent::Completed { end_turn: Some(false), .. }),
         ] if start_content.is_empty()
             && text == "First result."
-            && done_content == &vec![codex_protocol::models::ContentItem::OutputText {
+            && done_content.as_slice() == &[codex_protocol::models::ContentItem::OutputText {
                 annotations: None,
                 logprobs: None,
                 text: "First result.".to_string()

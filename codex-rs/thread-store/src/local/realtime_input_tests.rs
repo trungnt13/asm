@@ -55,7 +55,8 @@ async fn retry_after_uncertain_local_input_seal_does_not_append_again() {
         role: "user".into(),
         content: vec![ContentItem::InputText {
             text: "voice input".into(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };

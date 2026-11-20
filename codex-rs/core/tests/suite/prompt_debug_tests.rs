@@ -96,7 +96,7 @@ async fn build_prompt_input_includes_context_and_user_message() -> Result<()> {
     );
     assert!(
         matches!(reminder, ResponseItem::Message { role, content, .. }
-        if role == "developer" && content == &[input_text(STEP_REMINDER)])
+        if role == "developer" && content.as_slice() == &[input_text(STEP_REMINDER)])
     );
     let contains_text = |item: &ResponseItem, needle: &str| {
         let ResponseItem::Message { content, .. } = item else {

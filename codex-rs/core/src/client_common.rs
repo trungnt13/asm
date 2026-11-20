@@ -122,7 +122,7 @@ fn image_details(item: &ResponseItem) -> impl Iterator<Item = Option<ImageDetail
 fn normalize_image_details(item: &mut ResponseItem, model_info: &ModelInfo) {
     match item {
         ResponseItem::Message { content, .. } => {
-            for content_item in content {
+            for content_item in Arc::make_mut(content) {
                 if let ContentItem::InputImage { detail, .. } = content_item {
                     normalize_image_detail(detail, model_info);
                 }

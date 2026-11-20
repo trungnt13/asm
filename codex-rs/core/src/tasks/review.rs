@@ -243,7 +243,7 @@ pub(crate) async fn exit_review_mode(
                 encrypted_content: None,
                 id: Some(session.context_ids.next_item("msg")),
                 role: "user".to_string(),
-                content: vec![ContentItem::InputText { text: user_message }],
+                content: vec![ContentItem::InputText { text: user_message }].into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }],
@@ -269,7 +269,8 @@ pub(crate) async fn exit_review_mode(
                     annotations: None,
                     logprobs: None,
                     text: assistant_message,
-                }],
+                }]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             },

@@ -257,7 +257,8 @@ fn user_message(text: &str) -> ResponseItem {
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }
@@ -315,7 +316,7 @@ async fn extension_window_prefix_precedes_retained_turns_and_is_not_repeated() {
     };
     assert_eq!(role, "developer");
     assert_eq!(
-        content,
+        content.as_slice(),
         &[codex_protocol::models::input_text(
             "<example>active policy</example>"
         )]
@@ -378,7 +379,8 @@ fn collect_user_messages_extracts_user_text_only() {
                 annotations: None,
                 logprobs: None,
                 text: "ignored".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -389,7 +391,8 @@ fn collect_user_messages_extracts_user_text_only() {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "first".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -493,7 +496,8 @@ fn collect_user_messages_filters_session_prefix_entries() {
 do things
 </INSTRUCTIONS>"#
                     .to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -504,7 +508,8 @@ do things
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "<ENVIRONMENT_CONTEXT>cwd=/tmp</ENVIRONMENT_CONTEXT>".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -515,7 +520,8 @@ do things
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "real user message".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -574,7 +580,7 @@ fn build_token_limited_compacted_history_truncates_overlong_user_messages(
         ..
     } = std::sync::Arc::make_mut(&mut original.item)
     {
-        *content = vec![ContentItem::InputText { text: big.clone() }; content_parts];
+        *content = vec![ContentItem::InputText { text: big.clone() }; content_parts].into();
         *internal_chat_message_metadata_passthrough =
             Some(InternalChatMessageMetadataPassthrough {
                 content_item_metadata: attribution.clone(),
@@ -609,7 +615,7 @@ fn build_token_limited_compacted_history_truncates_overlong_user_messages(
                     .unwrap_or_default()
             };
             assert_eq!(
-                content,
+                content.as_ref(),
                 &vec![
                     ContentItem::InputText {
                         text: big[..32].to_string()
@@ -743,7 +749,8 @@ fn build_compacted_history_preserves_user_message_passthrough_metadata(attribute
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {
                         text: "first user message".to_string(),
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: Some(
                         InternalChatMessageMetadataPassthrough {
@@ -789,7 +796,8 @@ fn assemble_compaction_history_keeps_prefix_first_and_summary_last() {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "older user".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -800,7 +808,8 @@ fn assemble_compaction_history_keeps_prefix_first_and_summary_last() {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "latest user".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -812,7 +821,8 @@ fn assemble_compaction_history_keeps_prefix_first_and_summary_last() {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: format!("{SUMMARY_PREFIX}\nsummary text"),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -824,7 +834,8 @@ fn assemble_compaction_history_keeps_prefix_first_and_summary_last() {
         role: "developer".to_string(),
         content: vec![ContentItem::InputText {
             text: "fresh permissions".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }];
@@ -843,7 +854,8 @@ fn assemble_compaction_history_keeps_prefix_first_and_summary_last() {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "older user".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -854,7 +866,8 @@ fn assemble_compaction_history_keeps_prefix_first_and_summary_last() {
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
                 text: "fresh permissions".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -865,7 +878,8 @@ fn assemble_compaction_history_keeps_prefix_first_and_summary_last() {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "latest user".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -877,7 +891,8 @@ fn assemble_compaction_history_keeps_prefix_first_and_summary_last() {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: format!("{SUMMARY_PREFIX}\nsummary text"),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -909,7 +924,8 @@ fn assemble_compaction_history_keeps_compaction_last() {
         role: "developer".to_string(),
         content: vec![ContentItem::InputText {
             text: "fresh permissions".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }];
@@ -927,7 +943,8 @@ fn assemble_compaction_history_keeps_compaction_last() {
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
                 text: "fresh permissions".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },

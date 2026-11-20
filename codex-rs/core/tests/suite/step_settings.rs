@@ -3130,7 +3130,9 @@ async fn captured_step_settings_and_history_reach_extensions(
         .items()
         .iter()
         .filter_map(|item| match item {
-            ResponseItem::Message { role, content, .. } if role == "user" => Some(content),
+            ResponseItem::Message { role, content, .. } if role == "user" => {
+                Some(content.as_slice())
+            }
             _ => None,
         })
         .flatten()

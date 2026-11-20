@@ -149,7 +149,7 @@ impl TranscriptHistory {
                             encrypted_content: None,
                             id: id.clone(),
                             role: role.clone(),
-                            content: text,
+                            content: text.into(),
                             phase: phase.clone(),
                             internal_chat_message_metadata_passthrough:
                                 internal_chat_message_metadata_passthrough.clone(),

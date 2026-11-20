@@ -440,7 +440,8 @@ async fn multi_agent_v2_spawn_fork_turns_all_applies_agent_type_override(fork_tu
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "parent-skill-scope-history".to_string(),
-            }],
+            }]
+            .into(),
             status: None,
             encrypted_content: None,
             phase: None,

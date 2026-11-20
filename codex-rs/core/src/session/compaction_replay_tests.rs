@@ -36,7 +36,8 @@ async fn reconstruct_history_uses_replacement_history_verbatim() {
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: "summary".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: Some(InternalChatMessageMetadataPassthrough {
             turn_id: Some("compact-turn".to_string()),
@@ -55,7 +56,8 @@ async fn reconstruct_history_uses_replacement_history_verbatim() {
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
                 text: "stale developer instructions".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }),

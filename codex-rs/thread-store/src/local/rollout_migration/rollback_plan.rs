@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use codex_protocol::ResponseItemId;
 use codex_protocol::models::AudioReference;
@@ -41,7 +42,7 @@ struct CompactionFrame {
 #[derive(Clone)]
 struct PendingUserResponse {
     boundary: usize,
-    content: Vec<ContentItem>,
+    content: Arc<Vec<ContentItem>>,
 }
 
 struct InstructionBoundary {

@@ -41,7 +41,8 @@ fn guardian_parent_history() -> Vec<ResponseItem> {
             content: vec![ContentItem::InputText {
                 text: "Please check the repo visibility and push the docs fix if needed."
                     .to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -75,7 +76,8 @@ fn guardian_parent_history() -> Vec<ResponseItem> {
                 annotations: None,
                 logprobs: None,
                 text: "The repo is public; I now need approval to push the docs fix.".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -161,7 +163,8 @@ fn build_guardian_prompt_delta_mode_preserves_original_numbering() -> anyhow::Re
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "Please also push the second docs fix.".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -174,7 +177,8 @@ fn build_guardian_prompt_delta_mode_preserves_original_numbering() -> anyhow::Re
                 annotations: None,
                 logprobs: None,
                 text: "I need approval for the second push.".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },

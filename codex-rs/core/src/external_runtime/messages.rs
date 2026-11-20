@@ -32,7 +32,7 @@ pub(super) fn input_messages<'a>(
                     )
             }) =>
             {
-                for part in content {
+                for part in content.iter() {
                     if let ContentItem::InputText { text } = part {
                         messages.push(Value::String(text.clone()));
                     }
@@ -68,7 +68,7 @@ pub(super) fn input_messages<'a>(
                     messages.push(Value::String(texts.join("\n")));
                 } else {
                     let mut blocks = Vec::with_capacity(content.len());
-                    for part in content {
+                    for part in content.iter() {
                         blocks.push(match part {
                             ContentItem::InputText { text } if text.is_empty() => continue,
                             ContentItem::InputText { text } => json!({"type":"text","text":text}),
@@ -95,7 +95,7 @@ pub(super) fn input_messages<'a>(
                 let ResponseItem::Message { content, .. } = input::context_item(item)? else {
                     unreachable!("native context is a labeled plaintext message");
                 };
-                for part in content {
+                for part in std::sync::Arc::unwrap_or_clone(content) {
                     if let ContentItem::InputText { text } = part {
                         messages.push(Value::String(text));
                     }

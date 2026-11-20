@@ -46,7 +46,7 @@ impl ComposedContext {
                 let ResponseItem::Message { content, .. } = item else {
                     continue;
                 };
-                for item in content {
+                for item in content.iter() {
                     if let ContentItem::InputImage { image, .. } = item {
                         images.push(image);
                     }
@@ -155,7 +155,7 @@ impl TranscriptImages {
                 ResponseItem::Message { role, content, .. }
                     if matches!(role.as_str(), "user" | "assistant") =>
                 {
-                    for item in content {
+                    for item in content.iter() {
                         match item {
                             ContentItem::InputImage { image, detail } => {
                                 include_image(image, *detail)

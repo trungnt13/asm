@@ -716,7 +716,8 @@ fn user_message(message: &str) -> RolloutItem {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: message.to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }

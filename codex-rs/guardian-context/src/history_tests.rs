@@ -200,7 +200,7 @@ fn oversized_user_images_preserve_text_and_metadata_in_order() {
         let ResponseItem::Message { content, .. } = &mut with_image else {
             unreachable!()
         };
-        content.insert(
+        std::sync::Arc::make_mut(content).insert(
             /*index*/ 1,
             ContentItem::InputImage {
                 image: ImageReference::Inline {

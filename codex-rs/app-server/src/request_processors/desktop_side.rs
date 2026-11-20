@@ -48,7 +48,8 @@ pub(super) fn apply_defaults(
                 role: "developer".to_string(),
                 content: vec![ContentItem::InputText {
                     text: format!("{prompt}\n\n{DEVELOPER_BLOCK}"),
-                }],
+                }]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             })

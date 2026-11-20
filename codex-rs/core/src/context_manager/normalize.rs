@@ -1,9 +1,9 @@
+use codex_context_fragments::normalize_message_annotations;
 use codex_context_fragments::set_annotated_content;
 use codex_context_fragments::to_annotated_content;
 use codex_history::ResponseItemEnvelope;
 use codex_protocol::ResponseItemId;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ContentItemMetadata;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ResponseItem;
@@ -367,10 +367,14 @@ pub(crate) fn strip_images_when_unsupported(
     for envelope in items.iter_mut() {
         let changes = match envelope.item.as_ref() {
             ResponseItem::Message { content, .. } => {
-                message_annotations_need_normalizing(envelope.item.as_ref())
-                    || content
-                        .iter()
-                        .any(|part| matches!(part, ContentItem::InputImage { .. }))
+                if !content
+                    .iter()
+                    .any(|part| matches!(part, ContentItem::InputImage { .. }))
+                {
+                    normalize_message_annotations(&mut envelope.item);
+                    continue;
+                }
+                true
             }
             ResponseItem::FunctionCallOutput { output, .. }
             | ResponseItem::CustomToolCallOutput { output, .. } => {
@@ -436,10 +440,14 @@ pub(crate) fn strip_audio_when_unsupported(
     for envelope in items.iter_mut() {
         let changes = match envelope.item.as_ref() {
             ResponseItem::Message { content, .. } => {
-                message_annotations_need_normalizing(envelope.item.as_ref())
-                    || content
-                        .iter()
-                        .any(|part| matches!(part, ContentItem::InputAudio { .. }))
+                if !content
+                    .iter()
+                    .any(|part| matches!(part, ContentItem::InputAudio { .. }))
+                {
+                    normalize_message_annotations(&mut envelope.item);
+                    continue;
+                }
+                true
             }
             ResponseItem::FunctionCallOutput { output, .. }
             | ResponseItem::CustomToolCallOutput { output, .. } => {
@@ -483,30 +491,4 @@ pub(crate) fn strip_audio_when_unsupported(
             _ => {}
         }
     }
-}
-
-fn message_annotations_need_normalizing(item: &ResponseItem) -> bool {
-    let ResponseItem::Message {
-        content,
-        internal_chat_message_metadata_passthrough: metadata,
-        ..
-    } = item
-    else {
-        return false;
-    };
-    let Some(metadata) = metadata else {
-        return true;
-    };
-    if metadata.content_item_kinds.as_ref().map(Vec::len) != Some(content.len()) {
-        return true;
-    }
-    metadata
-        .content_item_metadata
-        .as_ref()
-        .is_some_and(|values| {
-            values.len() != content.len()
-                || values
-                    .iter()
-                    .all(|value| *value == ContentItemMetadata::default())
-        })
 }

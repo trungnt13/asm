@@ -5452,7 +5452,8 @@ async fn thread_resume_rejects_history_when_thread_is_running() -> Result<()> {
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
                     text: "history override".to_string(),
-                }],
+                }]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }]),
@@ -6670,7 +6671,8 @@ async fn thread_resume_supports_history_and_overrides() -> Result<()> {
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: history_text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }];

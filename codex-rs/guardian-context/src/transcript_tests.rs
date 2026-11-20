@@ -140,7 +140,9 @@ fn budget_drops_the_enclosing_call_and_its_label_together() {
             .into_messages()
             .into_iter()
             .filter_map(|item| match item {
-                ResponseItem::Message { content, .. } => Some(content),
+                ResponseItem::Message { content, .. } => {
+                    Some(std::sync::Arc::unwrap_or_clone(content))
+                }
                 _ => None,
             })
             .flatten()
@@ -325,7 +327,8 @@ fn registered_transcript_filters_roles_and_preserves_node_repl_tool_attribution(
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "Inspect the workspace.".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -336,7 +339,8 @@ fn registered_transcript_filters_roles_and_preserves_node_repl_tool_attribution(
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
                 text: "ordinary developer context".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -347,7 +351,8 @@ fn registered_transcript_filters_roles_and_preserves_node_repl_tool_attribution(
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
                 text: approved_action.clone(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -360,7 +365,8 @@ fn registered_transcript_filters_roles_and_preserves_node_repl_tool_attribution(
                 annotations: None,
                 logprobs: None,
                 text: "The first result is ready.".to_string(),
-            }],
+            }]
+            .into(),
             phase: Some(MessagePhase::PartialAnswer),
             internal_chat_message_metadata_passthrough: None,
         },
@@ -373,7 +379,8 @@ fn registered_transcript_filters_roles_and_preserves_node_repl_tool_attribution(
                 annotations: None,
                 logprobs: None,
                 text: "Inspection complete.".to_string(),
-            }],
+            }]
+            .into(),
             phase: Some(MessagePhase::FinalAnswer),
             internal_chat_message_metadata_passthrough: None,
         },
@@ -697,7 +704,7 @@ fn reused_registry_applies_current_history_sources_and_preserves_originals() {
         encrypted_content: None,
         id: None,
         role: "user".to_string(),
-        content: vec![ContentItem::InputText { text: text.clone() }],
+        content: vec![ContentItem::InputText { text: text.clone() }].into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }];
@@ -834,7 +841,8 @@ fn encrypted_messages_preserve_order_and_budget_for_both_reviewers() {
         role: "user".into(),
         content: vec![ContentItem::InputText {
             text: "Update this page.".into(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -946,7 +954,8 @@ fn collect_guardian_transcript_entries_includes_recent_tool_calls_and_output() {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "check the repo".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -980,7 +989,8 @@ fn collect_guardian_transcript_entries_includes_recent_tool_calls_and_output() {
                 annotations: None,
                 logprobs: None,
                 text: "I need to push a fix".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },

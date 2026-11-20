@@ -14,7 +14,7 @@ fn message(
             role: role.to_string(),
             encrypted_content: None,
             status: None,
-            content,
+            content: content.into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }

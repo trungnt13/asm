@@ -35,7 +35,8 @@ fn prompt_with_image_outputs(detail: Option<ImageDetail>) -> Prompt {
                         },
                         detail,
                     },
-                ],
+                ]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             },

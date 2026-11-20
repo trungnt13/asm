@@ -310,7 +310,7 @@ mod job {
                 encrypted_content: None,
                 id: Some(context.context_ids().next_item("msg")),
                 role: "user".to_string(),
-                content: vec![ContentItem::InputText { text: input_text }],
+                content: vec![ContentItem::InputText { text: input_text }].into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }],
@@ -620,7 +620,8 @@ mod tests {
                     text: "<environment_context>\n<cwd>/tmp</cwd>\n</environment_context>"
                         .to_string(),
                 },
-            ],
+            ]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         };
@@ -633,7 +634,8 @@ mod tests {
                 text:
                     "<skill>\n<name>demo</name>\n<path>skills/demo/SKILL.md</path>\nbody\n</skill>"
                         .to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         };
@@ -645,7 +647,7 @@ mod tests {
             content: vec![ContentItem::InputText {
                 text: "<subagent_notification>{\"agent_id\":\"a\",\"status\":\"completed\"}</subagent_notification>"
                     .to_string(),
-            }],
+            }].into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         };
@@ -675,7 +677,8 @@ mod tests {
                     content: vec![ContentItem::InputText {
                         text: "<environment_context>\n<cwd>/tmp</cwd>\n</environment_context>"
                             .to_string(),
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 },

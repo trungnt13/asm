@@ -91,7 +91,8 @@ async fn cancelled_turn_skips_launch_but_preserves_existing_work(trigger: Compac
                     file_id: "file_expired_since_last_turn".to_string(),
                 },
             },
-        ],
+        ]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };

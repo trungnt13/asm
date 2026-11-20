@@ -368,9 +368,9 @@ impl SamplingExecution {
                         if let ResponseItem::Message { role, content, .. } = item
                             && role == "assistant"
                         {
-                            for item in content {
+                            for item in content.iter() {
                                 if let ContentItem::OutputText { text, .. } = item {
-                                    output.push_str(&text);
+                                    output.push_str(text);
                                 }
                             }
                         }

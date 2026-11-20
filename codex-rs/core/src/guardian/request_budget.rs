@@ -121,7 +121,7 @@ pub(crate) async fn prepare_prompt(
                     "expected restored Guardian text".to_owned(),
                 ));
             };
-            let annotated = std::mem::take(content)
+            let annotated = std::sync::Arc::unwrap_or_clone(std::mem::take(content))
                 .into_iter()
                 .map(|item| {
                     let ContentItem::InputText { text } = item else {

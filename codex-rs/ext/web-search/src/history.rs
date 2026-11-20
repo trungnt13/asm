@@ -49,7 +49,8 @@ fn push_visible_message(messages: &mut Vec<ResponseItem>, item: &ResponseItem) {
                         annotations: None,
                         logprobs: None,
                         text: format!("Agent message from {author}:\n{text}"),
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: metadata.clone(),
                 });
@@ -76,7 +77,7 @@ fn push_visible_message(messages: &mut Vec<ResponseItem>, item: &ResponseItem) {
                     encrypted_content: None,
                     id: None,
                     role: role.clone(),
-                    content,
+                    content: content.into(),
                     phase: phase.clone(),
                     internal_chat_message_metadata_passthrough: metadata.clone(),
                 });
@@ -115,7 +116,8 @@ mod tests {
                 ContentItem::InputText {
                     text: text.to_string(),
                 }
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }
@@ -179,7 +181,8 @@ mod tests {
                     },
                     detail: None,
                 },
-            ],
+            ]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         };

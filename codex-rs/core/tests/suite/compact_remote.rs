@@ -401,7 +401,8 @@ async fn remote_compact_v2_retains_only_client_developer_messages_when_enabled(
         role: "developer".to_string(),
         content: vec![ContentItem::InputText {
             text: text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -949,7 +950,7 @@ async fn remote_compact_v2_budgets_persisted_file_audio_atomically(
                 ResponseItem::Message {
                     id: None,
                     role: "user".to_string(),
-                    content,
+                    content: content.into(),
                     status: None,
                     phase: None,
                     encrypted_content: None,

@@ -250,7 +250,8 @@ fn reused_registry_preserves_section_identity_and_source_roles() {
         role: "user".into(),
         content: vec![codex_protocol::models::ContentItem::InputText {
             text: "Inspect the workspace.".into(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }];

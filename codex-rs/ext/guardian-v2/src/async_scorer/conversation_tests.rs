@@ -864,7 +864,8 @@ async fn concurrent_requests_retain_only_the_newest_completed_history() -> Resul
                         annotations: None,
                         logprobs: None,
                         text: format!("Observed action {index}"),
-                    }],
+                    }]
+                    .into(),
                     phase: Some(MessagePhase::Commentary),
                     internal_chat_message_metadata_passthrough: None,
                 }])

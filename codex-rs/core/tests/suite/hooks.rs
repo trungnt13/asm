@@ -1161,9 +1161,9 @@ fn rollout_hook_prompt_texts(text: &str) -> Result<Vec<String>> {
             && let ResponseItem::Message { role, content, .. } = envelope.into_item()
             && role == "user"
         {
-            for item in content {
+            for item in content.iter() {
                 if let ContentItem::InputText { text } = item
-                    && let Some(fragment) = parse_hook_prompt_fragment(&text)
+                    && let Some(fragment) = parse_hook_prompt_fragment(text)
                 {
                     texts.push(fragment.text);
                 }

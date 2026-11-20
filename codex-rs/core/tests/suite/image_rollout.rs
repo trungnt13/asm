@@ -274,7 +274,8 @@ async fn copy_paste_local_image_persists_rollout_request_shape() -> anyhow::Resu
             ContentItem::InputText {
                 text: "pasted image".to_string(),
             },
-        ],
+        ]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -366,7 +367,8 @@ async fn drag_drop_image_persists_rollout_request_shape() -> anyhow::Result<()> 
             ContentItem::InputText {
                 text: "dropped image".to_string(),
             },
-        ],
+        ]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -446,7 +448,8 @@ async fn file_image_passes_through_request_and_rollout() -> anyhow::Result<()> {
                 ContentItem::InputText {
                     text: "file-backed image".to_string(),
                 },
-            ],
+            ]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }
@@ -670,7 +673,7 @@ async fn resumed_history_only_emits_resize_notices_for_new_images() -> anyhow::R
             .then_some(content)
         })
         .context("historical user message in rollout")?;
-    historical_content.insert(
+    std::sync::Arc::make_mut(historical_content).insert(
         /*index*/ 0,
         ContentItem::InputImage {
             image: ImageReference::Inline {

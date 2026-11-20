@@ -47,7 +47,10 @@ fn image_selection_preserves_source_policy_order_and_both_limits() {
             encrypted_content: None,
             id: None,
             role: "user".into(),
-            content: ["first", "second", "third", "fourth"].map(image).to_vec(),
+            content: ["first", "second", "third", "fourth"]
+                .map(image)
+                .to_vec()
+                .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -143,7 +146,7 @@ fn file_images_are_selected_from_history_sources() {
             encrypted_content: None,
             id: None,
             role: "user".into(),
-            content: vec![image("first"), file_image.clone()],
+            content: vec![image("first"), file_image.clone()].into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -199,7 +202,7 @@ fn file_images_are_selected_from_history_sources() {
         encrypted_content: None,
         id: None,
         role: "user".into(),
-        content: file_images.to_vec(),
+        content: file_images.to_vec().into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }];

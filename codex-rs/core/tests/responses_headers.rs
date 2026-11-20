@@ -162,7 +162,8 @@ async fn responses_stream_includes_subagent_header_on_review() {
             role: "user".into(),
             content: vec![ContentItem::InputText {
                 text: "hello".into(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }
@@ -316,7 +317,8 @@ async fn responses_stream_includes_subagent_header_on_other() {
             role: "user".into(),
             content: vec![ContentItem::InputText {
                 text: "hello".into(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }
@@ -455,7 +457,8 @@ async fn responses_respects_model_info_overrides_from_config() {
             role: "user".into(),
             content: vec![ContentItem::InputText {
                 text: "hello".into(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }

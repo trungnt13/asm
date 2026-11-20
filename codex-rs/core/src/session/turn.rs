@@ -3011,7 +3011,7 @@ async fn maybe_complete_plan_item_from_message(
         && role == "assistant"
     {
         let mut text = String::new();
-        for entry in content {
+        for entry in content.iter() {
             if let ContentItem::OutputText { text: chunk, .. } = entry {
                 text.push_str(chunk);
             }

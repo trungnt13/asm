@@ -88,7 +88,7 @@ fn message(role: &str, content: ContentItem) -> ResponseItem {
         encrypted_content: None,
         id: None,
         role: role.to_string(),
-        content: vec![content],
+        content: vec![content].into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }

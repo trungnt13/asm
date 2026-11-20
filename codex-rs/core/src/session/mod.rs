@@ -202,6 +202,7 @@ use codex_thread_store::ResumeThreadParams;
 use codex_thread_store::ThreadStore;
 use codex_thread_store::ThreadStoreResumePreparation;
 use codex_utils_audio::prepare_response_items as prepare_audio_response_items;
+use codex_utils_audio::prepare_shared_response_item as prepare_shared_audio_response_item;
 use codex_utils_git_discovery::GitRootDiscovery;
 use codex_utils_output_truncation::with_serialization_allowance;
 use codex_utils_path_uri::PathUri;
@@ -2254,7 +2255,7 @@ impl Session {
             .await;
         }
         for envelope in &mut history {
-            prepare_audio_response_items(std::slice::from_mut(Arc::make_mut(&mut envelope.item)));
+            prepare_shared_audio_response_item(&mut envelope.item);
         }
         file_audio::resolve(self, file_audio::file_ids(&history).cloned().collect()).await;
         // Ordinary replay needs no reviewer refresh. Only an opaque

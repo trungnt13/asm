@@ -495,7 +495,7 @@ fn retained_plugin_guidance_must_be_a_complete_developer_fragment() {
         };
         *retained_role = role.to_string();
         if quoted {
-            let ContentItem::InputText { text } = &mut content[0] else {
+            let ContentItem::InputText { text } = &mut std::sync::Arc::make_mut(content)[0] else {
                 panic!("plugin instructions should render as input text");
             };
             *text = format!("Quoted example: {text}");

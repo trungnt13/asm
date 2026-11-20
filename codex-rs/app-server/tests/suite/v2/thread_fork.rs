@@ -1965,7 +1965,8 @@ async fn thread_fork_freezes_active_paginated_turn_as_interrupted(
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
                     text: format!("{id} model input"),
-                }],
+                }]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }

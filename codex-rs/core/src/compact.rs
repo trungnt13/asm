@@ -803,9 +803,9 @@ fn build_compacted_history_with_limit(
                 id: id.clone(),
                 role: "user".to_owned(),
                 content: if preserve_content {
-                    content.clone()
+                    Arc::clone(content)
                 } else {
-                    Vec::new()
+                    Arc::default()
                 },
                 phase: None,
                 internal_chat_message_metadata_passthrough:

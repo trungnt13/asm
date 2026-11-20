@@ -21,10 +21,18 @@ pub(crate) fn without_notification_media(notification: ServerNotification) -> Se
         ServerNotification::RawResponseItemCompleted(mut notification) => {
             match &mut notification.item {
                 ResponseItem::Message { content, .. } => {
-                    content.retain(|item| match item {
+                    let keep = |item: &ContentItem| match item {
                         ContentItem::InputImage { .. } | ContentItem::InputAudio { .. } => false,
                         ContentItem::InputText { .. } | ContentItem::OutputText { .. } => true,
-                    });
+                    };
+                    if content.iter().any(|item| !keep(item)) {
+                        *content = content
+                            .iter()
+                            .filter(|item| keep(item))
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .into();
+                    }
                 }
                 ResponseItem::FunctionCallOutput { output, .. }
                 | ResponseItem::CustomToolCallOutput { output, .. } => {

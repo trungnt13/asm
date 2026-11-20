@@ -108,7 +108,8 @@ fn parses_user_message_with_text_and_two_images() {
                 },
                 detail: Some(DEFAULT_IMAGE_DETAIL),
             },
-        ],
+        ]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -155,7 +156,8 @@ fn parses_user_message_with_file_image() {
             ContentItem::InputText {
                 text: "describe it".to_string(),
             },
-        ],
+        ]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -207,7 +209,8 @@ fn skips_local_image_label_text() {
             ContentItem::InputText {
                 text: user_text.clone(),
             },
-        ],
+        ]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -256,7 +259,8 @@ fn skips_local_audio_label_text() {
             ContentItem::InputText {
                 text: user_text.clone(),
             },
-        ],
+        ]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -292,7 +296,8 @@ fn parses_assistant_message_input_text_for_backward_compatibility() {
         content: vec![ContentItem::InputText {
             text: "author: /root\nrecipient: /root/worker\nother_recipients: []\nContent: continue"
                 .to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -346,7 +351,8 @@ fn skips_unnamed_image_label_text() {
             ContentItem::InputText {
                 text: user_text.clone(),
             },
-        ],
+        ]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -381,7 +387,7 @@ fn skips_user_instructions_and_env() {
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
                     text: "# AGENTS.md instructions for test_directory\n\n<INSTRUCTIONS>\ntest_text\n</INSTRUCTIONS>".to_string(),
-                }],
+                }].into(),
             phase: None,
                 internal_chat_message_metadata_passthrough: None,},
             ResponseItem::Message {
@@ -391,7 +397,7 @@ fn skips_user_instructions_and_env() {
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
                     text: "<environment_context>test_text</environment_context>".to_string(),
-                }],
+                }].into(),
             phase: None,
                 internal_chat_message_metadata_passthrough: None,},
             ResponseItem::Message {
@@ -401,7 +407,7 @@ fn skips_user_instructions_and_env() {
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
                     text: "# AGENTS.md instructions for test_directory\n\n<INSTRUCTIONS>\ntest_text\n</INSTRUCTIONS>".to_string(),
-                }],
+                }].into(),
             phase: None,
                 internal_chat_message_metadata_passthrough: None,},
             ResponseItem::Message {
@@ -412,7 +418,7 @@ fn skips_user_instructions_and_env() {
                 content: vec![ContentItem::InputText {
                     text: "<skill>\n<name>demo</name>\n<path>skills/demo/SKILL.md</path>\nbody\n</skill>"
                         .to_string(),
-                }],
+                }].into(),
             phase: None,
                 internal_chat_message_metadata_passthrough: None,},
             ResponseItem::Message {
@@ -422,7 +428,7 @@ fn skips_user_instructions_and_env() {
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
                     text: "<user_shell_command>echo 42</user_shell_command>".to_string(),
-                }],
+                }].into(),
             phase: None,
                 internal_chat_message_metadata_passthrough: None,},
             ResponseItem::Message {
@@ -439,7 +445,7 @@ fn skips_user_instructions_and_env() {
                             "# AGENTS.md instructions for dir\n\n<INSTRUCTIONS>\nbody\n</INSTRUCTIONS>"
                                 .to_string(),
                     },
-                ],
+                ].into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,},
         ];
@@ -492,7 +498,7 @@ fn parses_hook_prompt_and_hides_other_contextual_fragments() {
                     "<hook_prompt hook_run_id=\"hook-run-1\">Retry with care &amp; joy.</hook_prompt>"
                         .to_string(),
             },
-        ],
+        ].into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,};
 
@@ -528,7 +534,8 @@ fn internal_model_context_does_not_parse_as_visible_turn_item() {
             )
             .render()
             .expect_text(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -547,7 +554,8 @@ fn parses_agent_message() {
             annotations: None,
             logprobs: None,
             text: "Hello from Codex".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };

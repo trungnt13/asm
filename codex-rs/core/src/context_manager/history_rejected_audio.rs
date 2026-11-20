@@ -66,7 +66,7 @@ enum FileErrorSource<'a> {
 fn visit_sources<'a>(item: &'a ResponseItem, mut visit: impl FnMut(FileErrorSource<'a>)) {
     match item {
         ResponseItem::Message { content, .. } => {
-            for part in content {
+            for part in content.iter() {
                 match part {
                     ContentItem::InputAudio {
                         audio: AudioReference::File { file_id },
@@ -258,7 +258,7 @@ pub(crate) async fn unavailable_file_audio(
     let mut ids = BTreeSet::new();
     for item in items {
         if let ResponseItem::Message { content, .. } = item.as_ref() {
-            for part in content {
+            for part in content.iter() {
                 if let ContentItem::InputAudio {
                     audio: AudioReference::File { file_id },
                 } = part
@@ -340,7 +340,7 @@ pub(super) fn project_file_audio(
         else {
             unreachable!()
         };
-        retain_aligned(content, &keep);
+        retain_aligned(Arc::make_mut(content), &keep);
         if let Some(metadata) = internal_chat_message_metadata_passthrough {
             if let Some(kinds) = &mut metadata.content_item_kinds {
                 retain_aligned(kinds, &keep);

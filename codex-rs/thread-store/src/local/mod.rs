@@ -2121,7 +2121,8 @@ mod tests {
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {
                         text: "edit after the initial snapshot".to_string(),
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 }

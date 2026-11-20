@@ -478,7 +478,7 @@ fn replace_attribution_fragment_with_legacy(
                     std::sync::Arc::make_mut(&mut response_item.item)
                 && role == "developer"
             {
-                for item in content {
+                for item in std::sync::Arc::make_mut(content) {
                     if let ContentItem::InputText { text } = item
                         && text.contains("<git_attribution>")
                     {

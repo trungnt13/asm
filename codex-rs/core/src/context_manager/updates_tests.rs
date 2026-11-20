@@ -59,7 +59,8 @@ fn message(role: &str, texts: &[&str]) -> ResponseItem {
             .map(|text| ContentItem::InputText {
                 text: text.to_string(),
             })
-            .collect(),
+            .collect::<Vec<_>>()
+            .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: Some(InternalChatMessageMetadataPassthrough {
             content_item_metadata: Some(vec![provenance; texts.len()]),

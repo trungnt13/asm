@@ -242,7 +242,8 @@ impl<'a> From<&'a RolloutItem> for RolloutItemWire<'a> {
                                 annotations: None,
                                 logprobs: None,
                                 text,
-                            }],
+                            }]
+                            .into(),
                             // Older Guardian clients exclude commentary from root-to-worker
                             // review. Keep the phase unspecified so they can review this
                             // confirmed delivery without claiming it ended the turn.

@@ -1554,7 +1554,8 @@ fn output_message(id: &str, text: &str) -> ResponseItem {
             annotations: None,
             logprobs: None,
             text: text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }

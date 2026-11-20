@@ -144,7 +144,7 @@ async fn assert_catalog_budget(evidence: BudgetEvidence) -> Result<()> {
                 let ResponseItem::Message { content, .. } = &mut user else {
                     unreachable!("user instruction is a message");
                 };
-                content.push(ContentItem::InputImage {
+                std::sync::Arc::make_mut(content).push(ContentItem::InputImage {
                     image: ImageReference::Inline { image_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGPgEpEDAABoAD1UCKP3AAAAAElFTkSuQmCC".to_owned() },
                     detail: None,
                 });
@@ -162,7 +162,8 @@ async fn assert_catalog_budget(evidence: BudgetEvidence) -> Result<()> {
                 role: "developer".to_owned(),
                 content: vec![ContentItem::InputText {
                     text: approval.clone(),
-                }],
+                }]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             });
@@ -173,7 +174,7 @@ async fn assert_catalog_budget(evidence: BudgetEvidence) -> Result<()> {
             encrypted_content: None,
             id: None,
             role: "assistant".to_owned(),
-            content: vec![ContentItem::InputText { text }],
+            content: vec![ContentItem::InputText { text }].into(),
             phase: Some(MessagePhase::Commentary),
             internal_chat_message_metadata_passthrough: None,
         }));

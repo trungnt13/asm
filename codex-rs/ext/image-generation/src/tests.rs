@@ -283,7 +283,8 @@ async fn recent_image_fallback_selects_newest_images_in_chronological_order() {
                 ContentItem::InputText {
                     text: "edit these".to_string(),
                 },
-            ],
+            ]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -388,7 +389,8 @@ async fn recent_image_fallback_passes_file_backed_image_to_edit_request() {
                     },
                     detail: None,
                 },
-            ],
+            ]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }],
@@ -548,7 +550,7 @@ async fn recent_image_fallback_requires_requested_count() {
             encrypted_content: None,
             id: None,
             role: "user".to_string(),
-            content: vec![input_image("only-image")],
+            content: vec![input_image("only-image")].into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }],

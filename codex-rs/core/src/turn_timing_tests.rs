@@ -197,7 +197,8 @@ fn response_item_records_turn_ttft_for_first_output_signals() {
             annotations: None,
             logprobs: None,
             text: "hello".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }));
@@ -214,7 +215,8 @@ fn response_item_records_turn_ttft_ignores_empty_non_output_items() {
             annotations: None,
             logprobs: None,
             text: String::new(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }));

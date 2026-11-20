@@ -317,7 +317,8 @@ async fn seed_guardian_parent_history(session: &Arc<Session>, turn: &Arc<TurnCon
                     content: vec![ContentItem::InputText {
                         text: "Please check the repo visibility and push the docs fix if needed."
                             .to_string(),
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 },
@@ -352,7 +353,8 @@ async fn seed_guardian_parent_history(session: &Arc<Session>, turn: &Arc<TurnCon
                         logprobs: None,
                         text: "The repo is public; I now need approval to push the docs fix."
                             .to_string(),
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 },
@@ -831,7 +833,8 @@ async fn build_guardian_prompt_stale_delta_version_falls_back_to_full_prompt() -
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {
                         text: "Compacted retained user request.".to_string(),
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 },
@@ -844,7 +847,8 @@ async fn build_guardian_prompt_stale_delta_version_falls_back_to_full_prompt() -
                         annotations: None,
                         logprobs: None,
                         text: "Compacted summary of earlier guardian context.".to_string(),
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 },
@@ -864,7 +868,8 @@ async fn build_guardian_prompt_stale_delta_version_falls_back_to_full_prompt() -
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {
                         text: "Please push after the compaction.".to_string(),
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 },
@@ -877,7 +882,8 @@ async fn build_guardian_prompt_stale_delta_version_falls_back_to_full_prompt() -
                         annotations: None,
                         logprobs: None,
                         text: "I need approval for the post-compaction push.".to_string(),
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 },
@@ -957,7 +963,8 @@ fn collect_guardian_transcript_entries_skips_contextual_user_messages() {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "<environment_context>\n<cwd>/tmp</cwd>\n</environment_context>".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -970,7 +977,8 @@ fn collect_guardian_transcript_entries_skips_contextual_user_messages() {
                 annotations: None,
                 logprobs: None,
                 text: "hello".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -1718,7 +1726,8 @@ async fn guardian_review_request_layout_matches_model_visible_request_snapshot()
                     text: format!(
                         "Use ${GUARDIAN_SKILL_NAME} before deciding whether the push is safe."
                     ),
-                }],
+                }]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }],
@@ -2005,7 +2014,8 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {
                         text: "Please push the second docs fix too.".to_string(),
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 },
@@ -2018,7 +2028,8 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
                         annotations: None,
                         logprobs: None,
                         text: "I need approval for the second docs fix.".to_string(),
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 },
@@ -2098,7 +2109,8 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {
                         text: "Please push the third docs fix too.".to_string(),
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 },
@@ -2111,7 +2123,8 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
                         annotations: None,
                         logprobs: None,
                         text: "I need approval for the third docs fix.".to_string(),
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 },
@@ -2165,7 +2178,8 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
                     text: "Please review after a summary-free context reset.".to_string(),
-                }],
+                }]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }],
@@ -3126,7 +3140,7 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
                         role: "user".to_string(),
                         content: vec![ContentItem::InputText {
                             text: "Please inspect pending changes before pushing.".to_string(),
-                        }],
+                        }].into(),
                         phase: None,
                         internal_chat_message_metadata_passthrough: None,},
                     ResponseItem::Message {
@@ -3138,7 +3152,7 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
                             annotations: None,
                             logprobs: None,
                             text: "I need approval to run git diff.".to_string(),
-                        }],
+                        }].into(),
                         phase: None,
                         internal_chat_message_metadata_passthrough: None,},
                 ],
@@ -3209,7 +3223,7 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
                         role: "user".to_string(),
                         content: vec![ContentItem::InputText {
                             text: "Now inspect whether pushing is safe.".to_string(),
-                        }],
+                        }].into(),
                         phase: None,
                         internal_chat_message_metadata_passthrough: None,},
                     ResponseItem::Message {
@@ -3221,7 +3235,7 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
                             annotations: None,
                             logprobs: None,
                             text: "I need approval to push after the diff check.".to_string(),
-                        }],
+                        }].into(),
                         phase: None,
                         internal_chat_message_metadata_passthrough: None,},
                 ],

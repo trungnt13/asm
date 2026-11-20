@@ -125,8 +125,15 @@ pub(crate) fn serialize_tiered_input(
             | RolloutItem::EventMsg(_) => None,
         };
         let Some(mut item) = item else { continue };
-        if let ResponseItem::Message { content, .. } = &mut item {
-            for part in content {
+        if let ResponseItem::Message { content, .. } = &mut item
+            && content.iter().any(|part| {
+                matches!(
+                    part,
+                    ContentItem::InputImage { .. } | ContentItem::InputAudio { .. }
+                )
+            })
+        {
+            for part in std::sync::Arc::make_mut(content) {
                 match part {
                     ContentItem::InputImage { .. } => {
                         *part = ContentItem::InputText {
@@ -341,7 +348,13 @@ pub(crate) fn sanitize_response_item_for_memories(item: &ResponseItem) -> Option
         && role == "user"
     {
         *status = None;
-        content.retain(|content_item| !is_memory_excluded_contextual_user_fragment(content_item));
+        if content
+            .iter()
+            .any(is_memory_excluded_contextual_user_fragment)
+        {
+            std::sync::Arc::make_mut(content)
+                .retain(|content_item| !is_memory_excluded_contextual_user_fragment(content_item));
+        }
         if content.is_empty() {
             return None;
         }

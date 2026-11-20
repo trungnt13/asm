@@ -156,7 +156,8 @@ async fn independent_review_preserves_oversized_instruction_order() -> Result<()
                 role: "developer".to_owned(),
                 content: vec![ContentItem::InputText {
                     text: approval.clone(),
-                }],
+                }]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             },

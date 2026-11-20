@@ -29,7 +29,7 @@ pub(crate) async fn replace_unresolvable_media_files<'a>(
     for item in &items {
         match item.as_ref() {
             ResponseItem::Message { content, .. } => {
-                for part in content {
+                for part in content.iter() {
                     if let ContentItem::InputImage {
                         image: ImageReference::File { file_id },
                         ..

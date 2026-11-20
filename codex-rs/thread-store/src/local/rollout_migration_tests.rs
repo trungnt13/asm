@@ -188,7 +188,8 @@ fn input_response_message(role: &str, text: &str) -> ResponseItem {
         role: role.to_string(),
         content: vec![ContentItem::InputText {
             text: text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }
@@ -1063,7 +1064,8 @@ async fn migration_coalesces_response_first_user_message_rollback_boundary() {
             ContentItem::InputAudio {
                 audio: audio.clone(),
             },
-        ],
+        ]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -1313,7 +1315,8 @@ async fn migration_rolls_back_pre_compaction_turns_from_sqlite_history() {
                 annotations: None,
                 logprobs: None,
                 text: "old answer".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -1843,7 +1846,8 @@ async fn assert_migrated_evidence_order(steer_order: Option<u64>) {
             role: "user".to_owned(),
             content: vec![ContentItem::InputText {
                 text: text.to_owned(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: Some(
                 InternalChatMessageMetadataPassthrough {
@@ -2284,7 +2288,8 @@ async fn migration_compacts_subagent_prefix_and_does_not_project_it() {
                         role: "user".to_string(),
                         content: vec![ContentItem::InputText {
                             text: "latest compacted context".to_string(),
-                        }],
+                        }]
+                        .into(),
                         phase: None,
                         internal_chat_message_metadata_passthrough: None,
                     }

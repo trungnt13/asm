@@ -291,8 +291,9 @@ impl ModelProvider for AmazonBedrockModelProvider {
                 ..
             } = item
             && role == "assistant"
+            && content.iter().any(|part| matches!(part, ContentItem::OutputText { annotations: Some(annotations), .. } if annotations.is_empty()))
         {
-            for part in content {
+            for part in Arc::make_mut(content) {
                 if let ContentItem::OutputText { annotations, .. } = part
                     && annotations.as_ref().is_some_and(Vec::is_empty)
                 {

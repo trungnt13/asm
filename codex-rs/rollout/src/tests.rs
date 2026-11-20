@@ -1525,7 +1525,8 @@ async fn read_head_for_summary_omits_harness_metadata() {
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: "hello".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -1685,7 +1686,8 @@ async fn test_updated_at_uses_file_mtime() -> Result<()> {
                     annotations: None,
                     logprobs: None,
                     text: format!("reply-{idx}"),
-                }],
+                }]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             })),
