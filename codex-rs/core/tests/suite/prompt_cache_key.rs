@@ -294,7 +294,11 @@ async fn root_fork_shares_cache_routing_but_keeps_session_identity(
                 })
                 .await?;
             test.thread_manager
-                .fork_prepared_thread(options, prepared)
+                .fork_prepared_thread(
+                    options,
+                    prepared,
+                    codex_thread_store::InheritedHistoryVisibility::Full,
+                )
                 .await?
         }
     };

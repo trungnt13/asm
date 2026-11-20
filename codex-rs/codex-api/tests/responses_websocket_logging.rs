@@ -105,6 +105,7 @@ async fn connector_results_reach_websocket_without_payload_logs() -> Result<()> 
                 retry_429: false,
                 retry_5xx: false,
                 retry_transport: false,
+                defer_server_overload: false,
             },
             stream_idle_timeout: TIMEOUT,
         },
@@ -132,7 +133,7 @@ async fn connector_results_reach_websocket_without_payload_logs() -> Result<()> 
     let mut body = ToolResultBody::from_mcp_result(&serde_json::from_value(result.clone())?)
         .expect("eligible connector result");
     body.set_nested_call_id(CALL_ID);
-    let input = [item];
+    let input = [Arc::new(item)];
     let request = ResponsesWsRequest::ResponseCreate(ResponseCreateWsRequest {
         model: "gpt-test",
         stream: true,

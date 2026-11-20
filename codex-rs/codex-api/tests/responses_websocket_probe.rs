@@ -40,6 +40,7 @@ fn probe_client(base_url: String) -> ResponsesWebsocketClient {
                 retry_429: false,
                 retry_5xx: false,
                 retry_transport: false,
+                defer_server_overload: false,
             },
             stream_idle_timeout: Duration::from_secs(/*secs*/ 5),
         },

@@ -314,6 +314,7 @@ async fn keep_open_error(event: serde_json::Value) -> crate::ApiError {
         Duration::from_secs(60),
         /*telemetry*/ None,
         /*turn_state*/ None,
+        /*request_started_at*/ None,
     );
     let started = tokio::time::Instant::now();
     let error = loop {
