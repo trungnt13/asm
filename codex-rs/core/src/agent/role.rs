@@ -300,6 +300,18 @@ mod role_overrides {
                 next_config.system1.rubric_instructions = Some(rubric.clone());
             }
             next_config.system1.validate().map_err(|err| anyhow!(err))?;
+            if system1.rubric_instructions.is_some() {
+                // A managed layer can win even after the role's rubric passes validation.
+                let effective = next_config.config_layer_stack.effective_config();
+                let rubric = effective
+                    .get("system1")
+                    .and_then(|settings| settings.get("rubric_instructions"))
+                    .and_then(TomlValue::as_str)
+                    .ok_or_else(|| {
+                        anyhow!("missing effective System1 rubric after role override")
+                    })?;
+                next_config.system1.rubric_instructions = Some(rubric.to_owned());
+            }
         }
         for key in overrides.features.keys() {
             if let Some(feature) = feature_for_key(key) {
