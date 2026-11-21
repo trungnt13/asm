@@ -118,13 +118,22 @@ impl Session {
                 Some(BaseInstructionsProvenance::Model { .. }) => render_current_instructions(),
                 Some(BaseInstructionsProvenance::Custom) | None => base_instructions.text,
             };
-            ModelInstructionsState::for_incremental_tools(
+            let mut model_state = ModelInstructionsState::for_incremental_tools(
                 &model_info.slug,
                 instructions,
                 turn_context
                     .config
                     .features
                     .enabled(Feature::SuppressModelChangeAnnouncements),
+            );
+            model_state.reassert_unhashed_instructions =
+                turn_context.config.has_role_base_instructions;
+            model_state
+        } else if turn_context.config.has_role_base_instructions {
+            ModelInstructionsState::new(
+                &model_info.slug,
+                /*previous_model*/ None,
+                String::new(),
             )
         } else {
             let model_instructions = render_current_instructions();

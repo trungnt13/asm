@@ -969,6 +969,14 @@ impl Session {
             .as_deref()
             .and_then(codex_protocol::openai_models::NativeRuntime::for_model)
             .map(|(runtime, _)| runtime);
+        if config.has_role_base_instructions
+            && native_runtime == Some(codex_protocol::openai_models::NativeRuntime::CursorAgent)
+        {
+            return Err(CodexErr::InvalidRequest(
+                "Cursor Agent cannot replace its base instructions; use an ASM-managed model or role developer_instructions"
+                    .to_string(),
+            ));
+        }
         let uses_native_runtime = native_runtime.is_some();
         if uses_native_runtime
             && config
@@ -4795,7 +4803,15 @@ impl Session {
                 ));
             }
         }
-        let dynamic_tools = self.dynamic_tools().await;
+        let dynamic_tools = if !turn_context.config.subagent_tools.dynamic_tools
+            && matches!(
+                &turn_context.session_source,
+                SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+            ) {
+            Arc::from([])
+        } else {
+            self.dynamic_tools().await
+        };
         let token_budget = token_budget::resolve_token_budget(
             turn_context.configured_token_budget.as_ref(),
             turn_context.use_model_token_budget_defaults,

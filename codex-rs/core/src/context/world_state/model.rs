@@ -33,6 +33,7 @@ pub(crate) struct ModelInstructionsState {
     previous_model: Option<String>,
     instructions: String,
     suppress_model_change_announcements: bool,
+    pub(crate) reassert_unhashed_instructions: bool,
 }
 
 impl ModelInstructionsState {
@@ -42,6 +43,7 @@ impl ModelInstructionsState {
             previous_model: previous_model.map(str::to_string),
             instructions,
             suppress_model_change_announcements: false,
+            reassert_unhashed_instructions: false,
         }
     }
 
@@ -60,6 +62,7 @@ impl ModelInstructionsState {
             previous_model: None,
             instructions: instructions.0,
             suppress_model_change_announcements,
+            reassert_unhashed_instructions: false,
         }
     }
 }
@@ -117,9 +120,12 @@ impl WorldStateSection for ModelInstructionsState {
             | PreviousSectionState::Absent => (self.previous_model.as_ref(), None),
         };
         let model_changed = previous_model.is_some_and(|previous| previous != model);
-        // Legacy model-only snapshots refresh instructions only when the model changes.
+        // A legacy model-only snapshot cannot confirm an explicit role override.
         let instructions_changed = instructions_hash.is_some_and(|current| {
-            previous_instructions_hash.map_or(model_changed, |previous| previous != current)
+            previous_instructions_hash.map_or(
+                model_changed || self.reassert_unhashed_instructions,
+                |previous| previous != current,
+            )
         });
         let announce_model = model_changed && !self.suppress_model_change_announcements;
         if instructions_hash.is_some() && !announce_model && !instructions_changed {

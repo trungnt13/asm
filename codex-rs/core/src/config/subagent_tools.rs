@@ -1,10 +1,20 @@
 use codex_protocol::config_types::WebSearchMode;
+use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SubAgentSource;
 use toml::Table;
 use toml::Value;
 
 use super::Config;
 
 impl Config {
+    pub(crate) fn subagent_collaboration_disabled(&self, session_source: &SessionSource) -> bool {
+        !self.subagent_tools.collaboration
+            && matches!(
+                session_source,
+                SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+            )
+    }
+
     pub(crate) fn apply_subagent_tools(&mut self) -> anyhow::Result<()> {
         let mut session_overrides = Table::new();
         let disabled_features = self.subagent_tools.disabled_features().collect::<Vec<_>>();

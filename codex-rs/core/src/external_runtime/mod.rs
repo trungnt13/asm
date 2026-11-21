@@ -343,8 +343,13 @@ async fn run_conversation(
     } else {
         None
     };
-    // Native V2 children get ASM messaging tools through the loopback JSON bridge.
+    // Keep checkpoint compatibility when a subagent's tool policy changes.
     let messaging = child_agent || native_runtime == NativeRuntime::ClaudeCode;
+    let expose_bridge = native_runtime == NativeRuntime::ClaudeCode
+        || (child_agent
+            && !turn
+                .config
+                .subagent_collaboration_disabled(&turn.session_source));
     let page_context = if native_runtime == NativeRuntime::ClaudeCode {
         let lease = RuntimeLease::take(&session.external_runtime)?;
         lease.runtime.as_ref().map_or(
@@ -538,7 +543,7 @@ async fn run_conversation(
             {
                 return Ok(last_message);
             }
-            let bridge = if messaging {
+            let bridge = if expose_bridge {
                 let step = if native_runtime == NativeRuntime::ClaudeCode {
                     let prepared = context::capture(
                         session,
@@ -573,7 +578,7 @@ async fn run_conversation(
                 NativeRuntime::ClaudeCode => {
                     "Claude Code supplies inference and conversation state. ASM owns tools, instructions, skills, sandbox and approvals."
                 }
-                NativeRuntime::CursorAgent if child_agent => {
+                NativeRuntime::CursorAgent if bridge.is_some() => {
                     "Cursor Agent owns instructions, tools and permissions. Cursor runs with --force; native denies and team auto-run controls still apply. ASM sandbox and approvals do not apply; remaining Cursor approval requests are denied. Token usage and context fill are unavailable. ASM communication uses a local CLI helper through native shell tools; messages arrive between turns."
                 }
                 NativeRuntime::CursorAgent => {
@@ -897,7 +902,7 @@ async fn run_conversation(
         if native_runtime == NativeRuntime::ClaudeCode {
             turn.extension_data.insert(handoff_capture.clone());
         }
-        stream.activity.messaging = messaging;
+        stream.activity.messaging = runtime.bridge.is_some();
         stream.activity.server = native_runtime.id();
         // Only Claude accepts native queued input; Cursor receives mail through tool results.
         let (steering, mut mid_turn_delivery) = match &runtime.runtime {

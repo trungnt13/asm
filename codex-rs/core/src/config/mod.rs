@@ -701,6 +701,9 @@ pub struct Config {
     /// Keeps a child role limit separate from the inherited scalar fallback.
     pub(crate) role_model_context_window: Option<i64>,
 
+    /// Distinguishes the selected role's base instructions from inherited text.
+    pub(crate) has_role_base_instructions: bool,
+
     /// Keeps selected role instructions separate from inherited developer instructions.
     pub(crate) role_developer_instructions: Option<String>,
 
@@ -4982,6 +4985,7 @@ impl Config {
             review_model,
             model_context_window: cfg.model_context_window,
             role_model_context_window: None,
+            has_role_base_instructions: false,
             role_developer_instructions: None,
             subagent_model_context_windows,
             model_auto_compact_token_limit: cfg.model_auto_compact_token_limit,

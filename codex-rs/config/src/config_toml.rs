@@ -195,6 +195,14 @@ pub struct SubagentToolsToml {
     pub skill_search: bool,
     pub skill_mcp_dependency_install: bool,
     pub request_permissions_tool: bool,
+    pub goals: bool,
+    pub shell_tool: bool,
+    pub memory_tool: bool,
+    pub view_image: bool,
+    /// Set false to hide client-supplied tools in spawned threads.
+    pub dynamic_tools: bool,
+    /// Set false to disable ASM collaboration tools without blocking result delivery.
+    pub collaboration: bool,
     /// Set false to disable ASM search, not search tools supplied by third parties.
     pub web_search: bool,
 }
@@ -215,6 +223,12 @@ impl Default for SubagentToolsToml {
             skill_search: true,
             skill_mcp_dependency_install: true,
             request_permissions_tool: true,
+            goals: true,
+            shell_tool: true,
+            memory_tool: true,
+            view_image: true,
+            dynamic_tools: true,
+            collaboration: true,
             web_search: true,
         }
     }
@@ -241,6 +255,12 @@ impl SubagentToolsToml {
                 self.request_permissions_tool,
                 Feature::RequestPermissionsTool,
             ),
+            (self.goals, Feature::Goals),
+            (self.shell_tool, Feature::ShellTool),
+            (self.memory_tool, Feature::MemoryTool),
+            (self.view_image, Feature::ViewImage),
+            (self.collaboration, Feature::AgentMessageBoard),
+            (self.collaboration, Feature::AgentMessageBoardMcp),
         ]
         .into_iter()
         .filter_map(|(inherit, feature)| (!inherit).then_some(feature))

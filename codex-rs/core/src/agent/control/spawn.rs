@@ -106,6 +106,7 @@ pub(in crate::agent) async fn inherited_dynamic_tools(
     version: MultiAgentVersion,
 ) -> Vec<DynamicToolSpec> {
     if version == MultiAgentVersion::V2
+        && config.subagent_tools.dynamic_tools
         && config.features.enabled(Feature::MultiAgentV2DynamicTools)
     {
         parent.session.dynamic_tools().await.to_vec()

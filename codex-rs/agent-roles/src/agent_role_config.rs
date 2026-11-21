@@ -26,6 +26,7 @@ struct RawAgentRoleFileToml {
     description: Option<String>,
     nickname_candidates: Option<Vec<String>>,
     fork_turns: Option<AgentRoleForkTurns>,
+    base_instructions: Option<String>,
     #[serde(flatten)]
     config: ConfigToml,
 }
@@ -36,6 +37,7 @@ pub struct ResolvedAgentRoleFile {
     pub description: Option<String>,
     pub nickname_candidates: Option<Vec<String>>,
     pub fork_turns: Option<AgentRoleForkTurns>,
+    pub base_instructions: Option<String>,
     pub config: TomlValue,
 }
 
@@ -68,10 +70,23 @@ pub fn parse_agent_role_file_contents(
         &format!("agent role file {}.description", role_file_label.display()),
         parsed.description.as_deref(),
     )?;
+    if parsed
+        .base_instructions
+        .as_deref()
+        .is_some_and(|instructions| instructions.trim().is_empty())
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "agent role file at {}.base_instructions cannot be blank",
+                role_file_label.display()
+            ),
+        ));
+    }
     validate_agent_role_file_developer_instructions(
         role_file_label,
         parsed.config.developer_instructions.as_deref(),
-        role_name_hint.is_none(),
+        role_name_hint.is_none() && parsed.base_instructions.is_none(),
     )?;
 
     let role_name = parsed
@@ -113,12 +128,14 @@ pub fn parse_agent_role_file_contents(
     config_table.remove("description");
     config_table.remove("nickname_candidates");
     config_table.remove("fork_turns");
+    config_table.remove("base_instructions");
 
     Ok(ResolvedAgentRoleFile {
         role_name,
         description,
         nickname_candidates,
         fork_turns: parsed.fork_turns,
+        base_instructions: parsed.base_instructions,
         config,
     })
 }
@@ -154,7 +171,7 @@ fn validate_agent_role_file_developer_instructions(
         None if require_present => Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             format!(
-                "agent role file at {} must define `developer_instructions`",
+                "agent role file at {} must define `developer_instructions` or `base_instructions`",
                 role_file_label.display()
             ),
         )),
