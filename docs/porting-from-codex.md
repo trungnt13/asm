@@ -151,6 +151,8 @@ For syncs or saved-cache/wire-format changes, apply this gate even after conflic
 
 #### Known upstream cold-history limitation
 
+For PR #240, the owner accepted the stock cold-history limitation through `ddfaef91b258da5a0217951ed5f6e0039add5e02` only. ASM passed cold search, timeline, turn, and item reads. Independent stock alpha.11 returned an empty cold timeline. One resume and a warm reopen recovered both saved items without changing the rollout. This exception does not cover voice history or waive other checks.
+
 For the sync through `63598243af3fa93ac670fb39da48b4b0967fb365`, the owner accepted the stock cold-history limitation for this revision only. Stock alpha.11 found the saved thread but returned an empty cold timeline. One resume and a warm reopen recovered both items without changing the rollout. This exception does not cover voice history or waive other checks.
 
 For PR #236, the owner accepted the stock cold-history limitation through `9f2b87495bf979f6c1953cf00c98143981664914` only. ASM passed cold search, timeline, turn, and item reads. Stock alpha.11 found the thread, but its cold timeline, turn, and item reads were empty. One resume and a warm reopen recovered both saved items without changing the rollout. This exception does not cover voice history or waive other checks.
