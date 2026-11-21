@@ -3650,7 +3650,7 @@ fn snapshot_turn_state(history: &InitialHistory) -> SnapshotTurnState {
     }
     let active_turn_id = builder.active_turn_id_if_explicit();
     if builder.has_active_turn() && active_turn_id.is_some() {
-        let active_turn_snapshot = builder.active_turn_snapshot();
+        let active_turn_snapshot = builder.active_turn_metadata_snapshot();
         if active_turn_snapshot
             .as_ref()
             .is_some_and(|turn| turn.status != TurnStatus::InProgress)

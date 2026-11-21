@@ -956,7 +956,7 @@ impl Session {
             for record in records {
                 match record {
                     RolloutItem::ResponseItem(item) => {
-                        assign_missing_item_id(Arc::make_mut(&mut item.item), &ids.context_ids)
+                        super::assign_missing_shared_item_id(&mut item.item, &ids.context_ids)
                     }
                     RolloutItem::Compacted(checkpoint) if restore_child_window => {
                         checkpoint.window_number = Some(0);

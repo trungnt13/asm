@@ -44,6 +44,7 @@ use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_thread_store::LoadThreadHistoryParams;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 fn sanitize_forked_rollout_item(
@@ -568,6 +569,14 @@ pub(super) async fn prepare_forked_history(
             |response| retain_forked_item(response, &mut replaced_parent_developer_instructions),
         )
     });
+    share_forked_message_bodies(
+        &mut forked_rollout_items,
+        parent_thread
+            .session
+            .shared_history_items()
+            .await
+            .as_slice(),
+    );
     if preserve_fork_prefix {
         forked_rollout_items.push(RolloutItem::ResponseItem(
             ContextualUserFragment::into(MultiAgentUsageHint::new(
@@ -618,6 +627,56 @@ pub(super) async fn prepare_forked_history(
         destination_history_mode,
         None,
     ))
+}
+
+fn share_forked_message_bodies(
+    forked_rollout_items: &mut [RolloutItem],
+    parent_items: &[ResponseItemEnvelope],
+) {
+    // Compare typed content without reserializing. JSON values in provider metadata
+    // can compare equal despite serializing differently (e.g. object key order).
+    let parent_bodies: HashMap<_, _> = parent_items
+        .iter()
+        .filter_map(|envelope| match envelope.item.as_ref() {
+            ResponseItem::Message {
+                id: Some(id),
+                content,
+                ..
+            } if !id.is_empty()
+                && !content.iter().any(|part| {
+                    matches!(part,
+                        ContentItem::OutputText { annotations, logprobs, .. }
+                        if annotations.as_ref().is_some_and(|values| !values.is_empty())
+                            || logprobs.as_ref().is_some_and(|values| !values.is_empty())
+                    )
+                }) =>
+            {
+                Some((id.as_str(), content))
+            }
+            _ => None,
+        })
+        .collect();
+    for envelope in forked_rollout_items.iter_mut().flat_map(|item| match item {
+        RolloutItem::ResponseItem(envelope) => std::slice::from_mut(envelope),
+        RolloutItem::Compacted(checkpoint) => checkpoint
+            .replacement_history
+            .as_deref_mut()
+            .unwrap_or_default(),
+        _ => &mut [],
+    }) {
+        if let ResponseItem::Message {
+            id: Some(id),
+            content,
+            ..
+        } = envelope.item.as_ref()
+            && let Some(&parent_content) = parent_bodies.get(id.as_str())
+            && !Arc::ptr_eq(content, parent_content)
+            && content == parent_content
+            && let ResponseItem::Message { content, .. } = Arc::make_mut(&mut envelope.item)
+        {
+            *content = Arc::clone(parent_content);
+        }
+    }
 }
 
 pub(super) fn requires_handoff(model: Option<&str>, provider: &str, config: &Config) -> bool {

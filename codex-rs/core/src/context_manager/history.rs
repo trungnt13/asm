@@ -923,6 +923,10 @@ impl ContextManager {
         Arc::clone(&self.rejected_audio_file_ids)
     }
 
+    pub(crate) fn shared_annotated_items(&self) -> Arc<Vec<ResponseItemEnvelope>> {
+        Arc::clone(&self.items)
+    }
+
     /// Restores durable rejection facts from a checkpoint and subsequent failed turns.
     pub(crate) fn restore_rejected_audio_file_ids(&mut self, rejected: BTreeSet<String>) {
         self.rejected_audio_file_ids = Arc::new(rejected);

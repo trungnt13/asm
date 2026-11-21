@@ -1250,8 +1250,11 @@ impl Session {
         let refresh_client = {
             let state = self.state.lock().await;
             let configuration = &state.session_configuration;
-            (!crate::guardian::is_basic_session_source(&configuration.session_source))
-                .then(|| Self::build_effective_session_config(configuration).http_client_factory())
+            (!crate::guardian::is_basic_session_source(&configuration.session_source)).then(|| {
+                configuration
+                    .original_config_do_not_use
+                    .http_client_factory()
+            })
         };
         // An auth refresh may change allowed settings; finish it before capturing this turn.
         if let Some(http_client_factory) = refresh_client {

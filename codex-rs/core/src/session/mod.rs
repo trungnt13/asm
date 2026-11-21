@@ -638,10 +638,25 @@ pub(crate) fn assign_missing_item_id(
     item: &mut ResponseItem,
     context_ids: &codex_thread_context_ids::ThreadContextIds,
 ) {
-    if item.id().is_none_or(|id| id.is_empty())
-        && let Some(prefix) = item.id_prefix()
-    {
+    if let Some(prefix) = missing_item_id_prefix(item) {
         item.set_id(Some(context_ids.next_item(prefix)));
+    }
+}
+
+fn assign_missing_shared_item_id(
+    item: &mut Arc<ResponseItem>,
+    context_ids: &codex_thread_context_ids::ThreadContextIds,
+) {
+    if let Some(prefix) = missing_item_id_prefix(item) {
+        Arc::make_mut(item).set_id(Some(context_ids.next_item(prefix)));
+    }
+}
+
+fn missing_item_id_prefix(item: &ResponseItem) -> Option<&'static str> {
+    if item.id().is_none_or(|id| id.is_empty()) {
+        item.id_prefix()
+    } else {
+        None
     }
 }
 
@@ -2114,7 +2129,7 @@ impl Session {
                 let turn_context = self.new_default_turn().await;
                 for record in &mut rollout_items {
                     if let RolloutItem::ResponseItem(envelope) = record {
-                        self.assign_missing_response_item_id(Arc::make_mut(&mut envelope.item));
+                        assign_missing_shared_item_id(&mut envelope.item, &self.context_ids);
                     }
                 }
                 self.apply_rollout_reconstruction(&turn_context, &rollout_items)
@@ -5326,7 +5341,7 @@ impl Session {
             self.context_ids
                 .assign_prefix_ids(fresh.map(|entry| Arc::make_mut(&mut entry.item)));
             for envelope in &mut items {
-                self.assign_missing_response_item_id(Arc::make_mut(&mut envelope.item));
+                assign_missing_shared_item_id(&mut envelope.item, &self.context_ids);
             }
             // Goal edits are published outside the running task. Keep edits accepted after
             // the compaction input snapshot, in their original order, after its replacement.
@@ -5844,6 +5859,11 @@ impl Session {
     pub(crate) async fn clone_history(&self) -> ContextManager {
         let state = self.state.lock().await;
         state.clone_history()
+    }
+
+    pub(crate) async fn shared_history_items(&self) -> Arc<Vec<ResponseItemEnvelope>> {
+        let state = self.state.lock().await;
+        state.history.shared_annotated_items()
     }
 
     /// Captures the history lifetime without exposing mutable session state.

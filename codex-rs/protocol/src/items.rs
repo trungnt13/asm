@@ -808,6 +808,10 @@ pub fn parse_hook_prompt_message(
 }
 
 pub fn parse_hook_prompt_fragment(text: &str) -> Option<HookPromptFragment> {
+    // A hook run ID must appear as an XML attribute.
+    if !text.contains('<') {
+        return None;
+    }
     let trimmed = text.trim();
     let HookPromptXml { text, hook_run_id } = from_xml_str::<HookPromptXml>(trimmed).ok()?;
     if hook_run_id.trim().is_empty() {
