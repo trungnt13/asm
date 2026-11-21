@@ -46,11 +46,18 @@ pub(crate) fn remove_collaboration_role_instructions(input: &mut Vec<Arc<Respons
         let is_role = |index: usize, content: &ContentItem| {
             let kind = kinds.get(index).map_or("", |kind| kind.as_str());
             kind == MultiAgentRoleInstructions::KIND
-                // Older rollouts use the same kind as the harness's fork boundary.
+                // Older rollouts could omit provenance. Preserve their known fork
+                // boundary, not the stale role hints that shared its kind.
                 || kind == MultiAgentUsageHint::KIND
-                    && sources.get(index).is_some_and(|source| {
-                        matches!(source.provenance, ContentItemProvenance::Tool { .. })
-                    })
+                    && match sources.get(index).map(|source| &source.provenance) {
+                        Some(ContentItemProvenance::Tool { .. }) => true,
+                        None | Some(ContentItemProvenance::Unknown) => matches!(
+                            content,
+                            ContentItem::InputText { text }
+                                if !text.starts_with("You are now a newly spawned child agent. ")
+                        ),
+                        Some(_) => false,
+                    }
                 || matches!(kind, "" | "unknown")
                     && matches!(content, ContentItem::InputText { text } if MultiAgentRoleInstructions::matches_text(text))
         };
