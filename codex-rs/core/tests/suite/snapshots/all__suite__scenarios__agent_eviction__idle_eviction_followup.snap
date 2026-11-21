@@ -1,18 +1,17 @@
 ---
 source: core/tests/suite/scenarios_agent_eviction_tests.rs
-assertion_line: 275
 expression: "format!(\"{history}\\n\\nResumed worker mailbox:\\n{mailbox}\")"
 ---
 Scenario: A parent with no configured environment delegates an API migration, queues a note while the worker is idle, and follows up after idle eviction. The worker temporarily attaches a workspace, then resumes with no environment, its earlier answer, and the unread note. Complete model streams are grouped as parent, then worker.
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=986c496967009f45):
+00:additional_tools/developer (2; hash=316a5129e8f3824e):
         - namespace/functions; hash=00038ed0481eceeb
           - custom/exec
           - function/wait
           - function/request_user_input
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=dfc7229f861c7bcf
+        - namespace/agents: Tools for spawning and managing sub-agents.; hash=8ce3162f68b375be
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
@@ -32,30 +31,30 @@ Scenario: A parent with no configured environment delegates an API migration, qu
 06:message/user:
     Run spawn_agent for the API migration.
 -- request 2 (turn) --
-07:function_call/collaboration.spawn_agent:{"fork_turns":"none","message":"Check who owns the API migration.","task_name":"worker"}
+07:function_call/agents.spawn_agent:{"fork_turns":"none","message":"Check who owns the API migration.","task_name":"worker"}
 08:function_call_output:{"task_name":"/root/worker"}
 -- request 3 (turn) --
 09:message/user:
     Run send_message for the API migration.
 -- request 4 (turn) --
-10:function_call/collaboration.send_message:{"message":"Use the new API for the migration.","target":"worker"}
+10:function_call/agents.send_message:{"message":"Use the new API for the migration.","target":"worker"}
 11:function_call_output:
 12:agent_message
 -- request 5 (turn) --
 13:message/user:
     Run followup_task for the API migration.
 -- request 6 (turn) --
-14:function_call/collaboration.followup_task:{"message":"Continue the migration with the queued note.","target":"worker"}
+14:function_call/agents.followup_task:{"message":"Continue the migration with the queued note.","target":"worker"}
 15:function_call_output:
 
 ## Window 2 (after request 6: input diverged at item 03)
 -- request 7 (turn) --
-00:additional_tools/developer (2; hash=986c496967009f45):
+00:additional_tools/developer (2; hash=316a5129e8f3824e):
         - namespace/functions; hash=00038ed0481eceeb
           - custom/exec
           - function/wait
           - function/request_user_input
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=dfc7229f861c7bcf
+        - namespace/agents: Tools for spawning and managing sub-agents.; hash=8ce3162f68b375be
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents

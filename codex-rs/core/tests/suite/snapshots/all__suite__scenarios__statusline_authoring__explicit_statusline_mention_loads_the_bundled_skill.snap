@@ -1,13 +1,12 @@
 ---
 source: core/tests/suite/scenarios_statusline_authoring_tests.rs
-assertion_line: 44
 expression: "context_snapshot::format_request_history_snapshot(\"A user requests the bundled statusline skill by name.\",\n&mock.requests(),\n&ContextSnapshotOptions::default().rewrite_known_segments(),)"
 ---
 Scenario: A user requests the bundled statusline skill by name.
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=6e484ca7819c8fe6):
+00:additional_tools/developer (3; hash=9cb384a026c8cd09):
         - namespace/functions; hash=c2cdcb8626fae9fd
           - custom/exec
           - function/wait
@@ -15,7 +14,7 @@ Scenario: A user requests the bundled statusline skill by name.
           - function/request_user_input_async
         - namespace/clock: Tools for reading and waiting on time.; hash=7c9fa8bed22f77c8
           - function/sleep
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=dfc7229f861c7bcf
+        - namespace/agents: Tools for spawning and managing sub-agents.; hash=8ce3162f68b375be
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
