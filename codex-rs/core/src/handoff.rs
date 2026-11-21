@@ -21,6 +21,7 @@ use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::TruncationPolicy;
 use codex_protocol::protocol::TurnCompleteEvent;
 use codex_protocol::protocol::TurnStartedEvent;
+use codex_utils_string::serialized_json_bytes;
 
 pub(crate) enum PortableHistory {
     Visible,
@@ -39,6 +40,16 @@ pub(crate) fn project(
         |context_ids| ContextManager::new(context_ids, /*retention*/ None),
         TruncationPolicy::Bytes(0),
     );
+    let check_limit = |bytes| {
+        if bytes > max_history_bytes {
+            return Err(CodexErr::InvalidRequest(format!(
+                "handoff history needs at least {bytes} bytes; handoff.max_history_bytes is {max_history_bytes}"
+            )));
+        }
+        Ok(())
+    };
+    let mut bytes = 2usize; // JSON array brackets.
+    check_limit(bytes)?;
     let mut items = Vec::new();
     let mut last_source_turn = None;
     let mut turn_id = crate::session::new_submission_id();
@@ -64,21 +75,19 @@ pub(crate) fn project(
             continue;
         }
         let mut portable = Vec::new();
+        let prefix_bytes = bytes.saturating_add(usize::from(!items.is_empty()));
+        let mut payload_bytes = prefix_bytes;
         for (index, part) in crate::event_mapping::user_input_parts(content) {
-            match (role.as_str(), part) {
+            let payload_len = match (role.as_str(), part) {
                 (
                     "assistant",
                     ContentItem::InputText { text } | ContentItem::OutputText { text, .. },
-                ) if !text.is_empty() => portable.push(ContentItem::OutputText {
-                    text: text.clone(),
-                    annotations: None,
-                    logprobs: None,
-                }),
+                ) if !text.is_empty() => text.len(),
                 ("user", part) if is_authored(metadata.as_ref(), index) => match part {
                     ContentItem::InputText { text }
-                        if !text.is_empty() && !RealtimeDelegation::matches_text(text) =>
+                        if !text.is_empty() && !is_legacy_realtime_wrapper(text) =>
                     {
-                        portable.push(part.clone())
+                        text.len()
                     }
                     ContentItem::InputImage {
                         image: ImageReference::Inline { image_url },
@@ -94,7 +103,7 @@ pub(crate) fn project(
                             )
                     }) =>
                     {
-                        portable.push(part.clone())
+                        image_url.len()
                     }
                     ContentItem::InputImage { .. } | ContentItem::InputAudio { .. } => {
                         return Err(CodexErr::InvalidRequest(
@@ -102,10 +111,25 @@ pub(crate) fn project(
                                 .to_owned(),
                         ));
                     }
-                    ContentItem::InputText { .. } | ContentItem::OutputText { .. } => {}
+                    ContentItem::InputText { .. } | ContentItem::OutputText { .. } => continue,
                 },
-                _ => {}
-            }
+                _ => continue,
+            };
+            // A JSON string cannot be shorter than its raw UTF-8 payload.
+            payload_bytes = payload_bytes.saturating_add(payload_len);
+            check_limit(payload_bytes)?;
+            portable.push(match part {
+                ContentItem::InputText { text } | ContentItem::OutputText { text, .. }
+                    if role == "assistant" =>
+                {
+                    ContentItem::OutputText {
+                        text: text.clone(),
+                        annotations: None,
+                        logprobs: None,
+                    }
+                }
+                part => part.clone(),
+            });
         }
         if portable.is_empty() {
             continue;
@@ -117,7 +141,7 @@ pub(crate) fn project(
             turn_id = crate::session::new_submission_id();
             last_source_turn = source_turn.map(str::to_owned);
         }
-        items.push(ResponseItemEnvelope {
+        let envelope = ResponseItemEnvelope {
             item: ResponseItem::Message {
                 id: None,
                 status: None,
@@ -148,14 +172,10 @@ pub(crate) fn project(
                 portable_handoff: true,
                 ..Default::default()
             }),
-        });
-    }
-    let messages: Vec<_> = items.iter().map(|envelope| &envelope.item).collect();
-    let byte_count = serde_json::to_vec(&messages)?.len();
-    if byte_count > max_history_bytes {
-        return Err(CodexErr::InvalidRequest(format!(
-            "handoff history needs {byte_count} bytes; handoff.max_history_bytes is {max_history_bytes}"
-        )));
+        };
+        bytes = prefix_bytes.saturating_add(serialized_json_bytes(envelope.item.as_ref())?);
+        check_limit(bytes)?;
+        items.push(envelope);
     }
     Ok(items)
 }
@@ -231,4 +251,23 @@ fn is_authored(metadata: Option<&InternalChatMessageMetadataPassthrough>, index:
         }
         _ => false,
     }
+}
+
+fn is_legacy_realtime_wrapper(text: &str) -> bool {
+    // Old realtime writers recorded these rendered transcripts as ordinary user input.
+    // Only the generated layout is ambiguous, not text merely enclosed in the tag.
+    let (open, close) = RealtimeDelegation::type_markers();
+    text.strip_prefix(open)
+        .and_then(|body| body.strip_suffix(close))
+        .map(|body| {
+            body.strip_prefix("\n  <source>transcript_tail_flush</source>")
+                .unwrap_or(body)
+        })
+        .and_then(|body| body.strip_prefix("\n  <input>"))
+        .and_then(|body| body.split_once("</input>\n"))
+        .is_some_and(|(_, tail)| {
+            tail.is_empty()
+                || (tail.starts_with("  <transcript_delta>")
+                    && tail.ends_with("</transcript_delta>\n"))
+        })
 }
