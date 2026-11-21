@@ -384,6 +384,8 @@ pub struct StartThreadOptions {
     pub thread_instructions_provider: Option<Arc<dyn ThreadInstructionsProvider>>,
     pub allow_provider_model_fallback: bool,
     pub initial_history: InitialHistory,
+    /// Resolved provider of the fork source, which may not own the history's session header.
+    pub fork_source_provider: Option<String>,
     /// Store-owned state prepared while loading the resumed history.
     pub resume_preparation: Option<ThreadStoreResumePreparation>,
     /// Parent captured for `start_thread`, including a parent not in the live registry.
@@ -470,6 +472,7 @@ impl StartThreadOptions {
             thread_instructions_provider: None,
             allow_provider_model_fallback: false,
             initial_history: InitialHistory::New,
+            fork_source_provider: None,
             resume_preparation: None,
             internal_parent: None,
             history_mode: None,
@@ -1977,10 +1980,13 @@ impl ThreadManager {
             InitialHistory::Forked(_) => history.forked_from_id(),
             InitialHistory::New | InitialHistory::Cleared => None,
         };
-        let source_provider = history
-            .get_session_meta()
-            .filter(|meta| Some(meta.id) == source_thread_id)
-            .and_then(|meta| meta.model_provider.as_deref());
+        let source_provider = options.fork_source_provider.take();
+        let source_provider = source_provider.as_deref().or_else(|| {
+            history
+                .get_session_meta()
+                .filter(|meta| Some(meta.id) == source_thread_id)
+                .and_then(|meta| meta.model_provider.as_deref())
+        });
         let native_source = crate::session::history_native_model(&history);
         let native_target = options
             .config
@@ -2782,6 +2788,7 @@ impl ThreadManagerState {
             HistoryInitialization::from_history(&options.initial_history)
         };
         let StartThreadOptions {
+            fork_source_provider: _,
             mut config,
             prevent_daybreak_program_propagation_enrollment,
             request_country,

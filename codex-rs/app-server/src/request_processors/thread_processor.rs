@@ -6069,6 +6069,7 @@ impl ThreadRequestProcessor {
         );
         let fork_options = StartThreadOptions {
             attached_thread: attach_to_source,
+            fork_source_provider: Some(source_thread.model_provider.clone()),
             thread_source,
             parent_trace,
             reserved_thread_id,
