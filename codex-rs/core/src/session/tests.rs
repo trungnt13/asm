@@ -299,6 +299,7 @@ impl StepContext {
         });
         settings.service_tier = turn.config.service_tier.clone();
         Arc::new(Self {
+            active_collaboration_mode: settings.active_collaboration_mode(/*previous*/ None),
             sampled_through_sequence: None,
             turn_cancellation: tokio_util::sync::CancellationToken::new(),
             preempt: turn
@@ -6877,7 +6878,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         forked_from_ordinal_exclusive: None,
         next_internal_sub_id: AtomicU64::new(0),
     };
-    let per_turn_config = session.build_per_turn_config(
+    let per_turn_config = Session::build_per_turn_config(
         &session_configuration,
         resolved_turn_environments.local_selection(),
     );
@@ -7700,7 +7701,7 @@ async fn request_permissions_tool_resolves_legacy_paths_against_selected_environ
                 turn: turn_context,
                 cancellation_token: CancellationToken::new(),
                 tracker,
-                call_id,
+                call_id: call_id.into(),
                 tool_name: codex_tools::ToolName::plain("request_permissions"),
                 source: ToolCallSource::Direct,
                 native_call: None,
@@ -7786,7 +7787,7 @@ async fn request_permissions_tool_rejects_invalid_requests(
         turn: turn_context,
         cancellation_token: CancellationToken::new(),
         tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
-        call_id: "call-1".to_string(),
+        call_id: "call-1".into(),
         tool_name: codex_tools::ToolName::plain("request_permissions"),
         source: ToolCallSource::Direct,
         native_call: None,
@@ -9246,7 +9247,7 @@ where
         forked_from_ordinal_exclusive: None,
         next_internal_sub_id: AtomicU64::new(0),
     });
-    let per_turn_config = session.build_per_turn_config(
+    let per_turn_config = Session::build_per_turn_config(
         &session_configuration,
         resolved_turn_environments.local_selection(),
     );
@@ -13311,7 +13312,7 @@ async fn unified_exec_rejects_escalated_permissions_when_policy_not_on_request()
             step_context,
             cancellation_token: CancellationToken::new(),
             tracker: Arc::clone(&tracker),
-            call_id: "exec-call".to_string(),
+            call_id: "exec-call".into(),
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: crate::tools::context::ToolCallSource::Direct,
             native_call: None,
@@ -13535,4 +13536,14 @@ async fn rejected_mcp_refresh_then_corrected_user_config_blocks_ordinary_replace
             .is_some_and(|server| server.enabled),
         "rejection must not permit same-name ordinary-auth replacement in this session"
     );
+}
+
+impl TurnContext {
+    pub(crate) fn to_turn_context_item(&self) -> TurnContextItem {
+        self.context_item_with_mode(
+            self.initial_settings
+                .active_collaboration_mode(/*previous*/ None)
+                .map(|_| self.collaboration_mode()),
+        )
+    }
 }

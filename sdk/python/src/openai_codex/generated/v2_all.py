@@ -1851,23 +1851,6 @@ class GatewayOAuthCancelResponse(BaseModel):
     )
 
 
-class GatewayOAuthLoginParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    device_auth: Annotated[
-        bool | None,
-        Field(
-            alias="deviceAuth",
-            description="Select device authorization when the server advertises support for it.",
-        ),
-    ] = None
-    model_provider: Annotated[
-        str | None,
-        Field(alias="modelProvider", description="Defaults to the current provider when omitted."),
-    ] = None
-
-
 class GatewayOAuthPrompt(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -1892,6 +1875,22 @@ class GatewayOAuthStatus(Enum):
     started = "started"
     succeeded = "succeeded"
     failed = "failed"
+
+
+class ConfigServerGatewayOAuthTarget(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    kind: Literal["configServer"]
+
+
+class GatewayOAuthTarget(RootModel[ConfigServerGatewayOAuthTarget]):
+    root: Annotated[
+        ConfigServerGatewayOAuthTarget,
+        Field(
+            description="An explicit service to authorize instead of the selected model provider."
+        ),
+    ]
 
 
 class GcpProviderId(RootModel[Literal["gcp"]]):
@@ -3170,10 +3169,6 @@ class NetworkUnixSocketPermission(Enum):
 class NonSteerableTurnKind(Enum):
     review = "review"
     compact = "compact"
-
-
-class NullableGatewayOAuthLoginParams(RootModel[GatewayOAuthLoginParams | None]):
-    root: Annotated[GatewayOAuthLoginParams | None, Field(title="Nullable_GatewayOAuthLoginParams")]
 
 
 class NullableGatewayOAuthReadParams(RootModel[GatewayOAuthReadParams | None]):
@@ -5304,6 +5299,15 @@ class SpendControlLimitSnapshot(BaseModel):
     used: str
 
 
+class StartupGatewayOAuthChangedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    auth_url: Annotated[str, Field(alias="authUrl")]
+    status: GatewayOAuthStatus
+    target: GatewayOAuthTarget
+
+
 class StrictReviewRequiredNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -6079,6 +6083,13 @@ class FileIdThreadItem(BaseModel):
         ),
     ] = None
     id: str
+    image_metadata: Annotated[
+        dict[str, Any] | None,
+        Field(
+            alias="imageMetadata",
+            description="Per-image metadata selected by the backend for the receiving surface.",
+        ),
+    ] = None
     input_images: Annotated[
         list[ImageGenerationInputImage] | None,
         Field(
@@ -6121,6 +6132,13 @@ class ResultThreadItem(BaseModel):
         ),
     ] = None
     id: str
+    image_metadata: Annotated[
+        dict[str, Any] | None,
+        Field(
+            alias="imageMetadata",
+            description="Per-image metadata selected by the backend for the receiving surface.",
+        ),
+    ] = None
     input_images: Annotated[
         list[ImageGenerationInputImage] | None,
         Field(
@@ -8337,18 +8355,6 @@ class AccountGatewayOAuthReadRequest(BaseModel):
     params: GatewayOAuthReadParams | None = None
 
 
-class AccountGatewayOAuthLoginRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[
-        Literal["account/gatewayOAuth/login"],
-        Field(title="Account/gatewayOAuth/loginRequestMethod"),
-    ]
-    params: GatewayOAuthLoginParams | None = None
-
-
 class AccountGatewayOAuthCancelRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9181,6 +9187,29 @@ class GatewayOAuthChangedNotification(BaseModel):
     status: GatewayOAuthStatus
 
 
+class GatewayOAuthLoginParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    device_auth: Annotated[
+        bool | None,
+        Field(
+            alias="deviceAuth",
+            description="Select device authorization when the server advertises support for it.",
+        ),
+    ] = None
+    model_provider: Annotated[
+        str | None,
+        Field(alias="modelProvider", description="Defaults to the current provider when omitted."),
+    ] = None
+    target: Annotated[
+        GatewayOAuthTarget | None,
+        Field(
+            description="Available only on `--startup-oauth`. Mutually exclusive with `modelProvider`."
+        ),
+    ] = None
+
+
 class GatewayOAuthLoginResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9817,6 +9846,10 @@ class NewThreadModelDefaults(BaseModel):
         ReasoningEffort | None, Field(alias="modelReasoningEffort")
     ] = None
     service_tier: Annotated[str | None, Field(alias="serviceTier")] = None
+
+
+class NullableGatewayOAuthLoginParams(RootModel[GatewayOAuthLoginParams | None]):
+    root: Annotated[GatewayOAuthLoginParams | None, Field(title="Nullable_GatewayOAuthLoginParams")]
 
 
 class OtlpHttp(BaseModel):
@@ -12043,6 +12076,18 @@ class ReviewStartRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["review/start"], Field(title="Review/startRequestMethod")]
     params: ReviewStartParams
+
+
+class AccountGatewayOAuthLoginRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["account/gatewayOAuth/login"],
+        Field(title="Account/gatewayOAuth/loginRequestMethod"),
+    ]
+    params: GatewayOAuthLoginParams | None = None
 
 
 class ModelProviderConfigWriteRequest(BaseModel):

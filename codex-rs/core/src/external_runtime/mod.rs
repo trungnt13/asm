@@ -285,8 +285,9 @@ async fn run_conversation(
         bail!("structured output is not supported; start a native-model chat");
     }
     // Resume reads this native metadata; no ASM context is generated or sent to Claude.
+    let context_item = turn.context_item_with_mode(Some(turn.collaboration_mode()));
     if !session
-        .persist_rollout_items(&[RolloutItem::TurnContext(turn.to_turn_context_item())])
+        .persist_rollout_items(&[RolloutItem::TurnContext(context_item)])
         .await
     {
         bail!("could not persist native turn settings");

@@ -110,8 +110,12 @@ impl WriteStdinHandler {
             None
         };
         let preempt = step_context.preempt.clone();
-        let context =
-            UnifiedExecContext::new(session.clone(), step_context, cancellation_token, call_id);
+        let context = UnifiedExecContext::new(
+            session.clone(),
+            step_context,
+            cancellation_token,
+            call_id.into(),
+        );
         let mut response = session
             .services
             .unified_exec_manager

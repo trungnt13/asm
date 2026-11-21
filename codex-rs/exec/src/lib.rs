@@ -11,6 +11,7 @@ mod event_processor;
 mod event_processor_with_human_output;
 pub(crate) mod event_processor_with_jsonl_output;
 pub(crate) mod exec_events;
+mod mcp_log_filter;
 mod remote;
 mod worktree;
 
@@ -187,7 +188,8 @@ use crate::cli::Command as ExecCommand;
 use crate::event_processor::EventProcessor;
 
 const DEFAULT_ANALYTICS_ENABLED: bool = true;
-const EXEC_DEFAULT_LOG_FILTER: &str = "error,opentelemetry_sdk=off,opentelemetry_otlp=off";
+const EXEC_DEFAULT_LOG_FILTER: &str =
+    "error,codex_mcp_startup=warn,opentelemetry_sdk=off,opentelemetry_otlp=off";
 
 enum InitialOperation {
     ForkOnly,
@@ -267,12 +269,16 @@ fn exec_root_span() -> tracing::Span {
     )
 }
 
-fn exec_stderr_env_filter() -> EnvFilter {
+fn exec_stderr_env_filter() -> (EnvFilter, Option<mcp_log_filter::McpWorkerFilter>) {
     // OTEL export is best-effort; keep exporter self-diagnostics out of
     // headless command output unless the caller opts in with RUST_LOG.
-    EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new(EXEC_DEFAULT_LOG_FILTER))
-        .unwrap_or_else(|_| EnvFilter::new("error"))
+    match EnvFilter::try_from_default_env() {
+        Ok(filter) => (filter, None),
+        Err(_) => (
+            EnvFilter::try_new(EXEC_DEFAULT_LOG_FILTER).unwrap_or_else(|_| EnvFilter::new("error")),
+            Some(mcp_log_filter::McpWorkerFilter),
+        ),
+    }
 }
 
 pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
@@ -747,12 +753,17 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
 
     let otel_tracing_layer = otel.as_ref().and_then(|o| o.tracing_layer());
 
-    let fmt_layer = config.diagnostic_log_capture.then(|| {
-        tracing_subscriber::fmt::layer()
-            .with_ansi(stderr_with_ansi)
-            .with_writer(std::io::stderr)
-            .with_filter(exec_stderr_env_filter())
-    });
+    let (stderr_env_filter, mcp_worker_filter) = if config.diagnostic_log_capture {
+        exec_stderr_env_filter()
+    } else {
+        // Keep sanitized startup warnings visible without enabling diagnostic logs.
+        (EnvFilter::new("off,codex_mcp_startup=warn"), None)
+    };
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_ansi(stderr_with_ansi)
+        .with_writer(std::io::stderr)
+        .with_filter(mcp_worker_filter)
+        .with_filter(stderr_env_filter);
     let _ = tracing_subscriber::registry()
         .with(fmt_layer)
         .with(otel_tracing_layer)
@@ -1593,7 +1604,8 @@ async fn finish_turn(
             AppServerEvent::ThreadStreamDisconnected(error) => {
                 anyhow::bail!("app-server stream disconnected: {}", error.error.message)
             }
-            AppServerEvent::ThreadStreamReconnected(_) => {}
+            AppServerEvent::CloudInventoryChanged(_)
+            | AppServerEvent::ThreadStreamReconnected(_) => {}
             AppServerEvent::Lagged { skipped } => {
                 let message = lagged_event_warning_message(skipped);
                 warn!("{message}");

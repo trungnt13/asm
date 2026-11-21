@@ -239,7 +239,7 @@ async fn to_extension_call<'a>(
         .and_then(|metadata| to_ascii_json_string(&metadata).ok());
     ExtensionToolCall {
         turn_id: invocation.turn.sub_id.clone(),
-        call_id: invocation.call_id.clone(),
+        call_id: invocation.call_id.to_string(),
         tool_name: invocation.tool_name.clone(),
         model: settings.model_info.slug.clone(),
         codex_turn_metadata,
@@ -429,7 +429,7 @@ mod tests {
             turn,
             cancellation_token: tokio_util::sync::CancellationToken::new(),
             tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
-            call_id: "call-extension".to_string(),
+            call_id: "call-extension".into(),
             tool_name: codex_tools::ToolName::plain("extension_echo"),
             source: ToolCallSource::Direct,
             native_call: None,
@@ -528,7 +528,7 @@ mod tests {
             turn,
             cancellation_token: tokio_util::sync::CancellationToken::new(),
             tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
-            call_id: "call-extension".to_string(),
+            call_id: "call-extension".into(),
             tool_name: codex_tools::ToolName::plain("extension_echo"),
             source: ToolCallSource::CodeMode {
                 cell_id: "cell-1".to_string(),
@@ -622,6 +622,7 @@ mod tests {
             input_images: Vec::new(),
             imagegen_request_id: None,
             generation_id: None,
+            image_metadata: Default::default(),
         });
         let expected_completed_item = ExtensionItem::ImageGeneration(ImageGenerationItem {
             id: "call-image".to_string(),
@@ -636,6 +637,7 @@ mod tests {
             input_images: Vec::new(),
             imagegen_request_id: None,
             generation_id: None,
+            image_metadata: Default::default(),
         });
         codex_tools::TurnItemEmitter::emit_started(
             &emitter,
@@ -663,6 +665,7 @@ mod tests {
                     saved_path: Some(expected_path.clone()),
                     input_images: Vec::new(),
                     generation_id: None,
+                    image_metadata: Default::default(),
                 })],
             },
         )

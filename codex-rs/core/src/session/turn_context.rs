@@ -946,7 +946,10 @@ impl TurnContext {
         }
     }
 
-    pub(crate) fn to_turn_context_item(&self) -> TurnContextItem {
+    pub(crate) fn context_item_with_mode(
+        &self,
+        collaboration_mode: Option<CollaborationMode>,
+    ) -> TurnContextItem {
         #[allow(deprecated)]
         let cwd = self.cwd.clone();
         TurnContextItem {
@@ -967,7 +970,7 @@ impl TurnContext {
             ),
             model: self.model_info().slug.clone(),
             comp_hash: self.model_info().comp_hash.clone(),
-            collaboration_mode: Some(self.collaboration_mode()),
+            collaboration_mode,
             multi_agent_version: Some(self.multi_agent_version),
             realtime_active: Some(self.realtime_active),
             cyber_access_program: self.cyber_access_program,
@@ -998,7 +1001,6 @@ fn local_time_context() -> (String, String) {
 impl Session {
     /// Don't expand the number of mutated arguments on config. We are in the process of getting rid of it.
     pub(crate) fn build_per_turn_config(
-        &self,
         session_configuration: &SessionConfiguration,
         local_environment: Option<&TurnEnvironmentSelection>,
     ) -> Config {
@@ -1037,17 +1039,25 @@ impl Session {
         per_turn_config.approvals_reviewer = session_configuration.step_settings.approvals_reviewer;
         session_configuration
             .apply_permission_profile_to_permissions(&mut per_turn_config.permissions);
-        let permission_profile = session_configuration.permission_profile();
+        Self::apply_effective_web_search_mode(session_configuration, &mut per_turn_config);
+        per_turn_config.features = config.features.clone();
+        per_turn_config
+    }
+
+    pub(super) fn apply_effective_web_search_mode(
+        session_configuration: &SessionConfiguration,
+        config: &mut Config,
+    ) {
         let resolved_web_search_mode = resolve_web_search_mode_for_turn(
-            &per_turn_config.web_search_mode,
-            &permission_profile,
+            &config.web_search_mode,
+            config.web_search_mode_was_explicit,
+            session_configuration
+                .permission_profile_state
+                .permission_profile(),
             session_configuration.provider.capabilities(),
         );
-        if let Err(err) = per_turn_config
-            .web_search_mode
-            .set(resolved_web_search_mode)
-        {
-            let fallback_value = per_turn_config.web_search_mode.value();
+        if let Err(err) = config.web_search_mode.set(resolved_web_search_mode) {
+            let fallback_value = config.web_search_mode.value();
             tracing::warn!(
                 error = %err,
                 ?resolved_web_search_mode,
@@ -1055,15 +1065,12 @@ impl Session {
                 "resolved web_search_mode is disallowed by requirements; keeping constrained value"
             );
         }
-        per_turn_config.features = config.features.clone();
-        per_turn_config
     }
 
     pub(crate) fn build_effective_session_config(
-        &self,
         session_configuration: &SessionConfiguration,
     ) -> Config {
-        let mut config = self.build_per_turn_config(
+        let mut config = Self::build_per_turn_config(
             session_configuration,
             session_configuration
                 .environments
@@ -1243,10 +1250,8 @@ impl Session {
         let refresh_client = {
             let state = self.state.lock().await;
             let configuration = &state.session_configuration;
-            (!crate::guardian::is_basic_session_source(&configuration.session_source)).then(|| {
-                self.build_effective_session_config(configuration)
-                    .http_client_factory()
-            })
+            (!crate::guardian::is_basic_session_source(&configuration.session_source))
+                .then(|| Self::build_effective_session_config(configuration).http_client_factory())
         };
         // An auth refresh may change allowed settings; finish it before capturing this turn.
         if let Some(http_client_factory) = refresh_client {
@@ -1338,8 +1343,10 @@ impl Session {
         git_enrichment_policy: GitEnrichmentPolicy,
     ) -> Arc<TurnContext> {
         let primary_turn_environment = turn_environments.primary();
-        let mut per_turn_config =
-            self.build_per_turn_config(&session_configuration, turn_environments.local_selection());
+        let mut per_turn_config = Self::build_per_turn_config(
+            &session_configuration,
+            turn_environments.local_selection(),
+        );
         let overridden_direct_only_tool_namespaces =
             options.direct_only_tool_namespaces.map(|namespaces| {
                 std::mem::replace(
