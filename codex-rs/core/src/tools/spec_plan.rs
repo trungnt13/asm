@@ -728,6 +728,9 @@ fn collab_tools_enabled(turn_context: &TurnContext, model_info: &ModelInfo) -> b
         MultiAgentVersion::Disabled | MultiAgentVersion::V1 => false,
         MultiAgentVersion::V2 => {
             !turn_context.config.multi_agent_v2.disable_native_tools
+                && !turn_context
+                    .config
+                    .subagent_collaboration_disabled(&turn_context.session_source)
                 && (turn_context.session_source.get_agent_path().is_none()
                     || model_info.multi_agent_version == Some(MultiAgentVersion::V2))
         }
@@ -1548,6 +1551,12 @@ pub(crate) fn register_multi_agent_v2_communication_tools(
     exposure: ToolExposure,
     registry: &mut ToolRegistry,
 ) {
+    if turn_context
+        .config
+        .subagent_collaboration_disabled(&turn_context.session_source)
+    {
+        return;
+    }
     let tool_namespace = turn_context.config.multi_agent_v2.tool_namespace.as_deref();
     let native_review = if turn_context
         .config

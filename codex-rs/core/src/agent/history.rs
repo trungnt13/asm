@@ -604,6 +604,7 @@ pub(super) async fn prepare_forked_history(
     }
     if preserve_context_baselines
         && multi_agent_version == MultiAgentVersion::V2
+        && config.subagent_tools.collaboration
         && let Some(subagent_usage_hint) = options
             .multi_agent_v2_usage_hints
             .as_ref()

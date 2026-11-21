@@ -64,6 +64,7 @@ pub(crate) async fn apply_role_to_config(
     config: &mut Config,
     role_name: Option<&str>,
 ) -> Result<Option<ReasoningEffort>, String> {
+    config.has_role_base_instructions = false;
     config.role_developer_instructions = None;
     let role_name = role_name.unwrap_or(DEFAULT_ROLE_NAME);
 
@@ -88,7 +89,8 @@ async fn apply_role_to_config_inner(
     let Some(config_file) = role.config_file.as_ref() else {
         return Ok(None);
     };
-    let role_layer_toml = load_role_layer_toml(config, config_file, is_built_in, role_name).await?;
+    let (role_layer_toml, base_instructions) =
+        load_role_layer_toml(config, config_file, is_built_in, role_name).await?;
     let system1 = role_layer_toml
         .get("system1")
         .or_else(|| role_layer_toml.get("adaptive_reasoning"));
@@ -160,13 +162,17 @@ async fn apply_role_to_config_inner(
     }
 
     let role_layer_toml = TomlValue::try_from(&overrides)?;
-    if role_layer_toml
+    if !role_layer_toml
         .as_table()
         .is_some_and(toml::map::Map::is_empty)
     {
-        return Ok(None);
+        *config = role_overrides::build_next_config(config, role_layer_toml, &overrides)?;
     }
-    *config = role_overrides::build_next_config(config, role_layer_toml, &overrides)?;
+    if let Some(base_instructions) = base_instructions {
+        config.base_instructions = Some(base_instructions);
+        config.base_instructions_provenance = Some(BaseInstructionsProvenance::Custom);
+        config.has_role_base_instructions = true;
+    }
     Ok(overrides.model_reasoning_effort)
 }
 
@@ -175,33 +181,32 @@ async fn load_role_layer_toml(
     config_file: &Path,
     is_built_in: bool,
     role_name: &str,
-) -> anyhow::Result<TomlValue> {
-    let (role_config_toml, role_config_base) = if is_built_in {
+) -> anyhow::Result<(TomlValue, Option<String>)> {
+    let (role_config_toml, role_config_base, base_instructions) = if is_built_in {
         let role_config_contents = built_in::config_file_contents(config_file)
             .map(str::to_owned)
             .ok_or(anyhow!("No corresponding config content"))?;
         let role_config_toml: TomlValue = toml::from_str(&role_config_contents)?;
-        (role_config_toml, config.codex_home.as_path())
+        (role_config_toml, config.codex_home.as_path(), None)
     } else {
         let role_config_contents = read_sensitive_file_to_string(config_file).await?;
         let role_config_base = config_file
             .parent()
             .ok_or(anyhow!("No corresponding config content"))?;
-        let role_config_toml = parse_agent_role_file_contents(
+        let parsed = parse_agent_role_file_contents(
             &role_config_contents,
             config_file,
             role_config_base,
             Some(role_name),
-        )?
-        .config;
-        (role_config_toml, role_config_base)
+        )?;
+        (parsed.config, role_config_base, parsed.base_instructions)
     };
 
     deserialize_config_toml_with_base(role_config_toml.clone(), role_config_base)?;
-    Ok(resolve_relative_paths_in_config_toml(
-        role_config_toml,
-        role_config_base,
-    )?)
+    Ok((
+        resolve_relative_paths_in_config_toml(role_config_toml, role_config_base)?,
+        base_instructions,
+    ))
 }
 
 pub(crate) fn resolve_role_config<'a>(

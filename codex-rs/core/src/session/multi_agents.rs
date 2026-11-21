@@ -15,7 +15,11 @@ const HOSTED_MULTI_AGENT_SKILL_GUIDANCE: &str = "Before calling any multi-agent 
 
 pub(super) fn usage_hint_text(step_context: &StepContext) -> Option<MultiAgentRoleInstructions> {
     let turn_context = step_context.turn.as_ref();
-    if turn_context.multi_agent_version != MultiAgentVersion::V2 {
+    if turn_context.multi_agent_version != MultiAgentVersion::V2
+        || turn_context
+            .config
+            .subagent_collaboration_disabled(&turn_context.session_source)
+    {
         return None;
     }
 
@@ -85,6 +89,15 @@ pub(crate) fn effective_multi_agent_mode(step_context: &StepContext) -> Option<M
     let settings = &step_context.settings;
     if turn_context.multi_agent_version != MultiAgentVersion::V2 {
         return None;
+    }
+    if turn_context
+        .config
+        .subagent_collaboration_disabled(&turn_context.session_source)
+    {
+        return Some(MultiAgentMode::Custom(
+            "Collaboration tools are unavailable to this subagent. Finish the task yourself. Your final response goes to your parent agent."
+                .to_string(),
+        ));
     }
 
     let config = &turn_context.config.multi_agent_v2;

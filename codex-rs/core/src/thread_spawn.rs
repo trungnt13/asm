@@ -185,6 +185,14 @@ pub(crate) async fn prepare(
     request: ThreadCreateRequest,
 ) -> Result<(ChildSpawnSettings, AgentPath), ThreadSpawnError> {
     let turn = &step_context.turn;
+    if turn
+        .config
+        .subagent_collaboration_disabled(&turn.session_source)
+    {
+        return Err(ThreadSpawnError::Preparation(
+            "This subagent is not allowed to spawn agents.".to_string(),
+        ));
+    }
     let child_depth = next_thread_spawn_depth(&turn.session_source);
     if exceeds_thread_spawn_depth_limit(child_depth, turn.config.agent_max_depth) {
         return Err(ThreadSpawnError::Preparation(
@@ -248,6 +256,7 @@ pub(crate) async fn prepare(
     });
     let multi_agent_v2_usage_hints = if matches!(fork_mode, Some(SpawnAgentForkMode::FullHistory))
         && turn.multi_agent_version == MultiAgentVersion::V2
+        && config.subagent_tools.collaboration
     {
         let child_model_info = match config.model.as_deref() {
             Some(model) if model != turn.model_info().slug => Some(

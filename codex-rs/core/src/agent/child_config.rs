@@ -191,6 +191,7 @@ fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, String> {
     let base_config = turn.config.clone();
     let mut config = (*base_config).clone();
     config.role_model_context_window = None;
+    config.has_role_base_instructions = false;
     config.role_developer_instructions = None;
     if let Some((min, max)) = config.role_system1_base_bounds.take() {
         let reset = toml::Value::try_from(serde_json::json!({
