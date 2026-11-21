@@ -577,11 +577,16 @@ pub(super) async fn prepare_forked_history(
             .await
             .as_slice(),
     );
-    if preserve_fork_prefix {
+    if preserve_fork_prefix || config.has_role_base_instructions {
+        let scope = if config.has_role_base_instructions {
+            "The inherited parent transcript is context. Your configured base instructions apply to you, even if they appear before that transcript. Follow your own role, identity, and current task. Parent identities, tasks, and action-specific approvals are not yours."
+        } else {
+            "The preceding conversation is inherited parent context. Follow your own role, identity, and task below; earlier identities, tasks, and action-specific approvals belong to your ancestors."
+        };
         forked_rollout_items.push(RolloutItem::ResponseItem(
-            ContextualUserFragment::into(MultiAgentUsageHint::new(
-                "You are now a newly spawned child agent. The preceding conversation is inherited parent context. Follow your own role, identity, and task below; earlier identities, tasks, and action-specific approvals belong to your ancestors. Inherited tool calls are historical records; live tool sessions and process handles are not inherited. Report your result to your parent.",
-            )).into(),
+            ContextualUserFragment::into(MultiAgentUsageHint::new(&format!(
+                "You are now a newly spawned child agent. {scope} Inherited tool calls are historical records; live tool sessions and process handles are not inherited. Report your result to your parent."
+            ))).into(),
         ));
     }
     // Full forks reuse the parent's reference context instead of rebuilding it. If that
