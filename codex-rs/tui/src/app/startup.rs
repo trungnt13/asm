@@ -57,12 +57,15 @@ pub(super) fn startup_config_cwd<'a>(
     config: &'a Config,
     app_server: &'a AppServerSession,
     app_server_target: &AppServerTarget,
+    resumed_cwd: Option<&'a Path>,
 ) -> &'a Path {
     match app_server_target {
         AppServerTarget::Embedded | AppServerTarget::LocalDaemon { .. } => config.cwd.as_path(),
-        AppServerTarget::Remote { .. } | AppServerTarget::Cloud => {
-            app_server.remote_cwd_override().unwrap_or(Path::new("."))
-        }
+        AppServerTarget::Remote { .. } => app_server
+            .remote_cwd_override()
+            .or(resumed_cwd)
+            .unwrap_or(Path::new(".")),
+        AppServerTarget::Cloud => app_server.remote_cwd_override().unwrap_or(Path::new(".")),
     }
 }
 
@@ -396,7 +399,11 @@ impl App {
                 config.model_reasoning_effort = None;
             }
         }
-        let cwd = startup_config_cwd(&config, &app_server, &app_server_target)
+        let resumed_cwd = match &session_selection {
+            SessionSelection::Resume(target) => target.cwd.as_deref(),
+            _ => None,
+        };
+        let cwd = startup_config_cwd(&config, &app_server, &app_server_target, resumed_cwd)
             .display()
             .to_string();
         let startup_config = match startup_draft
@@ -464,6 +471,13 @@ impl App {
                 }
             },
         };
+        if let Some(defaults) = startup_config.as_ref() {
+            super::new_session::overlay_reasoning_summary(
+                &mut config,
+                &defaults.config,
+                &cli_kv_overrides,
+            );
+        }
         launch_choices.apply_projectless_approval_policy(
             startup_defaults.approval_policy,
             bootstrap.allowed_approval_policies.as_deref(),
@@ -1042,6 +1056,7 @@ See the Codex keymap documentation for supported actions and examples."
             backend_preference_context,
             config,
             local_settings,
+            realtime_call_client: Arc::default(),
             launch_cwd,
             runtime_working_directory_override: None,
             state_db,
@@ -1352,6 +1367,9 @@ See the Codex keymap documentation for supported actions and examples."
         let mut last_screen_size = tui.terminal.last_known_screen_size;
         let mut settled_size_tags = crate::terminal_size_telemetry::tags(last_screen_size);
         let mut pending_resize: Option<(ratatui::layout::Size, Instant)> = None;
+        let mut cloud_inventory_poll = tokio::time::interval(Duration::from_secs(/*secs*/ 10));
+        cloud_inventory_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut cloud_inventory_owner = None;
         let mut reconnect = None;
         let mut cloud_environment_picker: Option<
             futures::future::LocalBoxFuture<'static, crate::bottom_pane::SelectionViewParams>,
@@ -1590,6 +1608,15 @@ See the Codex keymap documentation for supported actions and examples."
                     .chat_widget
                     .rate_limit_refresh_interval()
                     .and_then(|interval| app.rate_limit_refresh_state.poll_deadline(interval));
+                let cloud_owner = (backends.is_listening(displayed_owner)
+                    && backends.session_at(displayed_session).thread_params_mode()
+                        == crate::ThreadParamsMode::Cloud
+                    && app.cloud_inventory_visible(displayed_owner))
+                .then_some(displayed_owner);
+                if cloud_inventory_owner != cloud_owner {
+                    cloud_inventory_owner = cloud_owner;
+                    cloud_inventory_poll.reset();
+                }
                 let control = select! {
                     result = async {
                         match app.daemon_restart.as_mut() {
@@ -1872,6 +1899,13 @@ See the Codex keymap documentation for supported actions and examples."
                         }
                     }, if backends.is_listening(displayed_owner) => {
                         app.refresh_rate_limits(backends.session_at(displayed_session), RateLimitRefreshOrigin::Periodic);
+                        AppRunControl::Continue
+                    }
+                    _ = cloud_inventory_poll.tick(), if cloud_owner.is_some() => {
+                        let session = backends.session_at(displayed_session);
+                        if let AppServerRequestHandle::Cloud(handle) = session.request_handle() {
+                            app.poll_cloud_inventory(session, handle.has_attachment());
+                        }
                         AppRunControl::Continue
                     }
                     () = async {

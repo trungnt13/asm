@@ -1922,6 +1922,11 @@ impl Session {
         state.set_token_info(Some(info));
     }
 
+    #[tracing::instrument(skip_all)]
+    pub(crate) async fn last_sampling_cot_removed(&self) -> Option<bool> {
+        self.state.lock().await.last_sampling_cot_removed
+    }
+
     pub(crate) async fn get_estimated_token_count(
         &self,
         turn_context: &TurnContext,
@@ -2436,7 +2441,7 @@ impl Session {
                             )
                 });
             let previous_config = notify_config_contributors
-                .then(|| self.build_effective_session_config(&state.session_configuration));
+                .then(|| Self::build_effective_session_config(&state.session_configuration));
             let current = &state.session_configuration;
             let refresh_network_proxy = current.permission_profile()
                 != updated.permission_profile()
@@ -2489,7 +2494,7 @@ impl Session {
                 None
             };
             let new_config = notify_config_contributors
-                .then(|| self.build_effective_session_config(&state.session_configuration));
+                .then(|| Self::build_effective_session_config(&state.session_configuration));
             let commit = SessionSettingsCommit {
                 configuration: state.session_configuration.clone(),
                 snapshot: state
@@ -2687,7 +2692,7 @@ impl Session {
                 state.reasoning_effort_pin.clone(),
             )
         };
-        let config = self.build_effective_session_config(&configuration);
+        let config = Self::build_effective_session_config(&configuration);
         if !config.features.enabled(Feature::ReasoningEffortOverride) {
             let model = configuration
                 .step_settings
@@ -4676,7 +4681,7 @@ impl Session {
         // Read the step's model and record its environments together so an update cannot split them.
         // Match apply_turn_settings and activate_turn_environments: active_turn before state.
         // Wait for executor startup below, after releasing both locks.
-        let (mut settings, environments, inherited_environments) = {
+        let (mut settings, active_collaboration_mode, environments, inherited_environments) = {
             // Serialize fallback with accepted manual baseline updates.
             let _settings_guard = thread_settings::acquire_persistence_lock(self)
                 .or_cancel(cancellation_token)
@@ -4696,8 +4701,11 @@ impl Session {
             if !Arc::ptr_eq(&current, &settings) {
                 turn_context.next_step_settings.store(Arc::clone(&settings));
             }
+            let active_collaboration_mode =
+                settings.active_collaboration_mode(state.history.reference_context_item_ref());
             (
                 settings,
+                active_collaboration_mode,
                 self.services.turn_environments.snapshot(),
                 self.features
                     .enabled(Feature::SubagentThreadEnvironments)
@@ -4982,6 +4990,7 @@ impl Session {
         }
         let (executor_hook_sources, mcp, tool_router, extension_data) = prepared_tools??;
         Ok(Arc::new(StepContext {
+            active_collaboration_mode,
             sampled_through_sequence: None,
             serving_assessment: None,
             guardian_probe: None,
@@ -5097,7 +5106,7 @@ impl Session {
                     communication
                         .delivery
                         .as_ref()
-                        .and_then(|d| d.source_tool_call_id.as_deref()),
+                        .and_then(|d| d.source_tool_call_id.as_ref()),
                 );
         }
         if let Some(delivery) = delivery.take() {

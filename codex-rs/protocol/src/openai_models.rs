@@ -874,6 +874,9 @@ pub struct GranularApprovalMessages {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, TS, JsonSchema)]
 pub struct CollaborationModeMessages {
+    /// Optional guidance for Default before the first Plan turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial: Option<String>,
     pub default: Option<String>,
     pub plan: Option<String>,
 }
@@ -1670,6 +1673,7 @@ mod tests {
             ModelMessages {
                 instructions_template: Some("legacy catalog instructions".to_string()),
                 collaboration_modes: Some(CollaborationModeMessages {
+                    initial: None,
                     default: Some(String::new()),
                     plan: None,
                 }),
@@ -1861,6 +1865,7 @@ mod tests {
                 ..Default::default()
             }),
             collaboration_modes: Some(CollaborationModeMessages {
+                initial: Some("initial collaboration".to_string()),
                 default: Some("default collaboration".to_string()),
                 plan: Some("plan collaboration".to_string()),
             }),

@@ -23,6 +23,7 @@ use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
+use codex_protocol::protocol::TurnContextItem;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -98,6 +99,15 @@ impl ResolvedStepSettings {
         self.reasoning_effort()
             .or(self.model_info.default_reasoning_level.as_ref())
             .cloned()
+    }
+
+    pub(super) fn active_collaboration_mode(
+        &self,
+        previous: Option<&TurnContextItem>,
+    ) -> Option<ModeKind> {
+        let mode = self.selected.collaboration_mode.mode;
+        (mode == ModeKind::Plan || previous.is_some_and(|item| item.collaboration_mode.is_some()))
+            .then_some(mode)
     }
 
     pub(crate) fn effective_collaboration_mode(&self) -> CollaborationMode {

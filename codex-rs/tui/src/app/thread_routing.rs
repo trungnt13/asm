@@ -948,6 +948,7 @@ impl App {
                 let config = self.config.clone();
                 let cwd = self.chat_widget.config_ref().cwd.clone();
                 let offer = String::from(offer_sdp.clone());
+                let call_client = Arc::clone(&self.realtime_call_client);
                 let tx = self.app_event_tx.clone();
                 tokio::spawn(async move {
                     let create = async {
@@ -955,7 +956,7 @@ impl App {
                         let thread = server
                             .thread_read(thread_id, /*include_turns*/ false)
                             .await?;
-                        crate::realtime_call::create(&config, &thread, offer, voice).await
+                        call_client.create(&config, &thread, offer, voice).await
                     };
                     if let Ok(result) = futures::future::Abortable::new(create, registration).await
                     {

@@ -3877,6 +3877,7 @@ async fn try_run_sampling_request(
                 token_usage,
                 usage_metadata,
                 generation_duration_ms,
+                reasoning_removals,
                 end_turn,
                 ..
             } => {
@@ -3909,6 +3910,8 @@ async fn try_run_sampling_request(
                     )
                     .await;
                 }
+                sess.state.lock().await.last_sampling_cot_removed =
+                    reasoning_removals.as_ref().map(|counts| !counts.is_empty());
                 response_completed = true;
                 sess.services
                     .analytics_events_client

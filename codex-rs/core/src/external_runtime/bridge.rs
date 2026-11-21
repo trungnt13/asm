@@ -777,7 +777,7 @@ async fn invoke_message_tool(
         .await;
     let call = ToolCall {
         tool_name: tool.name.clone(),
-        call_id,
+        call_id: call_id.into(),
         payload,
         encrypted_function_args: None,
         native_call: Some(Arc::new(item)),
