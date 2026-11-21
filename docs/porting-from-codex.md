@@ -48,7 +48,7 @@ Local profile rules:
 - Preserve explicit supported `--profile`, nextest `--cargo-profile`, and `--release` overrides. Nextest `--profile` selects runner settings, not Cargo settings.
 - Preserve profiles for CI, benchmarks, source-built Dylint, VS Code run/test buttons, inherited Windows setup, and sandbox smoke utilities.
 - Plain Cargo has no local default. For direct build/run/check/clippy, pass `--profile dev-small`. For tests, use `just test`.
-- Never delete caches used by builds/editors. Use optimized/cross-platform local builds only on request or to reproduce affected behavior. Releases use optimized `--release`.
+- Never delete caches used by builds/editors. Use optimized/cross-platform local builds only on request or to reproduce affected behavior.
 
 ### Validate narrowly
 
@@ -64,18 +64,18 @@ Select checks from changed inputs, fork interactions, conflicts, failures, and u
 - Run required generators for changed inputs. Keep schemas, locks, and Bazel data correct without Bazel CI. Reuse upstream outputs only with matching source, generator inputs, output bytes, provenance, and unchanged fork-specific effects. Record proof; regenerate for fork/conflict changes or uncertain evidence.
 - Do not default to whole-crate/workspace suites. If focused checks cannot establish outcome or safety, explain the gap and ask before expansion.
 
-After approved integration, reuse checks and the verified binary pair only with matching effective source, generated files, dependencies, toolchain, features, flags, and pair provenance. Preserve checkout-wrapper isolation; never copy fingerprints to fake freshness. For integration changes or version bumps, rebuild affected binaries and repeat affected checks. Release live/package checks remain separate requirements.
+After approved integration, reuse checks and the verified binary pair only with matching effective source, generated files, dependencies, toolchain, features, flags, and pair provenance. Preserve checkout-wrapper isolation; never copy fingerprints to fake freshness. For integration changes or version bumps, rebuild affected binaries and repeat affected checks.
 
 ### Real-session checks
 
 Before real-provider validation, use [asm-live-check](../.agents/skills/asm-live-check/SKILL.md). Follow its isolation, evidence, and cleanup procedure.
 
 - For isolated live-test CLI launches, including interactive TUI handoffs, pass `--dangerously-bypass-approvals-and-sandbox`. This disables approvals and the ASM sandbox for that run. Use a private test home and a controlled workspace. Omit the flag when testing approvals or sandboxing, or when managed policy requires those controls. Do not change build or installed defaults.
-- Except for [local-only upstream rebases](#local-validation-for-upstream-rebases), every PR needs a successful real-provider live check before readiness. Select the smallest changed-behavior/fork-interaction scenario; state the expected result. Builds, offline checks, and mocks are not substitutes when a live check is required. Missing credentials, budget, or compatible setup block readiness. Do not replay unrelated upstream features or whole sessions. Release smoke remains separately required.
+- Except for [local-only upstream rebases](#local-validation-for-upstream-rebases), every PR needs a successful real-provider live check before readiness. Select the smallest changed-behavior/fork-interaction scenario; state the expected result. Builds, offline checks, and mocks are not substitutes when a live check is required. Missing credentials, budget, or compatible setup block readiness. Do not replay unrelated upstream features or whole sessions.
 - Always choose the cheapest available model that supports the behavior being validated, using current prices and including required helper calls. Do not inherit the interactive model merely because it is configured. Use the lowest adequate reasoning effort and standard speed; apply overrides only in isolated validation state, never personal defaults. Record the model, selection evidence, and budget before calling. If the behavior requires a more expensive model, ask before making that exception.
 - Before calls, set request/turn counts and a time limit. Minimize input/requested output; set supported token limits. Stop at proof or first failure, then inspect evidence. Do not default to broad replays, model matrices, benchmarks, or repeated cold builds.
 - Use existing sign-in only as authorized. No separate spend approval is needed when the conservative estimate for the entire live check is strictly below US$1.00. Record the estimate before making calls, using current provider pricing and the planned request and token limits, including required runtime helper calls. If the cost cannot be estimated or the estimate is US$1.00 or more, get approval for the endpoint, model, request/token limits, and spend cap before making calls.
-- Do not trigger unrelated billable retries, warmups, Decisions calls, or extra subagents. Budget required runtime helpers; preserve release defaults. Record calls, elapsed time, and reported tokens. Report cost only when known; otherwise mark unknown. Missing prerequisites mean blocked, not verified.
+- Do not trigger unrelated billable retries, warmups, Decisions calls, or extra subagents. Budget required runtime helpers. Record calls, elapsed time, and reported tokens. Report cost only when known; otherwise mark unknown. Missing prerequisites mean blocked, not verified.
 
 ### Desktop SSH tests
 
@@ -110,8 +110,7 @@ The PR owner must complete cleanup after an authorized merge, before reporting i
 - Implementation requests authorize task-branch commits, pushes, and PR creation—not direct implementation on `main`.
 - An explicit upstream rebase request also authorizes merging its sync PR after required checks. Do not ask again. Other PRs, including features, require explicit merge approval.
 - Within the task, allow `--force-with-lease` on fork branches, including `main`, without separate approval. Plain `--force`, tag moves, discarded work, and releases still require approval.
-- An explicit release request authorizes existing-workflow candidate publication, verified remote `main` update, and safe local fast-forward. Source fixes require PRs.
-- Push explicit refs with `--no-follow-tags`, never all tags. Release-triggering tags, including inherited ones, require publication approval.
+- Push explicit refs with `--no-follow-tags`, never all tags.
 - Before lease-protected pushes, fetch and preserve remote-only work, including workflow release commits. Use an explicit lease against the inspected tip. Never refresh a failed lease and retry blindly.
 
 ## Upstream sync
@@ -126,7 +125,7 @@ Before syncs or targeted ports, use [asm-upstream-sync](../.agents/skills/asm-up
 - Put `[skip ci]` in each new rebase PR head commit. Do not start, retry, or wait for hosted CI unless the owner asks.
 - Do not run real-provider inference by default. Keep the read-only model catalog lookup.
 - If local checks are insufficient, report the gap. Ask before you run more checks.
-- Keep applicable compatibility checks local. Do not bypass branch protection or report skipped checks as passing. Release validation is unchanged.
+- Keep applicable compatibility checks local. Do not bypass branch protection or report skipped checks as passing.
 
 ### Built-in instruction changes
 
@@ -227,213 +226,8 @@ Use standard GitHub-hosted runners; paid larger runners need explicit approval. 
 
 - [Blocking CI](../.github/workflows/blocking-ci.yml) and [postmerge CI](../.github/workflows/postmerge-ci.yml) are manual-only `workflow_dispatch`, never automatic or required.
 - Blocking CI keeps workspace formatting, production Clippy, and result collection. Cover `codex-cli`, `codex-tui`, `codex-core`, and `codex-config` on both release targets. Preserve `--lib --bin codex -- -D warnings`. No test-target matrix, `cargo shear`, or warning suppression. Check other affected packages narrowly.
-- Postmerge CI keeps optimized builds, packaging, smoke checks, uploads, diagnostics, and results for targeted cross-platform checks. Do not run it for every merge. Releases retain their own build/package checks; publication does not require blocking CI. Report existing failures separately.
+- Postmerge CI keeps optimized builds, packaging, smoke checks, uploads, diagnostics, and results for targeted cross-platform checks. Do not run it for every merge. Report existing failures separately.
 - Port useful upstream action/toolchain/security/build fixes without broad matrices or routine local CI repetition. Exclude unrelated platforms, Bazel suites, SDKs, remote executors, V8 source-build canaries, and OpenAI-only infrastructure. The required two-target V8 build is not a broad suite/canary.
-
-## Releases
-
-### Operate a release
-
-Before release operations, use [asm-release](../.agents/skills/asm-release/SKILL.md). Require an explicit release request. Publication grants no installation or shared-server-restart authority. The procedure covers preparation, CI recovery, live smoke, dispatch, and finishing.
-
-A release request includes Linux v3. Check v3 support on the machine running
-the release procedure. Start or resume the standard GitHub Actions release
-after its normal checks. Do not wait for the local v3 build or a skip decision.
-
-If the machine supports v3, build the exact tagged candidate locally while CI
-runs. If any v3 prerequisite or check blocks progress, report the blocker and ask
-for approval to skip v3 for this tag. Keep CI running. Do not report the release
-complete until all required checks pass and v3 is published or the owner
-approves the skip. Report an approved skip explicitly.
-
-6. **Recover:** after interruption, rerun failed jobs. For a new resume dispatch, use `main`, `publish_release=true`, and `resume_run_id=<original run ID>`. Preserve original version/commit despite upstream advances. Never invent versions or replace tags. Report failures needing owner decisions. Only with explicit approval, supersede a source-defective failed unpublished candidate with a new immutable candidate. Record old run/source/tag and draft assets in `.github/scripts/superseded-fork-releases.json`. Preparation must verify that record and reject publication or asset drift. Preserve old candidate/tag/assets and occupied version. Never apply this exception to published or partially ready releases. The owner separately approved superseding cancelled run `42465703649` on 2026-11-09 to release current main. Preserve draft `v0.169.1-alpha.3.1`, its tag, candidate and installer unchanged; verify its recorded cancelled state before creating the new candidate.
-7. **Verify:** a platform is ready after its checked archive and platform checksum manifest are published. Candidate completion requires `release`, both `verify_native` jobs, and `sync_main` success for that candidate. Legacy `v*` pushes/dispatches require publication and both native checks, not `sync_main`. Inspect recorded checks/current metadata; do not repeat successful checks on unchanged artifacts. Builds, tag pushes, and version labels do not prove publication.
-
-### Release notes
-
-For release notes, use the notes section of [asm-release](../.agents/skills/asm-release/SKILL.md).
-
-### Workflow requirements
-
-These govern release code, not another manual procedure.
-
-#### Version
-
-- Select the highest upstream `rust-v` prerelease tag by Semantic Versioning, regardless of creation/publication time or publication. Increment only its numeric patch by one; retain suffix: `rust-v0.162.0-alpha.18` → `v0.162.1-alpha.18`.
-- For repeats, append one positive numeric counter: highest used plus one, without gaps. Preserve upstream identifiers; put the counter before build metadata. `alpha.18.1` precedes `alpha.18.2`; new upstream `alpha.19` starts `v0.162.1-alpha.19`. Installer accepts repeated numeric alpha/beta parts.
-- Resume unfinished candidates/releases first. Prove complete published assets. For the current family and highest fork version, also prove release, both native checks, and main sync for the exact candidate; successful resumes count. Older candidates need no expired Actions logs. If completion is unproved, no upstream prerelease exists, or the proposed version is not above every fork version, stop and ask.
-- Create immutable `agent/release-<run-id>`, not a `main` version commit. Set `[workspace.package].version` in [`Cargo.toml`](../codex-rs/Cargo.toml) and matching [`Cargo.lock`](../codex-rs/Cargo.lock) workspace versions. Do not change dependencies.
-- Tag, Cargo, and CLI `--version` must agree except prefixes. Tag renames do not change binary bytes. Never overwrite tags/assets or move candidates/tags on retries. Keep candidate branches for recovery and pre-policy bumps until the next successful release.
-
-#### Build and package
-
-Keep fork/upstream release workflows separate. Use GitHub-hosted runners:
-
-| Platform | Target | Runner | Build timeout |
-| --- | --- | --- | --- |
-| macOS ARM64 | `aarch64-apple-darwin` | `macos-15` | 300 minutes |
-| Linux x86_64 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` | 330 minutes |
-
-- Except for legacy tag jobs, allow 15 minutes beyond the build for setup,
-  packaging, smoke checks, and uploads. Normal job limits are 315 minutes on
-  macOS and 345 on Linux. For macOS postmerge and concurrency experiments, allow
-  180 minutes to build and 195 minutes per job. Preserve optimization, flags,
-  runner, and candidate on retries. Do not replace ready assets.
-- Legacy lookup allows 190 minutes; wait guards are macOS 150/Linux 185. Timeout fails; do not duplicate builds. Only legacy tag jobs allow 360 total minutes. Actual builds retain table limits; fresh candidates do not wait for postmerge.
-- Keep Ubuntu 22.04 / glibc 2.35 as the Linux minimum and build/native-smoke baseline. A GNU triple on newer runners is insufficient. Before April 2027 retirement, use an Ubuntu 22.04 container on supported runners. Never raise the minimum.
-- Use optimized `--release` and `CARGO_PROFILE_RELEASE_STRIP=debuginfo`, not `dev-small`. Retain function symbols/optimization. Fix timeouts without weakening profiles. Upstream tests do not justify more symbol/dependency removal. Keep shell commands compatible with macOS Bash 3.2, including `set -u` array expansion.
-- Build `codex`, `codex-code-mode-host`, and `codex-exec-server` from one commit/target/profile. Pass all three prebuilt executables to canonical packaging. `codex-<target>.tar.gz` contains `bin/codex`, `bin/codex-code-mode-host`, `bin/codex-exec-server`, `codex-package.json`, and `codex-path/rg`. Linux also contains `codex-resources/bwrap`, built from matching source/release profile; embed its final SHA-256 in the CLI before packaging.
-- Keep canonical layout/pinned ripgrep manifest. Include only required resources as regular executables with matching version/target metadata, including `execServer: "bin/codex-exec-server"`. Shared-server startup must recognize/validate the package without host helpers.
-- Publish six required assets: two archives, two `SHA256SUMS-<target>` files,
-  aggregate `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh).
-  Each platform checksum file covers its archive and pinned installer. Do not
-  publish source trees or logs.
-- Detect candidate contract from pinned smoke's required `codex-package.json`, not optional resource flags. Pass `--no-zsh` only if supported. Preserve older candidates' original contracts.
-- Pin builds, packaging, installer bytes, checks, and reuse to candidate SHA. Pin orchestration to dispatch SHA; save controls before checkout. Never fetch newer controls mid-run. Legacy uses verified exact tagged SHA. Candidate packaging may precede tagging.
-- Before upload, run [native smoke](../.github/scripts/smoke-codex-archive.py). CLI/exec-server versions match Cargo; all three help commands succeed with usage; manifest/resources and bundled ripgrep/Bubblewrap pass. Code-mode-host `--version` is not required. Record binary/archive sizes.
-- GNU source-built ELF requires x86_64 GNU loader and glibc symbols no newer than 2.35. Pinned ripgrep may be static. Check architecture/minimum-OS execution; run version/help in a clean Ubuntu 22.04 container with only declared runtime libraries. Runners alone do not prove compatibility.
-- No Apple signing/notarization, paid Apple membership, Azure Key Vault, release secrets, or self-hosted runners. Bundle only required ripgrep/Linux Bubblewrap; use system shell. No voice, patched zsh, or optional helpers. Preserve sandbox/security defaults.
-- Fork Linux uses native GNU and [`install-gnu-build-tools.sh`](../.github/scripts/install-gnu-build-tools.sh), not Zig/MUSL wrappers. Preserve inherited MUSL tooling. Retain `AWS_LC_SYS_NO_JITTER_ENTROPY` and verified V8 through [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml). Install Python 3.11+ explicitly on Ubuntu 22.04.
-- Preserve upstream GNU system allocator, locale, and PTY choices; do not mimic MUSL in Rust conditions. Use system OpenSSL 3; system liblzma is permitted. Match [`smoke-ubuntu-archive.sh`](../.github/scripts/smoke-ubuntu-archive.sh) libraries to ELF dependencies. Do not add ALSA/GStreamer requirements for GNU migration.
-- Agree intent before adding platforms, DMGs, optional resources, npm, R2, WinGet, or website/OpenAI-only publishing.
-
-#### Release PGO
-
-Profile-guided optimization (PGO) uses execution data to guide the compiler.
-LTO means link-time optimization.
-
-| Build | CPU | LTO | Codegen units | PGO |
-| --- | --- | --- | --- | --- |
-| Linux CI | Portable x86-64 | Thin | 4 | Yes |
-| Linux local | x86-64-v3 | Fat | 1 | Yes |
-| macOS CI | Apple Silicon | Upstream | Upstream | No |
-
-Leave Cargo profiles unchanged. Use one Cargo job for Linux PGO. Build Bubblewrap
-separately without PGO. CI does not need training credentials or histories. Publish the indexed
-profile as a dependency, not as a CLI release.
-
-[`setup.py`](../scripts/pgo/setup.py) fetches the profile pinned in
-[`agent-linux.json`](../scripts/pgo/agent-linux.json). Use Python 3.11+ and
-`llvm-tools-preview` from the consuming compiler. Fail if the selected profile
-is missing or incompatible. Training versions record provenance; they do not
-gate reuse. Keep compiler matching logs and verify the package and real-provider
-behavior. Recheck after compiler or source changes. Refresh the profile if
-matching or performance declines. A readable profile does not prove a speedup.
-
-For local use, run from `codex-rs`. Omit `--env-file` to validate only:
-
-```bash
-pgo_dir=$(mktemp -d)
-python3 ../scripts/pgo/setup.py --target x86_64-unknown-linux-gnu \
-  --output "$pgo_dir" --env-file "$pgo_dir/cargo.env" &&
-  while IFS= read -r setting; do export "$setting"; done < "$pgo_dir/cargo.env"
-```
-
-Load assignments without evaluating shell code. Pass the same target to Cargo.
-Keep the profile until the build ends.
-
-#### Linux v3 package
-
-Check glibc for full v3 support on the current machine. Do not infer support
-from AVX2 alone. When CI assigns the tag, build from that exact tag in a clean
-checkout. Use Ubuntu 22.04, natively or in a local container. Install the candidate toolchain, CI build tools,
-`llvm-tools-preview`, and Python 3.11+ (set `PYTHON` if needed). Use absolute
-paths. For `v8_dir`, supply the archive, bindings, checksum file, and
-`release.json` from the release used by
-[`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml). The build uses
-only tracked Cargo configuration and a private Cargo cache in `output`.
-It ignores host compiler flags and uses the tag's Bubblewrap source.
-
-```bash
-just build-release-v3 "$tag" "$output" "$v8_dir"
-```
-
-Keep the archive and its `.provenance` file together. Run the release-source
-live check before uploading. Before the first v3 upload, update and validate
-`tngo-workflow`: its verification and rollback assume the portable directory.
-
-After the base release is complete, upload v3 as part of the release request.
-Use Docker and a `GH_TOKEN` with Actions read and Contents write access. Set `base_run_id` to
-the successful release or resume run for this exact tag. Run this from the
-same tagged checkout:
-
-```bash
-GITHUB_REPOSITORY=trungnt13/asm RELEASE_TAG="$tag" RELEASE_SHA="$(git rev-parse HEAD)" \
-  python3 .github/scripts/publish-fork-release.py publish-v3 --base-run-id "$base_run_id" \
-    --archive "$output/codex-x86_64-unknown-linux-gnu-v3.tar.gz"
-```
-
-Upload the archive first and its verified checksum file last. Do not replace
-base assets or change Latest. The installer selects v3 only if glibc reports
-full support and the selected release has the uploaded v3 checksum file.
-Otherwise use the portable package. If an advertised v3 package fails
-verification, stop. Install the variants in separate directories.
-
-#### Train the PGO profile
-
-Use Linux with working Bubblewrap mount and PID namespaces. Use Python 3.11+,
-authorized Codex sign-in, and an instrumented CLI with its matching helper.
-Set `CODEX_HOME` to the source home and `PGO_INSTRUMENTED_BIN` to the CLI.
-Set `PGO_TRAINING_DIR` to an empty, private directory outside tracked sources.
-Run `python3 scripts/pgo/train.py`. Do not run it in release CI.
-
-The harness copies feature settings and disables System1. Bubblewrap makes
-host files read-only and permits writes to private session and profile paths.
-It does not restrict host reads or network access. The harness checks the
-effective SQLite and log paths before starting a turn. If managed settings
-change either path, stop. The monitor checks these limits: 890 completions, 19.9M input
-tokens, 245K output tokens, 60 minutes, or $4.90 API-equivalent. Actual charges
-are unknown. Never publish training homes, histories, or credentials.
-
-Verify 10/15/20 root turns and parallel child peaks of 4/3/2. Check the cheap
-model, fixture results, and streaming. Merge only that run's
-`profiles/*.profraw` with matching `llvm-profdata`. Publish the indexed result
-and update both hashes and provenance. Keep failed runs separate.
-
-The selected run peaked at eight simultaneous children. It does not cover all
-production paths. The local Fat LTO build reached about 30 GiB of proportional
-resident memory. The CI trial timed out at 330 minutes with about 22 GiB swap
-in use. Keep runner
-disk and swap checks. Require a successful full build before claiming runner
-feasibility.
-
-#### V8 dependency release
-
-For V8 dependency preparation or publication, use [asm-v8-release](../.agents/skills/asm-v8-release/SKILL.md). Its procedure defines workflow dispatch and tag identity. Keep the contracts below.
-
-- Reuse unchanged verified inputs. Same-version archive reuse for Cargo rebases/releases has standing approval only when independent review proves Cargo ABI, bindings, and full dependency-closure compatibility. Native consumer build/JavaScript/sandbox checks must pass. Record omitted source-recipe fixes; never claim source equivalence. Ask for incompatible dependencies/bindings, changed baselines, unsafe reuse, or ambiguous intent. Never replace published assets.
-- Do not reuse V8 152.2.0's original `glibc2.35` pair: CppGC sizes and typed-array threshold bindings are stale. Preserve its assets. `glibc2.35.2` rebuilds matching source-generated archives/bindings with Chromium C++ runtime isolation.
-- Build only optimized sandbox/pointer-compression pairs for macOS ARM64/Linux x86_64 GNU. Use existing Bazel source pair/staging helper locally on GitHub-hosted runners. No BuildBuddy, remote execution, paid infrastructure, or broad suites. Retain required static-library symbols.
-- Require both native `codex-v8-poc` sandbox/JavaScript smokes, including ignored CppGC ABI checks and Ubuntu 22.04 GNU. Reuse GNU Bazel platform/older glibc sysroot.
-- Publish each target's archive, Rust binding, and two-file manifest only. Use a normal release, **not Latest**, without installer; keep it separate from CLI discovery.
-- Before the first consuming `main` push, publish/verify both new version/generation pairs. CI/CLI releases use only matching verified fork V8. Verify GitHub SHA-256 digests and exact manifest names/hashes. Missing/bad assets fail without upstream fallback. Preserve upstream action paths for other workflows.
-
-#### Reuse and publish
-
-Serialize releases. Finish without later chat actions or token-push-triggered workflows. Legacy tags must already contain correct Cargo versions.
-
-Use [artifact lookup](../.github/scripts/find-postmerge-artifacts.sh) per target for unexpired smoke-checked archives from current dispatch/original candidate run. Legacy may reuse successful same-repo `main` push target jobs at exact tagged SHA. Wait for matching active runs, not other platforms. Never duplicate builds or rebuild ready published platforms. Timeouts/API errors fail; API errors are not cache misses. Build only without usable archives.
-
-1. Create pinned tag, draft, and common installer once. Never change candidates, move tags, or replace assets. Resume uploads only with matching names/sizes/digests.
-2. Independently build/reuse/check/upload each platform. Verify GitHub archive/installer digests; smoke the downloaded archive. Upload `SHA256SUMS-<target>` last as readiness marker.
-3. At first readiness, publish non-draft normal release, including `alpha`, **not Latest** while incomplete. Append other checked assets. Keep payloads immutable by policy. GitHub's immutable-release setting must stay disabled for append-only publication; never change it automatically.
-4. After both platforms pass, append aggregate manifest for old installers. Verify six assets, mark Latest, and retain both native checks. Only then merge candidate into `origin/main`. Preserve concurrent changes; stop on version conflicts. Prefer fast-forwards; necessary rewrites follow push permissions.
-5. Verify ready platforms; resume only missing work. For archives uploaded before readiness markers, recover/verify exact public bytes, even after Actions expiry. Do not rebuild them. Partial releases are incomplete. Legacy completed four-asset releases remain valid. Candidates with installers lacking platform manifests retain all-platform publication.
-
-Before first partial release, deploy platform-aware `tngo-workflow/setup.py`. Select the highest published host-ready version; macOS must not select Linux-only. Installer defaults to Latest; explicit `--release` may install an earlier ready platform. Preserve frozen policy for in-flight runs.
-
-### Installer
-
-- Use only `trungnt13/asm` GitHub `v*` releases for macOS ARM64/Linux x86_64 GNU. Before installing the complete package, verify GitHub digests and host `SHA256SUMS-<target>`. Use legacy `SHA256SUMS` only when host manifest is absent, never after invalid digests/manifests.
-- Reject incomplete two-binary archives. Keep older complete canonical packages without declared `execServer` compatible. If declared, require its exact regular executable; reject undeclared exec-server. Historical incomplete releases keep pinned installers.
-- Before metadata downloads/state changes, reject unsupported targets or Linux without glibc 2.35+. No MUSL fallback; historical MUSL requires its original installer. Use separate target-qualified GNU package directories; preserve MUSL packages and shared config/state.
-- Preserve `--release`, `CODEX_HOME`, `CODEX_INSTALL_DIR`, locking, and safe `current` selection. Store in `packages/asm-standalone`. Preserve upstream packages/update markers, shared Codex config/state, and `codex` command.
-- Only the owner installs externally. No OpenAI/CDN/legacy npm downloads, daemon-only installs, or `auto-update-version` writes. Do not port upstream standalone-release pruning. Preserve fork packages/layout.
-- Disable built-in update checks/prompts/commands/daemon loops regardless of settings/markers. CLI/daemon must not install/download upstream releases. Preserve ordinary daemon startup/restart separately.
-
-### Build experiment
-
-Optional `macos_concurrency_experiment` compares cold same-commit `macos-15` builds with 2/3 Cargo jobs and otherwise equal settings. Save separate timing/resource/size/smoke results. No postmerge reuse or publication, even on tags. Measure before changing defaults; one run does not prove general speedup.
 
 ## Intentional behavior differences
 
