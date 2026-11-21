@@ -1,17 +1,84 @@
+use std::sync::Arc;
+
 use crate::agent::types::ResolvedMultiAgentV2UsageHints;
 use crate::config::MultiAgentV2Config;
+use crate::context::ContextualUserFragment;
 use crate::context::MultiAgentRoleInstructions;
+use crate::context::MultiAgentUsageHint;
 use crate::session::step_context::StepContext;
+use codex_context_fragments::set_annotated_content;
+use codex_context_fragments::to_annotated_content;
 use codex_prompts::ResolvedMessage;
 use codex_prompts::ResolvedModelMessages;
 use codex_prompts::ResolvedMultiAgentMessages;
 use codex_protocol::config_types::MultiAgentMode;
+use codex_protocol::models::ContentItem;
+use codex_protocol::models::ContentItemProvenance;
+use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 
 const HOSTED_MULTI_AGENT_SKILL_GUIDANCE: &str = "Before calling any multi-agent tool, read the full multi-agent skill using its listed package locator. Skip the read only if the full skill text is already in your current context. If the read fails, make note of the blocker.";
+
+pub(crate) fn remove_collaboration_role_instructions(input: &mut Vec<Arc<ResponseItem>>) {
+    input.retain_mut(|item| {
+        let ResponseItem::Message {
+            role,
+            content,
+            internal_chat_message_metadata_passthrough,
+            ..
+        } = item.as_ref()
+        else {
+            return true;
+        };
+        if role != "developer" {
+            return true;
+        }
+        let metadata = internal_chat_message_metadata_passthrough.as_ref();
+        let kinds = metadata
+            .and_then(|metadata| metadata.content_item_kinds.as_deref())
+            .unwrap_or_default();
+        let sources = metadata
+            .and_then(|metadata| metadata.content_item_metadata.as_deref())
+            .unwrap_or_default();
+        let is_role = |index: usize, content: &ContentItem| {
+            let kind = kinds.get(index).map_or("", |kind| kind.as_str());
+            kind == MultiAgentRoleInstructions::KIND
+                // Older rollouts use the same kind as the harness's fork boundary.
+                || kind == MultiAgentUsageHint::KIND
+                    && sources.get(index).is_some_and(|source| {
+                        matches!(source.provenance, ContentItemProvenance::Tool { .. })
+                    })
+                || matches!(kind, "" | "unknown")
+                    && matches!(content, ContentItem::InputText { text } if MultiAgentRoleInstructions::matches_text(text))
+        };
+        let removed: Vec<_> = content
+            .iter()
+            .enumerate()
+            .filter_map(|(index, content)| is_role(index, content).then_some(index))
+            .collect();
+        if removed.is_empty() {
+            return true;
+        }
+        if removed.len() == content.len() {
+            return false;
+        }
+        let item = Arc::make_mut(item);
+        let Some(content) = to_annotated_content(item) else {
+            return true;
+        };
+        let retained = content
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, part)| (!removed.contains(&index)).then_some(part))
+            .collect();
+        // A mixed message no longer has the original provider-visible content.
+        item.set_id(None);
+        set_annotated_content(item, retained).is_some()
+    });
+}
 
 pub(super) fn usage_hint_text(step_context: &StepContext) -> Option<MultiAgentRoleInstructions> {
     let turn_context = step_context.turn.as_ref();

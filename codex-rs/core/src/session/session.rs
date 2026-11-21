@@ -1956,6 +1956,9 @@ impl Session {
             )
             .with_budget_policy(budget_policy.clone())
             .with_executed_tool_calls(executed_tool_calls.clone())
+            .with_subagent_collaboration_disabled(
+                config.subagent_collaboration_disabled(&session_configuration.session_source),
+            )
             .with_restored_history(matches!(
                 &initial_history,
                 InitialHistory::Resumed(_) | InitialHistory::Forked(_)
