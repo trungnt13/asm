@@ -40,20 +40,10 @@ pub(crate) fn project(
         |context_ids| ContextManager::new(context_ids, /*retention*/ None),
         TruncationPolicy::Bytes(0),
     );
-    let check_limit = |bytes| {
-        if bytes > max_history_bytes {
-            return Err(CodexErr::InvalidRequest(format!(
-                "handoff history needs at least {bytes} bytes; handoff.max_history_bytes is {max_history_bytes}"
-            )));
-        }
-        Ok(())
-    };
-    let mut bytes = 2usize; // JSON array brackets.
-    check_limit(bytes)?;
-    let mut items = Vec::new();
+    let mut candidates = Vec::new();
     let mut last_source_turn = None;
     let mut turn_id = crate::session::new_submission_id();
-    for envelope in reconstructed.history.into_iter().filter(retain) {
+    for envelope in reconstructed.history.iter().filter(|item| retain(item)) {
         let ResponseItem::Message {
             role,
             content,
@@ -75,8 +65,7 @@ pub(crate) fn project(
             continue;
         }
         let mut portable = Vec::new();
-        let prefix_bytes = bytes.saturating_add(usize::from(!items.is_empty()));
-        let mut payload_bytes = prefix_bytes;
+        let mut payload_bytes = 0usize;
         for (index, part) in crate::event_mapping::user_input_parts(content) {
             let payload_len = match (role.as_str(), part) {
                 (
@@ -115,23 +104,12 @@ pub(crate) fn project(
                 },
                 _ => continue,
             };
-            // A JSON string cannot be shorter than its raw UTF-8 payload.
             payload_bytes = payload_bytes.saturating_add(payload_len);
-            check_limit(payload_bytes)?;
-            portable.push(match part {
-                ContentItem::InputText { text } | ContentItem::OutputText { text, .. }
-                    if role == "assistant" =>
-                {
-                    ContentItem::OutputText {
-                        text: text.clone(),
-                        annotations: None,
-                        logprobs: None,
-                    }
-                }
-                part => part.clone(),
-            });
+            if payload_bytes <= max_history_bytes {
+                portable.push(part);
+            }
         }
-        if portable.is_empty() {
+        if payload_bytes == 0 {
             continue;
         }
         let source_turn = envelope.item.turn_id();
@@ -141,17 +119,67 @@ pub(crate) fn project(
             turn_id = crate::session::new_submission_id();
             last_source_turn = source_turn.map(str::to_owned);
         }
+        candidates.push((
+            role.as_str(),
+            phase,
+            envelope,
+            turn_id.clone(),
+            portable,
+            payload_bytes,
+        ));
+    }
+
+    let preferred = [
+        candidates.iter().rposition(|(role, ..)| *role == "user"),
+        candidates
+            .iter()
+            .rposition(|(role, ..)| *role == "assistant"),
+        candidates.iter().position(|(role, ..)| *role == "user"),
+    ];
+    let order = preferred
+        .into_iter()
+        .flatten()
+        .chain((0..candidates.len()).rev());
+    let mut tried = vec![false; candidates.len()];
+    // Reserve JSON array brackets for any nonempty selection.
+    let mut remaining = max_history_bytes.saturating_sub(2);
+    let mut items = Vec::new();
+    for index in order {
+        if std::mem::replace(&mut tried[index], true) {
+            continue;
+        }
+        let (role, phase, source, turn_id, parts, payload_bytes) = &candidates[index];
+        let separator = usize::from(!items.is_empty());
+        // Raw UTF-8 bounds the JSON size from below without copying an oversized message.
+        if payload_bytes.saturating_add(separator) > remaining {
+            continue;
+        }
+        let portable = parts
+            .iter()
+            .map(|&part| match part {
+                ContentItem::InputText { text } | ContentItem::OutputText { text, .. }
+                    if *role == "assistant" =>
+                {
+                    ContentItem::OutputText {
+                        text: text.clone(),
+                        annotations: None,
+                        logprobs: None,
+                    }
+                }
+                part => part.clone(),
+            })
+            .collect::<Vec<_>>();
         let envelope = ResponseItemEnvelope {
             item: ResponseItem::Message {
                 id: None,
                 status: None,
-                role: role.clone(),
-                phase: phase.clone(),
+                role: (*role).to_owned(),
+                phase: (*phase).clone(),
                 encrypted_content: None,
                 internal_chat_message_metadata_passthrough: Some(
                     InternalChatMessageMetadataPassthrough {
                         turn_id: Some(turn_id.clone()),
-                        content_item_metadata: (role == "user")
+                        content_item_metadata: (*role == "user")
                             .then(|| vec![ContentItemMetadata::user(); portable.len()]),
                         ..Default::default()
                     },
@@ -160,11 +188,11 @@ pub(crate) fn project(
             }
             .into(),
             metadata: Some(CodexHarnessMetadata {
-                retain_in_children: envelope
+                retain_in_children: source
                     .metadata
                     .as_ref()
                     .and_then(|meta| meta.retain_in_children),
-                retain_across_windows: envelope
+                retain_across_windows: source
                     .metadata
                     .as_ref()
                     .and_then(|meta| meta.retain_across_windows),
@@ -173,11 +201,14 @@ pub(crate) fn project(
                 ..Default::default()
             }),
         };
-        bytes = prefix_bytes.saturating_add(serialized_json_bytes(envelope.item.as_ref())?);
-        check_limit(bytes)?;
-        items.push(envelope);
+        let cost = serialized_json_bytes(envelope.item.as_ref())?.saturating_add(separator);
+        if cost <= remaining {
+            remaining -= cost;
+            items.push((index, envelope));
+        }
     }
-    Ok(items)
+    items.sort_unstable_by_key(|(index, _)| *index);
+    Ok(items.into_iter().map(|(_, envelope)| envelope).collect())
 }
 
 pub(crate) fn copied_turns(items: Vec<RolloutItem>, thread_id: ThreadId) -> Vec<RolloutItem> {
