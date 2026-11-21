@@ -1410,7 +1410,7 @@ impl App {
         start: FreshSessionStart,
         initial_user_message: Option<crate::chatwidget::UserMessage>,
         new_thread_name: Option<String>,
-        model_selection: Option<(String, Option<ReasoningEffortConfig>)>,
+        model_selection: Option<(String, Option<ReasoningEffortConfig>, Option<String>)>,
     ) {
         if self.reject_pending_permission_root_switch() {
             if let Some(message) = initial_user_message {
@@ -1558,18 +1558,18 @@ impl App {
         &mut self,
         app_server: &mut AppServerSession,
         session_start_source: Option<ThreadStartSource>,
-        model_selection: Option<(String, Option<ReasoningEffortConfig>)>,
+        model_selection: Option<(String, Option<ReasoningEffortConfig>, Option<String>)>,
     ) -> Result<PreparedFreshSession> {
         let (mut config, local_settings) = crate::boxed_future!(self.load_new_session_config(
             app_server,
-            model_selection.as_ref().map(|(model, _)| model.as_str())
+            model_selection.as_ref().map(|(model, ..)| model.as_str())
         ))
         .await
         .map_err(|err| color_eyre::eyre::eyre!("Failed to read new session defaults: {err}"))?;
-        if let Some((model, effort)) = model_selection {
+        if let Some((model, effort, service_tier)) = model_selection {
             config.model = Some(model);
             config.model_reasoning_effort = effort;
-            config.service_tier = None;
+            config.service_tier = service_tier;
             config.apply_external_model_provider()?;
         }
         let started = crate::boxed_future!(app_server.start_thread_with_session_start_source(
@@ -1868,6 +1868,9 @@ impl App {
             self.chatwidget_init_for_forked_or_resumed_thread(tui, config, initial_user_message);
         if let Some(account) = account {
             self.apply_session_account(&mut init, account);
+        } else if started.session.model_provider_id != self.chat_widget.quota_provider_id() {
+            let account = app_server.read_thread_account(&started.session).await;
+            self.apply_session_account(&mut init, account.unwrap_or_default());
         }
         self.replace_chat_widget_for_provider(
             ChatWidget::new_with_app_event(init),

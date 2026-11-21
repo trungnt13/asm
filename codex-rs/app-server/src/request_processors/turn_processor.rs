@@ -12,11 +12,13 @@ use codex_protocol::AgentPath;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::models::AgentMessageInputContent;
 use codex_protocol::models::ContentItem;
+use codex_protocol::models::ContentItemMetadata;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ImageReference as CoreImageReference;
 use codex_protocol::protocol::RealtimeConversationVersion;
+use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnEnvironmentRequests;
 use codex_protocol::protocol::TurnSettingsUpdate;
 use codex_protocol::protocol::TurnSettingsUpdateOutcome;
@@ -1209,7 +1211,7 @@ impl TurnRequestProcessor {
 
         let side_boundary = !agent_mail
             && matches!(items.as_slice(), [item]
-            if super::desktop_side::is_desktop_side_boundary(std::slice::from_ref(&item.item)));
+            if super::desktop_side::is_desktop_side_boundary(&item.item));
         if side_boundary {
             let thread_state = self.thread_state_manager.thread_state(thread_id).await;
             let state = thread_state.lock().await;
@@ -1219,6 +1221,30 @@ impl TurnRequestProcessor {
                 .and_then(|initialization| initialization.pending_prompt.clone())
             {
                 items.push(prompt.into());
+            }
+        }
+        let bootstrap = match config_snapshot
+            .thread_source
+            .as_ref()
+            .map(ThreadSource::as_str)
+        {
+            Some(ThreadSource::DESKTOP_SIDE_CHAT_SOURCE) => side_boundary,
+            Some(ThreadSource::TUI_SIDE_CHAT_SOURCE) => matches!(items.as_slice(),
+                [policy, _, ..] if matches!(&policy.item,
+                    ResponseItem::Message { internal_chat_message_metadata_passthrough: Some(metadata), .. }
+                        if matches!(metadata.content_item_kinds.as_deref(), Some([kind])
+                            if kind.as_str() == "side_conversation.policy"))),
+            _ => false,
+        };
+        for item in items.iter_mut().filter(|_| bootstrap) {
+            if let ResponseItem::Message {
+                internal_chat_message_metadata_passthrough: metadata,
+                content,
+                ..
+            } = &mut item.item
+            {
+                metadata.get_or_insert_default().content_item_metadata =
+                    Some(vec![ContentItemMetadata::harness(); content.len()]);
             }
         }
         let result = if agent_mail {

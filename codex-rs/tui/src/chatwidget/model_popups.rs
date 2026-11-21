@@ -333,6 +333,7 @@ impl ChatWidget {
                     thread_id,
                     model: model_for_action.clone(),
                     effort: effort_for_action.clone(),
+                    service_tier: None,
                     confirmed: false,
                 })
             })];

@@ -2682,6 +2682,19 @@
       },
       "type": "object"
     },
+    "HandoffConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "max_history_bytes": {
+          "default": 64000,
+          "description": "Maximum serialized history size, in bytes.",
+          "format": "uint",
+          "minimum": 1.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "History": {
       "additionalProperties": false,
       "description": "Settings that govern if and what will be written to `~/.codex/history.jsonl`.",
@@ -9406,6 +9419,17 @@
         }
       ],
       "description": "Goal-related settings."
+    },
+    "handoff": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/HandoffConfig"
+        }
+      ],
+      "default": {
+        "max_history_bytes": 64000
+      },
+      "description": "Global limits for conversation history handoff."
     },
     "hide_agent_reasoning": {
       "default": false,

@@ -1,6 +1,7 @@
 use codex_core::config::Config;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::ThreadSource;
 // Desktop 26.1027.51404 supplies these complete blocks, but no structured side marker.
 // Unknown client wording deliberately retains ordinary thread behavior.
 const DEVELOPER_BLOCK: &str = include_str!("desktop_side_instructions.txt");
@@ -9,11 +10,10 @@ const BOUNDARY: &str = include_str!("desktop_side_boundary.txt");
 pub(super) fn apply_defaults(
     instructions: Option<&str>,
     config: &mut Config,
+    thread_source: &mut Option<ThreadSource>,
     origin: SideOrigin,
 ) -> Option<SideSettingsInitialization> {
-    let Some(instructions) = instructions else {
-        return None;
-    };
+    let instructions = instructions?;
     let side_block_offset =
         instructions
             .match_indices(DEVELOPER_BLOCK)
@@ -23,9 +23,11 @@ pub(super) fn apply_defaults(
                     && (end == instructions.len() || instructions[end..].starts_with("\n\n")))
                 .then_some(offset)
             });
-    let Some(side_block_offset) = side_block_offset else {
-        return None;
-    };
+    let side_block_offset = side_block_offset?;
+    // TUI owns deletion of its Side attachments, not Desktop's.
+    *thread_source = Some(ThreadSource::Feature(
+        ThreadSource::DESKTOP_SIDE_CHAT_SOURCE.to_string(),
+    ));
     if let Some(prompt) = config
         .side_prompt
         .as_deref()
@@ -81,8 +83,8 @@ pub(super) fn apply_defaults(
     Some(initialization)
 }
 
-pub(super) fn is_desktop_side_boundary(items: &[ResponseItem]) -> bool {
-    matches!(items, [ResponseItem::Message { role, content, .. }]
+pub(super) fn is_desktop_side_boundary(item: &ResponseItem) -> bool {
+    matches!(item, ResponseItem::Message { role, content, encrypted_content: None, .. }
         if role == "user" && matches!(content.as_slice(),
             [ContentItem::InputText { text }]
                 if text.strip_prefix(BOUNDARY).is_some_and(|tail|

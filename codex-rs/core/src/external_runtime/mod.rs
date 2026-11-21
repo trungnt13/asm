@@ -1,4 +1,5 @@
 //! Thread-scoped lifecycle for the official CLI's native conversation and tools.
+mod active_handoff;
 mod activity;
 mod bridge;
 mod completion;
@@ -13,7 +14,9 @@ mod events;
 mod fork;
 mod input;
 mod messages;
+mod portable;
 mod state;
+pub(crate) use active_handoff::active_handoff_history;
 use bridge::ExternalMessageBridge;
 use cursor::record_cursor_frame;
 pub(crate) use deletion::delete_thread_data;
@@ -390,9 +393,9 @@ async fn run_conversation(
         let messages = input_messages(original_history.raw_items(), native_runtime)?;
         let mut lease = RuntimeLease::take(&session.external_runtime)?;
         let needs_binding = lease.runtime.is_some();
-        let mut fork_boundary = None;
         let mut prepared_context = None;
         if lease.runtime.is_none() {
+            let mut initial_context = None;
             let role_instructions = if thread_spawn_child {
                 turn.config.role_developer_instructions.clone()
             } else {
@@ -436,6 +439,7 @@ async fn run_conversation(
                     let id = uuid::Uuid::new_v4().to_string();
                     let parent = std::mem::replace(&mut checkpoint.session_id, id.clone());
                     checkpoint.fork_point = None;
+                    initial_context = Some(Value::String(TEMPORARY_FORK_BOUNDARY.to_owned()));
                     let at = seed.fork_point;
                     let fork = SessionStart::Fork { parent, at, id };
                     (checkpoint, fork, Linkage::Temporary)
@@ -449,9 +453,9 @@ async fn run_conversation(
                     (checkpoint, resume, Linkage::Saved)
                 }
                 (None, Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-                    // Unsent generated context can survive rejected first-input admission.
-                    // Only host-attributed text and shell context are safe without native linkage.
-                    let previous_input = original_history.raw_items().filter(|item| {
+                    let inherited = portable::inherited_prefix(original_history.annotated_items())?;
+                    let local = original_history.raw_items().skip(inherited.len());
+                    let previous_input = local.clone().filter(|item| {
                         !matches!(item, ResponseItem::Message {
                             role, content, internal_chat_message_metadata_passthrough: Some(metadata), ..
                         } if metadata.content_item_kinds.as_ref().is_some_and(|kinds| {
@@ -461,21 +465,40 @@ async fn run_conversation(
                             && !content.is_empty()
                             && content.iter().all(|part| matches!(part, codex_protocol::models::ContentItem::InputText { .. }))
                             && metadata.content_item_metadata.as_ref().is_some_and(|parts| {
-                                parts.len() == content.len() && parts.iter().all(|part| matches!(
+                                parts.len() == content.len() && parts.iter().enumerate().all(|(index, part)| matches!(
                                     part.provenance,
                                     codex_protocol::models::ContentItemProvenance::Harness { hook: false }
                                         | codex_protocol::models::ContentItemProvenance::DeveloperInstructions { .. }
                                         | codex_protocol::models::ContentItemProvenance::Skills
                                         | codex_protocol::models::ContentItemProvenance::AgentsMd
-                                ))
+                                ) || role == "developer"
+                                    && matches!(&part.provenance,
+                                        codex_protocol::models::ContentItemProvenance::Tool {
+                                            namespace: Some(codex_protocol::models::ContentItemNamespace::Collaboration) })
+                                    && metadata.content_item_kinds.as_ref().and_then(|kinds| kinds.get(index))
+                                        .is_some_and(|kind| matches!(kind.as_str(),
+                                            "multi_agent.mode_instructions" | codex_prompts::MultiAgentRoleInstructions::KIND)))
                             })))
                     });
                     if !input_messages(previous_input, native_runtime)?.is_empty()
-                        || original_history.raw_items().any(|item| matches!(item, ResponseItem::Message { role, .. } if role == "assistant"))
+                        || local.clone().any(|item| matches!(item, ResponseItem::Message { role, .. } if role == "assistant"))
                     {
                         bail!("missing native session linkage for existing history; start a new chat");
                     }
-                    let id = session.thread_id().to_string();
+                    let (input_count, reference) =
+                        portable::reference_message(inherited, native_runtime)?;
+                    initial_context = reference;
+                    let id = if inherited.is_empty() {
+                        session.thread_id().to_string()
+                    } else {
+                        uuid::Uuid::new_v4().to_string()
+                    };
+                    let linkage =
+                        if native_runtime == NativeRuntime::ClaudeCode && turn.config.ephemeral {
+                            Linkage::Temporary
+                        } else {
+                            Linkage::Saved
+                        };
                     (
                         Checkpoint {
                             format_version: if native_runtime == NativeRuntime::ClaudeCode {
@@ -491,12 +514,12 @@ async fn run_conversation(
                             session_id: id.clone(),
                             messaging,
                             in_flight: false,
-                            input_count: 0,
-                            input_prefix: input_prefix(&[])?,
+                            input_count,
+                            input_prefix: input_prefix(&messages[..input_count])?,
                             fork_point: None,
                         },
                         SessionStart::New { id },
-                        Linkage::Saved,
+                        linkage,
                     )
                 }
                 (None, Err(error)) => return Err(error.into()),
@@ -569,9 +592,6 @@ async fn run_conversation(
                 SessionStart::New { .. } => Some(Default::default()),
                 SessionStart::Resume { .. } | SessionStart::Fork { .. } => None,
             };
-            if matches!(linkage, Linkage::Temporary) {
-                fork_boundary = Some(TEMPORARY_FORK_BOUNDARY);
-            }
             let mut runtime = ExternalSession::spawn_runtime(
                 bridge.as_ref(),
                 if native_runtime == NativeRuntime::ClaudeCode {
@@ -588,6 +608,7 @@ async fn run_conversation(
                 &mut checkpoint,
                 &checkpoint_path,
                 session_start,
+                &linkage,
             )
             .await?;
             if let RuntimeProcess::Claude(process) = &mut runtime {
@@ -609,6 +630,7 @@ async fn run_conversation(
                 }
             }
             lease.runtime = Some(ExternalSession {
+                initial_context,
                 foreground_idle: true,
                 runtime,
                 page_context,
@@ -687,7 +709,7 @@ async fn run_conversation(
                         session,
                         &messages[runtime.checkpoint.input_count..],
                         input,
-                        fork_boundary,
+                        runtime.initial_context.as_ref(),
                         |prompt| match &runtime.runtime {
                             RuntimeProcess::Claude(_) => {
                                 codex_external_runtime::validate_claude_prompt(prompt)
@@ -762,12 +784,15 @@ async fn run_conversation(
                             (target != "none" || current.is_some()) && Some(target) != current
                         }))
                     {
+                        // An unsent handoff has no checkpoint to resume yet.
+                        let linkage = runtime
+                            .initial_context
+                            .as_ref()
+                            .map_or(&runtime.linkage, |_| &Linkage::Temporary);
                         let changed = match &mut runtime.runtime {
                             RuntimeProcess::Claude(process) => {
                                 runtime.checkpoint.in_flight = true;
-                                runtime
-                                    .linkage
-                                    .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
+                                linkage.save(&runtime.checkpoint, &runtime.checkpoint_path)?;
                                 process.set_effort(requested.as_deref()).await?;
                                 runtime
                                     .checkpoint
@@ -797,9 +822,7 @@ async fn run_conversation(
                         }
                         tracing::debug!(runtime_name, effort = ?requested, "Native effort confirmed");
                         runtime.checkpoint.effort = requested;
-                        runtime
-                            .linkage
-                            .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
+                        linkage.save(&runtime.checkpoint, &runtime.checkpoint_path)?;
                     }
                     Ok::<(), anyhow::Error>(())
                 }
@@ -829,8 +852,8 @@ async fn run_conversation(
         if matches!(&prompt, codex_external_runtime::Prompt::Text(text) if text.trim().is_empty()) {
             return Ok(last_message);
         }
-        if let Some(boundary) = fork_boundary {
-            pending_messages.insert(/*index*/ 0, Value::String(boundary.to_owned()));
+        if let Some(boundary) = &runtime.initial_context {
+            pending_messages.insert(/*index*/ 0, boundary.clone());
             prompt = prompt_content(&pending_messages)?;
         }
         drop(pending_messages);
@@ -867,8 +890,13 @@ async fn run_conversation(
         runtime
             .linkage
             .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
+        runtime.initial_context = None;
         let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(/*buffer*/ 32);
         let mut stream = events::MessageStream::default();
+        let handoff_capture = active_handoff::HandoffCapture::default();
+        if native_runtime == NativeRuntime::ClaudeCode {
+            turn.extension_data.insert(handoff_capture.clone());
+        }
         stream.activity.messaging = messaging;
         stream.activity.server = native_runtime.id();
         // Only Claude accepts native queued input; Cursor receives mail through tool results.
@@ -889,7 +917,6 @@ async fn run_conversation(
             .subscribe_activity(turn_state.as_deref())
             .await;
         let (steering_tx, steering_rx) = tokio::sync::mpsc::channel(1);
-        let mut submitted_steering_count = 0;
         let mut mail_receipts =
             delivery::CursorMailReceipts::new(runtime.checkpoint.session_id.clone());
         let result = {
@@ -916,7 +943,8 @@ async fn run_conversation(
                         pending_activity = None;
                         if continuation::submit_steering(session, turn, &mut runtime.checkpoint,
                             &runtime.linkage, &runtime.checkpoint_path, page_context, continuation::SteeringSubmission::Foreground(&steering_tx)).await? {
-                            submitted_steering_count += 1;
+                            stream.submitted_steering_count += 1;
+                            handoff_capture.send_replace(None);
                         }
                     }
                     Some(reply) = async {
@@ -995,7 +1023,7 @@ async fn run_conversation(
             }
         };
         mail_receipts.ensure_delivered()?;
-        if outcome.submitted_steering_count != submitted_steering_count {
+        if outcome.submitted_steering_count != stream.submitted_steering_count {
             bail!(
                 "Claude did not submit all recorded steering messages; explicit recovery is required"
             );

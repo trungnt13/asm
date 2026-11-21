@@ -13411,8 +13411,7 @@ fn multi_agent_v2_exposes_model_overrides_by_default() {
             .strip_prefix(hint_without_model_overrides.as_str())
             .expect("model-override guidance should extend the base usage hint");
         for required_fragment in [
-            "Full-history forks",
-            "`fork_turns`",
+            "when explicitly requested by the user",
             "`model`",
             "`reasoning_effort`",
         ] {

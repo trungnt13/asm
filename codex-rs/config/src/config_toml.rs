@@ -247,6 +247,21 @@ impl SubagentToolsToml {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct HandoffConfig {
+    /// Maximum serialized history size, in bytes.
+    pub max_history_bytes: NonZeroUsize,
+}
+
+impl Default for HandoffConfig {
+    fn default() -> Self {
+        Self {
+            max_history_bytes: NonZeroUsize::new(/*n*/ 64_000).unwrap(),
+        }
+    }
+}
+
 /// Base config deserialized from ~/.codex/config.toml.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -256,6 +271,9 @@ pub struct ConfigToml {
     /// Launch-only settings for native runtimes, leaving standalone CLI settings unchanged.
     #[serde(default)]
     pub native_runtimes: crate::NativeRuntimesConfig,
+    /// Global limits for conversation history handoff.
+    #[serde(default)]
+    pub handoff: HandoffConfig,
     /// Retry model overloads until recovery or cancellation. Defaults to false.
     pub continue_when_model_at_capacity: Option<bool>,
     /// Default Daybreak preference for new threads and non-interactive turns.

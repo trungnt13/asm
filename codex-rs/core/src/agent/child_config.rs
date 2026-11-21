@@ -134,7 +134,10 @@ pub(crate) async fn prepare_agent_spawn_config(
     config
         .validate_external_subagent_model()
         .map_err(|err| err.to_string())?;
-    if options.full_history_fork && config.model_provider_id != turn.config.model_provider_id {
+    if turn.multi_agent_version != MultiAgentVersion::V2
+        && options.full_history_fork
+        && config.model_provider_id != turn.config.model_provider_id
+    {
         return Err("Cross-provider subagents require fork_turns=none".to_string());
     }
     apply_spawn_agent_service_tier(session, &mut config).await?;
