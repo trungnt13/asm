@@ -2450,7 +2450,7 @@ async fn run_subagent_global_instruction_case(fork_context: bool) -> Result<()> 
             responses::ev_response_created("spawn-response"),
             responses::ev_function_call_with_namespace(
                 SPAWN_CALL_ID,
-                "collaboration",
+                "agents",
                 "spawn_agent",
                 &spawn_args,
             ),

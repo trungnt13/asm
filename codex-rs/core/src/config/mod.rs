@@ -287,7 +287,8 @@ pub(crate) const DEFAULT_MULTI_AGENT_V2_MAX_CONCURRENT_THREADS_PER_SESSION: usiz
 pub(crate) const DEFAULT_MULTI_AGENT_V2_MIN_WAIT_TIMEOUT_MS: i64 = 10_000;
 pub(crate) const DEFAULT_MULTI_AGENT_V2_MAX_WAIT_TIMEOUT_MS: i64 = 3600 * 1000;
 pub(crate) const DEFAULT_MULTI_AGENT_V2_DEFAULT_WAIT_TIMEOUT_MS: i64 = 30_000;
-const DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE: &str = "collaboration";
+pub(crate) const DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE: &str = "agents";
+pub(crate) const LEGACY_MULTI_AGENT_V2_TOOL_NAMESPACE: &str = "collaboration";
 
 pub(crate) const HARD_MIN_MULTI_AGENT_V2_TIMEOUT_MS: i64 = 0;
 pub(crate) const HARD_MAX_MULTI_AGENT_V2_TIMEOUT_MS: i64 =
@@ -3173,8 +3174,10 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
         .and_then(|config| config.multi_agent_mode_hint_text.as_ref())
         .cloned()
         .or(default.multi_agent_mode_hint_text);
+    // The old namespace can collide with reserved Responses tools.
     let tool_namespace = base
         .and_then(|config| config.tool_namespace.as_ref())
+        .filter(|namespace| namespace.as_str() != LEGACY_MULTI_AGENT_V2_TOOL_NAMESPACE)
         .cloned()
         .or(default.tool_namespace);
     let non_code_mode_only = base

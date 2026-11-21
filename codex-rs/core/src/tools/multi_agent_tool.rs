@@ -20,6 +20,18 @@ use std::sync::Arc;
 pub const MULTI_AGENT_V2_NAMESPACE_DESCRIPTION: &str =
     "Tools for spawning and managing sub-agents.";
 
+pub(crate) fn is_multi_agent_v2_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "spawn_agent"
+            | "send_message"
+            | "followup_task"
+            | "wait_agent"
+            | "list_agents"
+            | "interrupt_agent"
+    )
+}
+
 pub(crate) fn multi_agent_v2_handler(
     handler: impl CoreToolRuntime + 'static,
     namespace: Option<&str>,

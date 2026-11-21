@@ -127,6 +127,7 @@ async fn prompt_prefix_matches_release() -> Result<()> {
     if release.is_some() && prefixes[0] != prefixes[1] {
         let mut released: Value = serde_json::from_str(&prefixes[0])?;
         let current: Value = serde_json::from_str(&prefixes[1])?;
+        accept_agent_tool_namespace_migration(&mut released, &current);
         accept_spawn_agent_shortlist_rollout(&mut released, &current);
         accept_default_tool_description_rollouts(&mut released, &current);
         // Releases before #19024 append the catalog's Default block after permissions.
@@ -159,6 +160,43 @@ async fn prompt_prefix_matches_release() -> Result<()> {
     Ok(())
 }
 
+// Allow the default namespace migration and removal of its literal recipient example.
+fn accept_agent_tool_namespace_migration(released: &mut Value, current: &Value) {
+    const NAMESPACE: &str = "/input/0/tools/2";
+    let (Some(old), Some(new)) = (released.pointer_mut(NAMESPACE), current.pointer(NAMESPACE))
+    else {
+        return;
+    };
+    if old["type"] != "namespace"
+        || new["type"] != "namespace"
+        || old["name"] != "collaboration"
+        || new["name"] != "agents"
+        || old.pointer("/tools/4/name").and_then(Value::as_str) != Some("spawn_agent")
+        || new.pointer("/tools/4/name").and_then(Value::as_str) != Some("spawn_agent")
+    {
+        return;
+    }
+    old["name"] = json!("agents");
+
+    let Some(items) = released["input"].as_array_mut() else {
+        return;
+    };
+    const EXAMPLE: &str = ", such as `to=functions.collaboration.spawn_agent`";
+    for item in items.iter_mut().filter(|item| item["role"] == "developer") {
+        let Some(content) = item["content"].as_array_mut() else {
+            continue;
+        };
+        for fragment in content {
+            if let Some(text) = fragment["text"].as_str()
+                && text.starts_with("<multi_agent_role>")
+                && text.matches(EXAMPLE).count() == 1
+            {
+                fragment["text"] = json!(text.replace(EXAMPLE, ""));
+            }
+        }
+    }
+}
+
 // Accept the exact default-on shortlist expansion from #18296 while comparing with
 // releases that still advertise five models. All other description bytes stay checked.
 fn accept_spawn_agent_shortlist_rollout(released: &mut Value, current: &Value) {
@@ -168,7 +206,7 @@ fn accept_spawn_agent_shortlist_rollout(released: &mut Value, current: &Value) {
             || prefix
                 .pointer("/input/0/tools/2/name")
                 .and_then(Value::as_str)
-                != Some("collaboration")
+                != Some("agents")
             || prefix.pointer(TOOL).and_then(|tool| tool["name"].as_str()) != Some("spawn_agent")
         {
             return;

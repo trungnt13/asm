@@ -379,7 +379,7 @@ async fn managed_force_shutdown_exits_with_blocked_rollout_writer() -> Result<()
                 responses::ev_response_created("spawn-child"),
                 responses::ev_function_call_with_namespace(
                     "spawn-child",
-                    "collaboration",
+                    "agents",
                     "spawn_agent",
                     r#"{"task_name":"child","message":"Wait here","fork_turns":"none"}"#,
                 ),
@@ -456,7 +456,7 @@ async fn managed_restart_preserves_child_result_received_during_drain() -> Resul
             body: responses::sse(vec![
                 responses::ev_function_call_with_namespace(
                     "spawn-child",
-                    "collaboration",
+                    "agents",
                     "spawn_agent",
                     r#"{"task_name":"child","message":"Return the report","fork_turns":"none"}"#,
                 ),

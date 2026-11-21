@@ -640,7 +640,7 @@ async fn subagents_inherit_spawn_metadata_without_live_parent_updates(
         json!({"message": "Inspect the example"})
     };
     let namespace = if multi_agent_v2 {
-        "collaboration"
+        "agents"
     } else {
         "multi_agent_v1"
     };

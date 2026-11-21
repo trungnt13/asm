@@ -823,7 +823,7 @@ async fn cancelled_spawn_discards_provisional_child() -> anyhow::Result<()> {
         })
         .build_with_auto_env(&server)
         .await?;
-    let namespace = "collaboration";
+    let namespace = "agents";
     let arguments =
         json!({"message":"child startup task", "task_name":"worker", "fork_turns":"all"});
     responses::mount_sse_once(

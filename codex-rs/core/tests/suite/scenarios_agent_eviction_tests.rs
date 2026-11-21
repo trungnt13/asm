@@ -103,12 +103,7 @@ async fn idle_eviction_preserves_worker_context_for_followup() -> Result<()> {
             &server,
             wiremock::matchers::header("thread-id", parent_id.clone()),
             sse(vec![
-                ev_function_call_with_namespace(
-                    &call_id,
-                    "collaboration",
-                    tool,
-                    &arguments.to_string(),
-                ),
+                ev_function_call_with_namespace(&call_id, "agents", tool, &arguments.to_string()),
                 ev_completed("parent-call"),
             ]),
         )

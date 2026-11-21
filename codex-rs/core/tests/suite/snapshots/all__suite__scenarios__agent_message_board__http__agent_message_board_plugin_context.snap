@@ -54,7 +54,7 @@ Scenario: A child posts through the HTTP MCP executable; its restarted parent di
     <ENVIRONMENT_CONTEXT>
 05:message/user:
     Spawn a worker and finish your turn.
-06:function_call/collaboration.spawn_agent:{"fork_turns":"none","message":"Say ready.","task_name":"worker"}
+06:function_call/agents.spawn_agent:{"fork_turns":"none","message":"Say ready.","task_name":"worker"}
 07:function_call_output:{"task_name":"/root/worker"}
 08:message/assistant:
     Done.

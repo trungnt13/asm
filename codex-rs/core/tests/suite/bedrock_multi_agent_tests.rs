@@ -57,8 +57,8 @@ async fn bedrock_catalog_selects_v2_by_default(
         assert!(
             declarations
                 .iter()
-                .any(|item| responses::namespace_child_tool(item, "collaboration", tool).is_some()),
-            "default Bedrock catalog should expose collaboration.{tool}",
+                .any(|item| responses::namespace_child_tool(item, "agents", tool).is_some()),
+            "default Bedrock catalog should expose agents.{tool}",
         );
     }
     Ok(())

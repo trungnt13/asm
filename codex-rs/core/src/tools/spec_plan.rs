@@ -1,3 +1,5 @@
+use crate::config::DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE;
+use crate::config::LEGACY_MULTI_AGENT_V2_TOOL_NAMESPACE;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::image_preparation::unified_image_budget_enabled;
 use crate::session::session::Session;
@@ -42,6 +44,7 @@ use crate::tools::handlers::tool_search_spec::ToolSearchSourceListing;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
 use crate::tools::hosted_spec::WebSearchToolOptions;
 use crate::tools::hosted_spec::create_web_search_tool;
+use crate::tools::multi_agent_tool::is_multi_agent_v2_tool;
 use crate::tools::multi_agent_tool::multi_agent_v2_handler;
 use crate::tools::registry::NativeReview;
 use crate::tools::registry::RegisteredTool;
@@ -240,16 +243,11 @@ fn apply_mcp_tool_exposure_policy(
             }
             continue;
         }
-        let tool_name = tool_name.with_default_namespace();
-
         let mut exposures = ToolExposures::ALL.difference(*omitted_exposures);
-        if tool_name.namespace.as_ref().is_some_and(|namespace| {
-            turn_context
-                .config
-                .code_mode
-                .direct_only_tool_namespaces
-                .contains(namespace)
-        }) {
+        if code_mode_namespace_matches(
+            &tool_name,
+            &turn_context.config.code_mode.direct_only_tool_namespaces,
+        ) {
             exposures = exposures.difference(ToolExposures::DEFERRED | ToolExposures::CODE_MODE);
         }
 
@@ -573,17 +571,10 @@ fn tool_exposure_with_namespace_override(
     exposure: ToolExposure,
 ) -> ToolExposure {
     if exposure.is_available_in_code_mode()
-        && tool_name
-            .with_default_namespace()
-            .namespace
-            .as_ref()
-            .is_some_and(|namespace| {
-                turn_context
-                    .config
-                    .code_mode
-                    .direct_only_tool_namespaces
-                    .contains(namespace)
-            })
+        && code_mode_namespace_matches(
+            &tool_name,
+            &turn_context.config.code_mode.direct_only_tool_namespaces,
+        )
     {
         ToolExposure::DirectModelOnly
     } else {
@@ -848,13 +839,26 @@ fn is_directly_visible(
 }
 
 fn is_excluded_from_code_mode(turn_context: &TurnContext, tool_name: &ToolName) -> bool {
-    let tool_name = tool_name.clone().with_default_namespace();
-    tool_name.namespace.as_ref().is_some_and(|namespace| {
-        turn_context
-            .config
-            .code_mode
-            .excluded_tool_namespaces
-            .contains(namespace)
+    code_mode_namespace_matches(
+        tool_name,
+        &turn_context.config.code_mode.excluded_tool_namespaces,
+    )
+}
+
+fn code_mode_namespace_matches(tool_name: &ToolName, namespaces: &[String]) -> bool {
+    let namespace = tool_name
+        .namespace
+        .as_deref()
+        .filter(|namespace| !namespace.is_empty())
+        .unwrap_or(DEFAULT_FUNCTION_NAMESPACE);
+    namespaces.iter().any(|configured| {
+        configured == namespace
+            || (configured == LEGACY_MULTI_AGENT_V2_TOOL_NAMESPACE
+                && namespace == DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE
+                && (is_multi_agent_v2_tool(&tool_name.name)
+                    || codex_message_board::MessageBoardTool::DISCUSSION
+                        .iter()
+                        .any(|tool| tool.name() == tool_name.name)))
     })
 }
 

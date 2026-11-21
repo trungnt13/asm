@@ -39,7 +39,7 @@ use std::time::Instant;
 use test_case::test_case;
 use tokio::time::sleep;
 
-const MULTI_AGENT_V2_NAMESPACE: &str = "collaboration";
+const MULTI_AGENT_V2_NAMESPACE: &str = "agents";
 const SPAWN_AGENT_TOOL_NAME: &str = "spawn_agent";
 
 fn spawn_agent_description(body: &Value, namespace: &str) -> Option<String> {
@@ -588,8 +588,8 @@ pub(super) async fn model_catalog_refresh_requests(
     Ok(requests)
 }
 
-#[test_case(true, false, "collaboration"; "v2 hides agent type without roles")]
-#[test_case(true, true, "collaboration"; "v2 exposes agent type with a role")]
+#[test_case(true, false, "agents"; "v2 hides agent type without roles")]
+#[test_case(true, true, "agents"; "v2 exposes agent type with a role")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn configured_agent_roles_control_spawn_agent_type(
     multi_agent_v2: bool,

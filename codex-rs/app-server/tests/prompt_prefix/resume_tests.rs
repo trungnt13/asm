@@ -34,6 +34,8 @@ async fn resume_preserves_prefix_and_appends_changed_tool_declaration() -> Resul
     // The separate fresh-start test still compares each binary's bundled defaults.
     catalog.models[model_index].description = Some("Before the app-server upgrade".into());
     std::fs::write(&catalog_path, serde_json::to_vec(&catalog)?)?;
+    // Use the same unreserved namespace in both versions so this test isolates
+    // description changes rather than the legacy namespace migration.
     MockResponsesConfig::new(&server.uri())
         .with_model("gpt-6-astra")
         .enable_feature(Feature::IncrementalTools)
@@ -42,6 +44,7 @@ async fn resume_preserves_prefix_and_appends_changed_tool_declaration() -> Resul
             "skills.bundled.enabled = false\nmodel_catalog_json = {}\nmulti_agent_v2.expose_spawn_agent_model_overrides = true",
             serde_json::to_string(&catalog_path)?
         ))
+        .with_extra_config("[features.multi_agent_v2]\nenabled = true\ntool_namespace = \"agents\"")
         .write(home.path())?;
     let builder = || {
         TestAppServer::builder()
@@ -170,6 +173,6 @@ fn spawn_agent_declarations(input: &[Value]) -> Vec<&Value> {
     input
         .iter()
         .filter(|item| item["type"] == "additional_tools")
-        .filter_map(|item| responses::namespace_child_tool(item, "collaboration", "spawn_agent"))
+        .filter_map(|item| responses::namespace_child_tool(item, "agents", "spawn_agent"))
         .collect()
 }

@@ -1,13 +1,12 @@
 ---
 source: core/tests/suite/scenarios.rs
-assertion_line: 715
 expression: "context_snapshot::format_request_history_snapshot(\"Available file references pass through. A later request replaces missing files, preserves references on backend errors, rechecks each distinct ID once, and keeps canonical history intact.\",\n&requests, &ContextSnapshotOptions::default().rewrite_known_segments(),)"
 ---
 Scenario: Available file references pass through. A later request replaces missing files, preserves references on backend errors, rechecks each distinct ID once, and keeps canonical history intact.
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=6e484ca7819c8fe6):
+00:additional_tools/developer (3; hash=9cb384a026c8cd09):
         - namespace/functions; hash=c2cdcb8626fae9fd
           - custom/exec
           - function/wait
@@ -15,7 +14,7 @@ Scenario: Available file references pass through. A later request replaces missi
           - function/request_user_input_async
         - namespace/clock: Tools for reading and waiting on time.; hash=7c9fa8bed22f77c8
           - function/sleep
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=dfc7229f861c7bcf
+        - namespace/agents: Tools for spawning and managing sub-agents.; hash=8ce3162f68b375be
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
@@ -42,7 +41,7 @@ Scenario: Available file references pass through. A later request replaces missi
 
 ## Window 2 (after request 1: input diverged at item 06)
 -- request 2 (turn) --
-00:additional_tools/developer (3; hash=6e484ca7819c8fe6):
+00:additional_tools/developer (3; hash=9cb384a026c8cd09):
         - namespace/functions; hash=c2cdcb8626fae9fd
           - custom/exec
           - function/wait
@@ -50,7 +49,7 @@ Scenario: Available file references pass through. A later request replaces missi
           - function/request_user_input_async
         - namespace/clock: Tools for reading and waiting on time.; hash=7c9fa8bed22f77c8
           - function/sleep
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=dfc7229f861c7bcf
+        - namespace/agents: Tools for spawning and managing sub-agents.; hash=8ce3162f68b375be
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents

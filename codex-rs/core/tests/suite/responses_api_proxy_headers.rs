@@ -54,12 +54,7 @@ async fn responses_api_parent_and_subagent_requests_include_identity_headers_and
         },
         sse(vec![
             ev_response_created("resp-parent-1"),
-            ev_function_call_with_namespace(
-                SPAWN_CALL_ID,
-                "collaboration",
-                "spawn_agent",
-                &spawn_args,
-            ),
+            ev_function_call_with_namespace(SPAWN_CALL_ID, "agents", "spawn_agent", &spawn_args),
             ev_completed("resp-parent-1"),
         ]),
     )

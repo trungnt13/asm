@@ -296,7 +296,7 @@ async fn assert_child_retains_tool_search(test: &mut TestCodex, server: &MockSer
                 ev_response_created("parent-spawn"),
                 ev_function_call_with_namespace(
                     "spawn-child",
-                    "collaboration",
+                    "agents",
                     "spawn_agent",
                     &json!({"message": "Say done.", "task_name": "worker", "fork_turns": "none"})
                         .to_string(),

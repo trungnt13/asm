@@ -408,7 +408,7 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
             responses::ev_completed(id),
         ])
     };
-    for (namespace, fork_turns) in [("collaboration", "none"), ("collaboration", "all")] {
+    for (namespace, fork_turns) in [("agents", "none"), ("agents", "all")] {
         let spawn_arguments = json!({"message": "inspect the repository", "task_name": "worker", "fork_turns": fork_turns});
         let server = responses::start_mock_server().await;
         Mock::given(method("POST"))
@@ -631,7 +631,7 @@ async fn saved_daybreak_rejection_records_child_input(
         {
             responses::ev_function_call_with_namespace(
                 "spawn-worker",
-                "collaboration",
+                "agents",
                 "spawn_agent",
                 &json!({"task_name": "worker", "message": "inspect", "fork_turns": "none"})
                     .to_string(),
@@ -803,7 +803,7 @@ async fn saved_daybreak_uses_existing_websocket_requests() -> Result<()> {
             vec![
                 responses::ev_function_call_with_namespace(
                     "spawn-worker",
-                    "collaboration",
+                    "agents",
                     "spawn_agent",
                     &json!({"task_name": "worker", "message": "inspect", "fork_turns": "none"})
                         .to_string(),
@@ -936,14 +936,14 @@ async fn saved_daybreak_uses_existing_websocket_requests() -> Result<()> {
     Ok(())
 }
 
-#[test_case("collaboration", true, true, Some(true), CyberAccessProgram::DaybreakBlue, CyberAccessProgram::DaybreakRed; "v2 blue to red")]
-#[test_case("collaboration", true, true, Some(true), CyberAccessProgram::DaybreakRed, CyberAccessProgram::DaybreakBlue; "v2 red to blue")]
-#[test_case("collaboration", true, true, Some(false), CyberAccessProgram::DaybreakBlue, CyberAccessProgram::DaybreakRed; "turn override wins over saved off")]
-#[test_case("collaboration", true, true, Some(true), CyberAccessProgram::Standard, CyberAccessProgram::DaybreakRed; "standard override wins over saved on")]
-#[test_case("collaboration", true, true, Some(false), CyberAccessProgram::Standard, CyberAccessProgram::DaybreakRed; "standard with saved off")]
-#[test_case("collaboration", false, true, Some(true), CyberAccessProgram::DaybreakBlue, CyberAccessProgram::DaybreakRed; "rollout disabled")]
-#[test_case("collaboration", true, true, None, CyberAccessProgram::DaybreakBlue, CyberAccessProgram::DaybreakRed; "choice unset")]
-#[test_case("collaboration", true, false, Some(true), CyberAccessProgram::DaybreakBlue, CyberAccessProgram::DaybreakRed; "provider opt out")]
+#[test_case("agents", true, true, Some(true), CyberAccessProgram::DaybreakBlue, CyberAccessProgram::DaybreakRed; "v2 blue to red")]
+#[test_case("agents", true, true, Some(true), CyberAccessProgram::DaybreakRed, CyberAccessProgram::DaybreakBlue; "v2 red to blue")]
+#[test_case("agents", true, true, Some(false), CyberAccessProgram::DaybreakBlue, CyberAccessProgram::DaybreakRed; "turn override wins over saved off")]
+#[test_case("agents", true, true, Some(true), CyberAccessProgram::Standard, CyberAccessProgram::DaybreakRed; "standard override wins over saved on")]
+#[test_case("agents", true, true, Some(false), CyberAccessProgram::Standard, CyberAccessProgram::DaybreakRed; "standard with saved off")]
+#[test_case("agents", false, true, Some(true), CyberAccessProgram::DaybreakBlue, CyberAccessProgram::DaybreakRed; "rollout disabled")]
+#[test_case("agents", true, true, None, CyberAccessProgram::DaybreakBlue, CyberAccessProgram::DaybreakRed; "choice unset")]
+#[test_case("agents", true, false, Some(true), CyberAccessProgram::DaybreakBlue, CyberAccessProgram::DaybreakRed; "provider opt out")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn saved_daybreak_follows_the_child_model_and_automatic_compaction(
     namespace: &'static str,

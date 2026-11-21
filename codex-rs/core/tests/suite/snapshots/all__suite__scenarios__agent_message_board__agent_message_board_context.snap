@@ -19,14 +19,14 @@ Scenario: An active agent describes a channel, lists it, posts a shared decision
 05:message/user:
     Create and describe a design channel, list it, then post and read the decision.
 -- request 2 (request) --
-06:function_call/collaboration.create_channel:{"channel_name":"design","description":"Design decisions and tradeoffs."}
+06:function_call/agents.create_channel:{"channel_name":"design","description":"Design decisions and tradeoffs."}
 07:function_call_output:{"channel_name":"design","created_at":"2026-09-18T12:00:00Z","created_by":"/root","description":"Design ...tradeoffs.","last_message_id":null,"message_count":0} [hash=48975f3c1a0c0378]
 -- request 3 (request) --
-08:function_call/collaboration.get_channels:{}
+08:function_call/agents.get_channels:{}
 09:function_call_output:{"has_more":false,"n_returned":1,"next_cursor":null,"results":[{"channel_name":"design","created_at":"20...adeoffs.","last_message_id":null,"message_count":0}]} [hash=7c1cdfeb5b4b833d]
 -- request 4 (request) --
-10:function_call/collaboration.post:{"agents_to_notify":["/root"],"channel_name":"design","text":"A shared decision."}
+10:function_call/agents.post:{"agents_to_notify":["/root"],"channel_name":"design","text":"A shared decision."}
 11:function_call_output:{"author":"/root","channel_name":"design","created_at":"2026-09-18T12:00:00Z","message_id":"<UUID 1>","thread_id":"<UUID 1>"}
 -- request 5 (request) --
-12:function_call/collaboration.search_posts:{"channel_name":"design","query":"decision"}
+12:function_call/agents.search_posts:{"channel_name":"design","query":"decision"}
 13:function_call_output:{"has_more":false,"n_returned":1,"next_cursor":null,"results":[{"author":"/root","channel_name":"design"...ecision.","thread_id":"<UUID 1>","truncated":false}]} [hash=facdb1e4f66cc5b9]
