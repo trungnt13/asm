@@ -629,6 +629,7 @@ impl App {
         mut chat_widget: ChatWidget,
         thread_provider: Option<&str>,
     ) {
+        self.conversation_frame = Default::default();
         self.statusline_picker = None;
         chat_widget.inherit_view_transition_key_guard(&mut self.chat_widget);
         chat_widget.fork_in_progress = self.chat_widget.fork_in_progress;
@@ -1076,6 +1077,7 @@ impl App {
                 .unwrap_or_default();
             self.apply_session_account(&mut init, account);
         }
+        let presented = preserve_screen.then(|| std::mem::take(&mut self.conversation_frame));
         self.replace_chat_widget_for_provider(
             ChatWidget::new_with_app_event(init),
             snapshot
@@ -1083,6 +1085,9 @@ impl App {
                 .as_ref()
                 .map(|session| session.model_provider_id.as_str()),
         );
+        if let Some(frame) = presented {
+            self.conversation_frame = frame;
+        }
         self.chat_widget
             .set_task_mentions_enabled(app_server.task_tools_available(thread_id));
         self.chat_widget
@@ -2075,6 +2080,9 @@ impl App {
             self.agents_overview
                 .hidden_threads
                 .remove(&target_session.thread_id);
+            if self.agents_overview.workspace.is_open() {
+                self.focus_workspace_composer(tui);
+            }
             self.repaint_agents_overview();
             tui.frame_requester().schedule_frame();
             return Ok(AppRunControl::Continue);
@@ -2308,6 +2316,10 @@ impl App {
                 if let Some(notice) = history_notice {
                     self.chat_widget
                         .add_info_message(notice.to_string(), /*hint*/ None);
+                }
+                if self.agents_overview.workspace.is_open() {
+                    self.focus_workspace_composer(tui);
+                    self.repaint_agents_overview();
                 }
                 self.backfill_loaded_subagent_threads(app_server).await;
                 if matches!(
