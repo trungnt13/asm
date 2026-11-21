@@ -17,6 +17,8 @@ use crate::context::MultiAgentRoleInstructions;
 use crate::context::MultiAgentUsageHint;
 use crate::context::world_state::IncrementalToolsUpdate;
 use crate::context::world_state::PersistentModeState;
+use crate::external_runtime::is_native_model;
+use crate::handoff::PortableHistory;
 use crate::session::multi_agents::resolve_usage_hints;
 use crate::tasks::InterruptedTurnHistoryMarker;
 use crate::thread_manager::ForkSnapshot;
@@ -341,14 +343,18 @@ pub(super) async fn load_agent_model_context(
     }
 }
 
-/// Prepare copied history while leaving startup settings and timing with the caller.
+type ForkedHistory = (
+    InitialHistory,
+    Option<ThreadHistoryMode>,
+    Option<PortableHistory>,
+);
 pub(super) async fn prepare_forked_history(
     state: &ThreadManagerState,
     session_source: &SessionSource,
     options: &SpawnAgentOptions,
     config: &Config,
     multi_agent_version: MultiAgentVersion,
-) -> CodexResult<(InitialHistory, Option<ThreadHistoryMode>)> {
+) -> CodexResult<ForkedHistory> {
     if options.fork_parent_spawn_call_id.is_none() {
         return Err(CodexErr::Fatal(
             "spawn_agent fork requires a parent spawn call id".to_string(),
@@ -399,18 +405,48 @@ pub(super) async fn prepare_forked_history(
             (None, None)
         }
     };
-    let parent_history_mode = parent_thread.config_snapshot().await.history_mode;
-    // `record_conversation_items` only queues persistence writes asynchronously.
-    // Flush before snapshotting store history for a fork.
-    parent_thread.ensure_rollout_materialized().await;
-    parent_thread.flush_rollout().await?;
-
+    let parent = parent_thread.config_snapshot().await;
+    let parent_history_mode = parent.history_mode;
     let destination_history_mode = matches!(parent_history_mode, ThreadHistoryMode::Paginated)
         .then_some(ThreadHistoryMode::Paginated);
-    let mut forked_rollout_items =
+    let native_cut = options.native_fork_cut.as_ref();
+    let mut forked_rollout_items = if let Some(history) = native_cut {
+        history.get_rollout_items().to_vec()
+    } else {
+        // Flush asynchronous rollout writes before snapshotting stored history.
+        parent_thread.ensure_rollout_materialized().await;
+        parent_thread.flush_rollout().await?;
         load_agent_model_context(state, parent_thread_id, parent_history_mode)
             .await?
-            .items;
+            .items
+    };
+    if multi_agent_version == MultiAgentVersion::V2
+        && (native_cut.is_some()
+            || requires_handoff(Some(&parent.model), &parent.model_provider_id, config))
+    {
+        if native_cut.is_none()
+            && is_native_model(&parent.model)
+            && parent_thread.has_active_turn().await
+        {
+            return Err(CodexErr::InvalidRequest(
+                "Cannot fork without a verified active native history snapshot".into(),
+            ));
+        }
+        let history = InitialHistory::Forked(forked_rollout_items);
+        let items = crate::handoff::project(
+            &history,
+            parent_history_mode,
+            config.handoff.max_history_bytes.get(),
+            |item| item.child_retention() != Some(false),
+        )?;
+        let history =
+            InitialHistory::Forked(items.into_iter().map(RolloutItem::ResponseItem).collect());
+        return Ok((
+            history,
+            destination_history_mode,
+            Some(PortableHistory::Hidden),
+        ));
+    }
 
     let multi_agent_v2_usage_hint_texts_to_filter: Vec<String> =
         if multi_agent_version == MultiAgentVersion::V2 {
@@ -589,6 +625,7 @@ pub(super) async fn prepare_forked_history(
     Ok((
         InitialHistory::Forked(forked_rollout_items),
         destination_history_mode,
+        None,
     ))
 }
 
@@ -640,4 +677,10 @@ fn share_forked_message_bodies(
             *content = Arc::clone(parent_content);
         }
     }
+}
+
+pub(super) fn requires_handoff(model: Option<&str>, provider: &str, config: &Config) -> bool {
+    model.is_none_or(is_native_model)
+        || config.model.as_deref().is_some_and(is_native_model)
+        || config.model_provider_id != provider
 }

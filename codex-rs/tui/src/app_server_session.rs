@@ -215,7 +215,8 @@ enum ForkPresentation {
     SideConversation(SideChatStorage),
 }
 
-pub(crate) const ATTACHED_SIDE_CHAT_SOURCE: &str = "tui_side_chat";
+pub(crate) const ATTACHED_SIDE_CHAT_SOURCE: &str =
+    codex_protocol::protocol::ThreadSource::TUI_SIDE_CHAT_SOURCE;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SideChatStorage {
@@ -1586,7 +1587,7 @@ impl AppServerSession {
                 self.remote_cwd_override.as_deref(),
             )
         };
-        if params.attach_to_source {
+        if matches!(presentation, ForkPresentation::SideConversation(_)) {
             params.thread_source =
                 Some(ThreadSource::Feature(ATTACHED_SIDE_CHAT_SOURCE.to_string()));
         }

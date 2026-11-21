@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 // the resume/fork hydration metadata derived from the same replay.
 #[derive(Debug, PartialEq)]
 pub(crate) struct RolloutReconstruction {
-    pub(super) history: Vec<ResponseItemEnvelope>,
+    pub(crate) history: Vec<ResponseItemEnvelope>,
     pub(super) rejected_audio_file_ids: BTreeSet<String>,
     pub(crate) retained_context: codex_history::RetainedContext,
     pub(super) guardian_history: Option<codex_history::GuardianHistoryCheckpoint>,

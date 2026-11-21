@@ -425,7 +425,7 @@ fn append_external_model_aliases(
     if !aliases.is_empty() {
         description.push_str("\nExternal models (native runtimes or configured providers; runtime/service availability is not verified):\n- ");
         description.push_str(&aliases.join("\n- "));
-        description.push_str(&format!("\nUse these exact model aliases. Cross-provider spawns require `{fork_argument}`; native-runtime spawns also require fresh history; include all needed context in `message`."));
+        description.push_str(&format!("\nUse these exact model aliases. Use `{fork_argument}` to start without parent history."));
     }
     description
 }
@@ -471,7 +471,7 @@ If the parent transcript is not forked, include the context needed for the task 
     };
 
     let tool_description = format!(
-        "{tool_description}\nNative runtime models (`claude-code/*`, `cursor-agent/*`) require `fork_turns=\"none\"`. Include all needed context in `message`. They use their native instructions, tools and permissions, not the parent's. Cursor agents cannot call agent messaging tools; their final answer is still returned."
+        "{tool_description}\nAcross providers or runtimes, `fork_turns=\"all\"` transfers visible user and assistant messages, not provider state. Native runtime models use their native instructions, tools and permissions. Cursor agents cannot call agent messaging tools; their final answer is still returned."
     );
 
     if let Some(usage_hint_text) = usage_hint_text {

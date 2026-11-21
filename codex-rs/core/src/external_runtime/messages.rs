@@ -189,7 +189,7 @@ pub(super) fn validate_pending_prompt(
     session: &Session,
     messages: &[Value],
     pending: &[TurnInput],
-    boundary: Option<&str>,
+    boundary: Option<&Value>,
     validate: impl FnOnce(&codex_external_runtime::Prompt) -> anyhow::Result<()>,
     runtime: NativeRuntime,
 ) -> anyhow::Result<()> {
@@ -207,7 +207,7 @@ pub(super) fn validate_pending_prompt(
     let mut messages = messages.to_vec();
     messages.extend(input_messages(&items, runtime)?);
     if let Some(boundary) = boundary {
-        messages.insert(/*index*/ 0, Value::String(boundary.to_owned()));
+        messages.insert(/*index*/ 0, boundary.clone());
     }
     validate(&prompt_content(&messages)?)
 }

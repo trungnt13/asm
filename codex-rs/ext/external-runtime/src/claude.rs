@@ -31,6 +31,9 @@ pub enum ClaudeSession {
     New {
         id: String,
     },
+    NewTemporary {
+        id: String,
+    },
     Resume {
         id: String,
     },
@@ -103,13 +106,19 @@ impl ClaudeDriver {
                 "Claude auto-compaction window must be between 100000 and 1000000 tokens"
             );
         }
+        let temporary = matches!(options.session, ClaudeSession::NewTemporary { .. });
         let (session_id, session_flag, fork_parent) = match options.session {
-            ClaudeSession::New { id } => (id, "--session-id", None),
+            ClaudeSession::New { id } | ClaudeSession::NewTemporary { id } => {
+                (id, "--session-id", None)
+            }
             ClaudeSession::Resume { id } => (id, "--resume", None),
             ClaudeSession::Fork { parent, at, id } => (id, "--session-id", Some((parent, at))),
         };
         Uuid::parse_str(&session_id).context("Claude session ID must be a UUID")?;
         let mut command = Command::new(options.executable);
+        if temporary {
+            command.arg("--no-session-persistence");
+        }
         if let Some((parent, at)) = fork_parent {
             Uuid::parse_str(&parent).context("Claude parent session ID must be a UUID")?;
             Uuid::parse_str(&at).context("Claude fork message ID must be a UUID")?;

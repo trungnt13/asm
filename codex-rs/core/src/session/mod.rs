@@ -612,10 +612,15 @@ pub(crate) const SUBMISSION_CHANNEL_CAPACITY: usize = 512;
 const CYBER_VERIFY_URL: &str = "https://chatgpt.com/cyber";
 const CYBER_SAFETY_URL: &str = "https://developers.openai.com/codex/concepts/cyber-safety";
 
-/// Returns the native runtime recorded in saved history, if any.
 pub(crate) fn history_native_runtime(
     history: &InitialHistory,
 ) -> Option<codex_protocol::openai_models::NativeRuntime> {
+    history_native_model(history).map(|(_, runtime)| runtime)
+}
+
+pub(crate) fn history_native_model(
+    history: &InitialHistory,
+) -> Option<(&str, codex_protocol::openai_models::NativeRuntime)> {
     history.get_rollout_items().iter().find_map(|item| {
         let model = match item {
             RolloutItem::TurnContext(context) => &context.model,
@@ -624,7 +629,8 @@ pub(crate) fn history_native_runtime(
             }
             _ => return None,
         };
-        codex_protocol::openai_models::NativeRuntime::for_model(model).map(|(runtime, _)| runtime)
+        codex_protocol::openai_models::NativeRuntime::for_model(model)
+            .map(|(runtime, _)| (model.as_str(), runtime))
     })
 }
 
@@ -975,12 +981,14 @@ impl Session {
             ));
         }
         // Compare concrete runtimes so Claude and Cursor sessions never resume each other.
-        // Claude history forks only into a temporary side, which Claude forks natively.
         let temporary_claude_fork = config.ephemeral
             && native_runtime == Some(codex_protocol::openai_models::NativeRuntime::ClaudeCode)
             && history_native_runtime(&conversation_history) == native_runtime;
         if (matches!(&conversation_history, InitialHistory::Forked(_))
             && !temporary_claude_fork
+            && thread_extension_init
+                .get::<crate::handoff::PortableHistory>()
+                .is_none()
             && (uses_native_runtime || history_native_runtime(&conversation_history).is_some()))
             || (matches!(&conversation_history, InitialHistory::Resumed(_))
                 && history_native_runtime(&conversation_history) != native_runtime)
@@ -1106,6 +1114,17 @@ impl Session {
                 &model_info_overrides.models_manager_config(&model, config.personality),
             )
             .await;
+        if !uses_native_runtime
+            && thread_extension_init.get::<crate::handoff::PortableHistory>().is_some()
+            && matches!(&conversation_history, InitialHistory::Forked(_))
+            && !model_info.input_modalities.contains(&codex_protocol::openai_models::InputModality::Image)
+            && conversation_history.scan_rollout_items(|item| matches!(item,
+                RolloutItem::ResponseItem(envelope)
+                if matches!(envelope.item.as_ref(), ResponseItem::Message { content, .. }
+                    if content.iter().any(|part| matches!(part, codex_protocol::models::ContentItem::InputImage { .. })))))
+        {
+            return Err(CodexErr::InvalidRequest("The destination model cannot receive handoff images".into()));
+        }
         let auth = auth_manager.auth_cached();
         // Forked subagents keep their parent's activation with the copied history.
         // Fresh children restore configured preferences before applying startup defaults.
@@ -2127,6 +2146,10 @@ impl Session {
 
                 let thread_settings_applied =
                     RolloutItem::EventMsg(thread_settings::applied_event(self).await);
+                let portable = self
+                    .services
+                    .thread_extension_data
+                    .get::<crate::handoff::PortableHistory>();
                 match &self.fork_persistence {
                     ForkPersistence::Referenced {
                         inherited_item_count,
@@ -2144,6 +2167,15 @@ impl Session {
                         // thread is created.
                         rollout_items.clear();
                         rollout_items.push(thread_settings_applied);
+                    }
+                    ForkPersistence::Copied if portable.is_some() => {
+                        if portable.is_some_and(|value| {
+                            matches!(*value, crate::handoff::PortableHistory::Visible)
+                        }) {
+                            rollout_items =
+                                crate::handoff::copied_turns(rollout_items, self.thread_id);
+                        }
+                        rollout_items.insert(0, thread_settings_applied);
                     }
                     ForkPersistence::Copied
                     | ForkPersistence::CopiedDeferred

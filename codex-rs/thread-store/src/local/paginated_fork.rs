@@ -20,7 +20,7 @@ pub(super) async fn prepare(
 ) -> ThreadStoreResult<PreparedFork> {
     let PrepareForkParams {
         thread_id,
-        ref boundary,
+        boundary,
     } = params;
     let source_reservation = store.live_writer_locks.reserve_lifecycle(thread_id).await;
     // Keep the source reserved until persistence and lineage materialization finish, even if the
@@ -47,7 +47,7 @@ pub(super) async fn prepare(
     }
     let (history_base, model_context, preview_before_compaction) = lineage
         .read_with_fallback(store, |lineage| {
-            read_fork_history(store, thread_id, boundary, lineage)
+            read_fork_history(store, thread_id, &boundary, lineage)
         })
         .await?;
     let mut fork = PreparedFork::with_source_reservation(
@@ -56,6 +56,7 @@ pub(super) async fn prepare(
         Arc::new(model_context),
         source_reservation,
     );
+    fork.boundary = boundary;
     fork.preview_before_compaction = preview_before_compaction;
     Ok(fork)
 }

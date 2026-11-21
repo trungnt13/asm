@@ -58,6 +58,18 @@ impl App {
         } else {
             event
         };
+        let (event, model_selection) = match event {
+            AppEvent::StartModelSession { thread_id, .. } if thread_id != self.chat_widget.thread_id() => {
+                return Ok(AppRunControl::Continue);
+            }
+            AppEvent::StartModelSession { thread_id: Some(id), model, effort, service_tier, confirmed: true }
+                if self.chat_widget.model_session_has_context()
+                    || self.thread_event_channels.get(&id).is_some_and(|channel| channel.history_may_be_incomplete) =>
+            {
+                (AppEvent::ForkCurrentSession { name: None }, Some((model, effort, service_tier)))
+            }
+            event => (event, None),
+        };
         // Release the shortcut's input guard even when a fork is rejected below.
         if matches!(event, AppEvent::ForkCurrentSession { .. }) {
             self.chat_widget.fork_in_progress = false;
@@ -318,14 +330,11 @@ impl App {
                     self.chat_widget.show_misalignment_policy_precaution();
                 }
             }
-            AppEvent::StartModelSession { thread_id, model, effort, confirmed } => {
-                if self.chat_widget.thread_id() != thread_id {
-                    return Ok(AppRunControl::Continue);
-                }
+            AppEvent::StartModelSession { model, effort, service_tier, confirmed, .. } => {
                 if confirmed {
-                    self.start_model_session(tui, app_server, FreshSessionStart::PreserveCurrentView(None), /*initial_user_message*/ None, /*new_thread_name*/ None, Some((model, effort))).await;
+                    self.start_model_session(tui, app_server, FreshSessionStart::PreserveCurrentView(None), /*initial_user_message*/ None, /*new_thread_name*/ None, Some((model, effort, service_tier))).await;
                 } else {
-                    self.chat_widget.confirm_model_session(model, effort);
+                    self.chat_widget.confirm_model_session(model, effort, service_tier);
                 }
             }
             AppEvent::ContinueProviderChat { thread_id } => {
@@ -756,6 +765,7 @@ impl App {
                 return self.delete_current_thread(tui, app_server).await;
             }
             AppEvent::ForkCurrentSession { name } => {
+                let switching_model = model_selection.is_some();
                 let from_locked_thread = self.chat_widget.is_external_writer_view();
                 let source = if from_agents_overview {
                     "agents_overview_shortcut"
@@ -769,8 +779,9 @@ impl App {
                     /*inc*/ 1,
                     &[("source", source)],
                 );
-                self.chat_widget
-                    .add_plain_history_lines(vec!["/fork".magenta().into()]);
+                if !switching_model {
+                    self.chat_widget.add_plain_history_lines(vec!["/fork".magenta().into()]);
+                }
                 if let Some(thread_id) = self.chat_widget.thread_id() {
                     if self.pending_server_profiles.contains_key(&thread_id) {
                         self.chat_widget.add_error_message(
@@ -792,19 +803,47 @@ impl App {
                     fork_config.model = Some(self.chat_widget.current_model().to_string());
                     fork_config.model_reasoning_effort =
                         self.chat_widget.current_reasoning_effort();
+                    if let Some((model, effort, service_tier)) = model_selection {
+                        match crate::boxed_future!(self.load_new_session_config(app_server, Some(&model))).await {
+                            Ok((config, _)) => fork_config.model_provider_id = config.model_provider_id,
+                            Err(err) => {
+                                self.chat_widget.fork_in_progress = false;
+                                self.chat_widget.add_error_message(err.to_string());
+                                self.chat_widget.maybe_send_next_queued_input();
+                                return Ok(AppRunControl::Continue);
+                            }
+                        }
+                        fork_config.model = Some(model);
+                        fork_config.model_reasoning_effort = effort;
+                        fork_config.service_tier = service_tier;
+                        fork_config.ephemeral &= !self.side_threads.contains_key(&thread_id);
+                        if let Err(err) = fork_config.apply_external_model_provider() {
+                            self.chat_widget.fork_in_progress = false;
+                            self.chat_widget.add_error_message(err.to_string());
+                            self.chat_widget.maybe_send_next_queued_input();
+                            return Ok(AppRunControl::Continue);
+                        }
+                    }
+                    let continuation = if switching_model && !fork_config.ephemeral {
+                        ForkGoalContinuation::DeferUntilNextTurn
+                    } else {
+                        ForkGoalContinuation::StartIfIdle
+                    };
                     let selected_profile = self.selected_server_profile(thread_id);
                     match app_server.fork_thread_at(
                         &self.local_settings,
                         fork_config,
-                        app_server.uses_remote_workspace().then(|| self.chat_widget.session_workspace_roots()),
+                        (switching_model || app_server.uses_remote_workspace())
+                            .then(|| self.chat_widget.session_workspace_roots()),
                         thread_id,
                         /*last_turn_id*/ None,
                         /*before_turn_id*/ None,
-                        ForkGoalContinuation::StartIfIdle,
+                        continuation,
                         selected_profile.as_ref(),
                     ).await {
                         Ok(mut forked) => {
-                            let retained_input = from_locked_thread
+                            let draft = switching_model.then(|| self.chat_widget.composer_draft_snapshot());
+                            let retained_input = (!switching_model && from_locked_thread)
                                 .then(|| self.chat_widget.capture_thread_input_state())
                                 .flatten();
                             let name_error = if let Some(name) = name {
@@ -840,6 +879,9 @@ impl App {
                                     }
                                     // Keep local input without replacing the fork's running state.
                                     self.chat_widget.restore_reconnected_input(retained_input, &[]);
+                                    if let Some(draft) = draft {
+                                        self.chat_widget.restore_startup_draft(draft);
+                                    }
                                     if let Some(err) = name_error {
                                         self.chat_widget.add_error_message(err);
                                     }

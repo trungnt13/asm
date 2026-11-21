@@ -165,7 +165,7 @@ impl ChatWidget {
             service_tier,
         } = command;
         if self.model_selection_needs_new_session(&model) {
-            self.confirm_model_session(model, Some(effort));
+            self.confirm_model_session(model, Some(effort), service_tier);
             return;
         }
         let warning = self.ultra_reasoning_concurrency_warning(&effort);
