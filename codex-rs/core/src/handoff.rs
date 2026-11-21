@@ -21,6 +21,7 @@ use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::TruncationPolicy;
 use codex_protocol::protocol::TurnCompleteEvent;
 use codex_protocol::protocol::TurnStartedEvent;
+use codex_utils_string::serialized_json_bytes;
 
 pub(crate) enum PortableHistory {
     Visible,
@@ -39,10 +40,10 @@ pub(crate) fn project(
         |context_ids| ContextManager::new(context_ids, /*retention*/ None),
         TruncationPolicy::Bytes(0),
     );
-    let mut items = Vec::new();
+    let mut candidates = Vec::new();
     let mut last_source_turn = None;
     let mut turn_id = crate::session::new_submission_id();
-    for envelope in reconstructed.history.into_iter().filter(retain) {
+    for envelope in reconstructed.history.iter().filter(|item| retain(item)) {
         let ResponseItem::Message {
             role,
             content,
@@ -64,21 +65,18 @@ pub(crate) fn project(
             continue;
         }
         let mut portable = Vec::new();
+        let mut payload_bytes = 0usize;
         for (index, part) in crate::event_mapping::user_input_parts(content) {
-            match (role.as_str(), part) {
+            let payload_len = match (role.as_str(), part) {
                 (
                     "assistant",
                     ContentItem::InputText { text } | ContentItem::OutputText { text, .. },
-                ) if !text.is_empty() => portable.push(ContentItem::OutputText {
-                    text: text.clone(),
-                    annotations: None,
-                    logprobs: None,
-                }),
+                ) if !text.is_empty() => text.len(),
                 ("user", part) if is_authored(metadata.as_ref(), index) => match part {
                     ContentItem::InputText { text }
-                        if !text.is_empty() && !RealtimeDelegation::matches_text(text) =>
+                        if !text.is_empty() && !is_legacy_realtime_wrapper(text) =>
                     {
-                        portable.push(part.clone())
+                        text.len()
                     }
                     ContentItem::InputImage {
                         image: ImageReference::Inline { image_url },
@@ -94,7 +92,7 @@ pub(crate) fn project(
                             )
                     }) =>
                     {
-                        portable.push(part.clone())
+                        image_url.len()
                     }
                     ContentItem::InputImage { .. } | ContentItem::InputAudio { .. } => {
                         return Err(CodexErr::InvalidRequest(
@@ -102,12 +100,16 @@ pub(crate) fn project(
                                 .to_owned(),
                         ));
                     }
-                    ContentItem::InputText { .. } | ContentItem::OutputText { .. } => {}
+                    ContentItem::InputText { .. } | ContentItem::OutputText { .. } => continue,
                 },
-                _ => {}
+                _ => continue,
+            };
+            payload_bytes = payload_bytes.saturating_add(payload_len);
+            if payload_bytes <= max_history_bytes {
+                portable.push(part);
             }
         }
-        if portable.is_empty() {
+        if payload_bytes == 0 {
             continue;
         }
         let source_turn = envelope.item.turn_id();
@@ -117,17 +119,67 @@ pub(crate) fn project(
             turn_id = crate::session::new_submission_id();
             last_source_turn = source_turn.map(str::to_owned);
         }
-        items.push(ResponseItemEnvelope {
+        candidates.push((
+            role.as_str(),
+            phase,
+            envelope,
+            turn_id.clone(),
+            portable,
+            payload_bytes,
+        ));
+    }
+
+    let preferred = [
+        candidates.iter().rposition(|(role, ..)| *role == "user"),
+        candidates
+            .iter()
+            .rposition(|(role, ..)| *role == "assistant"),
+        candidates.iter().position(|(role, ..)| *role == "user"),
+    ];
+    let order = preferred
+        .into_iter()
+        .flatten()
+        .chain((0..candidates.len()).rev());
+    let mut tried = vec![false; candidates.len()];
+    // Reserve JSON array brackets for any nonempty selection.
+    let mut remaining = max_history_bytes.saturating_sub(2);
+    let mut items = Vec::new();
+    for index in order {
+        if std::mem::replace(&mut tried[index], true) {
+            continue;
+        }
+        let (role, phase, source, turn_id, parts, payload_bytes) = &candidates[index];
+        let separator = usize::from(!items.is_empty());
+        // Raw UTF-8 bounds the JSON size from below without copying an oversized message.
+        if payload_bytes.saturating_add(separator) > remaining {
+            continue;
+        }
+        let portable = parts
+            .iter()
+            .map(|&part| match part {
+                ContentItem::InputText { text } | ContentItem::OutputText { text, .. }
+                    if *role == "assistant" =>
+                {
+                    ContentItem::OutputText {
+                        text: text.clone(),
+                        annotations: None,
+                        logprobs: None,
+                    }
+                }
+                part => part.clone(),
+            })
+            .collect::<Vec<_>>();
+        let envelope = ResponseItemEnvelope {
             item: ResponseItem::Message {
                 id: None,
                 status: None,
-                role: role.clone(),
-                phase: phase.clone(),
+                role: (*role).to_owned(),
+                phase: (*phase).clone(),
                 encrypted_content: None,
                 internal_chat_message_metadata_passthrough: Some(
                     InternalChatMessageMetadataPassthrough {
                         turn_id: Some(turn_id.clone()),
-                        content_item_metadata: (role == "user")
+                        content_item_metadata: (*role == "user")
                             .then(|| vec![ContentItemMetadata::user(); portable.len()]),
                         ..Default::default()
                     },
@@ -136,11 +188,11 @@ pub(crate) fn project(
             }
             .into(),
             metadata: Some(CodexHarnessMetadata {
-                retain_in_children: envelope
+                retain_in_children: source
                     .metadata
                     .as_ref()
                     .and_then(|meta| meta.retain_in_children),
-                retain_across_windows: envelope
+                retain_across_windows: source
                     .metadata
                     .as_ref()
                     .and_then(|meta| meta.retain_across_windows),
@@ -148,16 +200,15 @@ pub(crate) fn project(
                 portable_handoff: true,
                 ..Default::default()
             }),
-        });
+        };
+        let cost = serialized_json_bytes(envelope.item.as_ref())?.saturating_add(separator);
+        if cost <= remaining {
+            remaining -= cost;
+            items.push((index, envelope));
+        }
     }
-    let messages: Vec<_> = items.iter().map(|envelope| &envelope.item).collect();
-    let byte_count = serde_json::to_vec(&messages)?.len();
-    if byte_count > max_history_bytes {
-        return Err(CodexErr::InvalidRequest(format!(
-            "handoff history needs {byte_count} bytes; handoff.max_history_bytes is {max_history_bytes}"
-        )));
-    }
-    Ok(items)
+    items.sort_unstable_by_key(|(index, _)| *index);
+    Ok(items.into_iter().map(|(_, envelope)| envelope).collect())
 }
 
 pub(crate) fn copied_turns(items: Vec<RolloutItem>, thread_id: ThreadId) -> Vec<RolloutItem> {
@@ -231,4 +282,23 @@ fn is_authored(metadata: Option<&InternalChatMessageMetadataPassthrough>, index:
         }
         _ => false,
     }
+}
+
+fn is_legacy_realtime_wrapper(text: &str) -> bool {
+    // Old realtime writers recorded these rendered transcripts as ordinary user input.
+    // Only the generated layout is ambiguous, not text merely enclosed in the tag.
+    let (open, close) = RealtimeDelegation::type_markers();
+    text.strip_prefix(open)
+        .and_then(|body| body.strip_suffix(close))
+        .map(|body| {
+            body.strip_prefix("\n  <source>transcript_tail_flush</source>")
+                .unwrap_or(body)
+        })
+        .and_then(|body| body.strip_prefix("\n  <input>"))
+        .and_then(|body| body.split_once("</input>\n"))
+        .is_some_and(|(_, tail)| {
+            tail.is_empty()
+                || (tail.starts_with("  <transcript_delta>")
+                    && tail.ends_with("</transcript_delta>\n"))
+        })
 }
