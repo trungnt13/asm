@@ -18,7 +18,7 @@ pub(in crate::suite) async fn recorded_mcp_items(
         .filter_map(|entry| match entry {
             RolloutItem::ResponseItem(item) => match item.item.as_ref() {
                 ResponseItem::Message { role, content, .. }
-                    if role == "user" && content == &[input_text(prompt)] =>
+                    if role == "user" && content.as_slice() == &[input_text(prompt)] =>
                 {
                     Some(item.into_item())
                 }
