@@ -43,7 +43,7 @@ pub(super) fn reference_message(
         };
         let quote = |text: &str| text_block(&json!({"role": role, "text": text}).to_string());
         if role == "assistant" {
-            for part in content {
+            for part in content.iter() {
                 let ContentItem::OutputText { text, .. } = part else {
                     bail!("invalid assistant handoff content");
                 };

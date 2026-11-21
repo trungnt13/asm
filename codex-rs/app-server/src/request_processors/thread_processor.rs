@@ -6035,13 +6035,6 @@ impl ThreadRequestProcessor {
         } else {
             String::new()
         };
-        let ephemeral_turns = if ephemeral && include_turns {
-            build_legacy_api_turns_from_rollout_items(&history_items)
-        } else {
-            Vec::new()
-        };
-        let ephemeral_token_usage_turn_id = (ephemeral && include_turns)
-            .then(|| restored_token_usage_turn_id(&history_items, ephemeral_turns.as_slice()));
         let token_usage_history_items = paginated_source.then(|| Arc::clone(&history_items));
         let inherited_project_id = source_thread.project_id.clone();
         let reserved_thread_id = if options.config.ephemeral {
@@ -6195,8 +6188,7 @@ impl ThreadRequestProcessor {
 
         let config_snapshot = forked_thread.config_snapshot().await;
 
-        // Persistent forks materialize their own rollout immediately. Ephemeral forks stay
-        // pathless, so their visible history is projected before the source history is consumed.
+        // Persistent forks materialize their own rollout. Ephemeral forks keep their replay in memory.
         let (mut thread, mut token_usage_turn_id) = if session_configured.rollout_path.is_some() {
             let stored_thread = self
                 .read_stored_thread_for_new_fork(thread_id, include_turns && !paginated_source)
@@ -6228,8 +6220,20 @@ impl ThreadRequestProcessor {
             let mut thread = build_thread_from_loaded_snapshot(&forked_thread, &config_snapshot)?;
             thread.preview = inherited_preview;
             thread.forked_from_id = Some(source_thread_id.to_string());
-            thread.turns = ephemeral_turns;
-            (thread, ephemeral_token_usage_turn_id)
+            let token_usage_turn_id = if ephemeral
+                && include_turns
+                && let Some(history) = forked_thread
+                    .ephemeral_fork_history()
+                    .await
+                    .map_err(|err| internal_error(format!("failed to read fork history: {err}")))?
+            {
+                thread.preview = preview_from_rollout_items(&history);
+                thread.turns = build_legacy_api_turns_from_rollout_items(&history);
+                Some(restored_token_usage_turn_id(&history, &thread.turns))
+            } else {
+                None
+            };
+            (thread, token_usage_turn_id)
         };
         if paginated_source && include_turns {
             thread.turns = self.paginated_thread_full_turns(thread_id).await?;

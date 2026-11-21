@@ -1,3 +1,5 @@
+use crate::context::ContextualUserFragment;
+use crate::context::RealtimeDelegation;
 use crate::context_manager::ContextManager;
 use codex_history::CodexHarnessMetadata;
 use codex_history::HEARTBEAT_CONTENT_KIND;
@@ -13,6 +15,7 @@ use codex_protocol::models::ImageReference;
 use codex_protocol::models::InternalChatMessageMetadataPassthrough;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::TruncationPolicy;
@@ -51,10 +54,12 @@ pub(crate) fn project(
         else {
             continue;
         };
-        if envelope
-            .metadata
-            .as_ref()
-            .is_some_and(|meta| meta.compaction_output)
+        if envelope.metadata.as_ref().is_some_and(|meta| {
+            meta.compaction_output
+                || meta.realtime_handoff.is_some()
+                || meta.realtime_session_input.is_some()
+                || meta.realtime_session_end_input
+        }) || (role == "assistant" && InterAgentCommunication::is_message_content(content))
         {
             continue;
         }
@@ -70,7 +75,9 @@ pub(crate) fn project(
                     logprobs: None,
                 }),
                 ("user", part) if is_authored(metadata.as_ref(), index) => match part {
-                    ContentItem::InputText { text } if !text.is_empty() => {
+                    ContentItem::InputText { text }
+                        if !text.is_empty() && !RealtimeDelegation::matches_text(text) =>
+                    {
                         portable.push(part.clone())
                     }
                     ContentItem::InputImage {
@@ -125,7 +132,7 @@ pub(crate) fn project(
                         ..Default::default()
                     },
                 ),
-                content: portable,
+                content: portable.into(),
             }
             .into(),
             metadata: Some(CodexHarnessMetadata {
