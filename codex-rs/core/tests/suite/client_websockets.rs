@@ -2848,7 +2848,7 @@ fn message_item(text: &str) -> ResponseItem {
         encrypted_content: None,
         id: None,
         role: "user".into(),
-        content: vec![ContentItem::InputText { text: text.into() }],
+        content: vec![ContentItem::InputText { text: text.into() }].into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }
@@ -2864,7 +2864,8 @@ fn assistant_message_item(id: &str, text: &str) -> ResponseItem {
             annotations: None,
             logprobs: None,
             text: text.into(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }

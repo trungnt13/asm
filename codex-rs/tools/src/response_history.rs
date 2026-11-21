@@ -48,7 +48,7 @@ pub fn truncate_assistant_output_text_to_token_budget(
             return true;
         }
 
-        content.retain_mut(|content_item| {
+        std::sync::Arc::make_mut(content).retain_mut(|content_item| {
             let ContentItem::OutputText { text, .. } = content_item else {
                 return true;
             };
@@ -97,7 +97,8 @@ mod tests {
                 ContentItem::InputText {
                     text: text.to_string(),
                 }
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }

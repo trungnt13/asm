@@ -6,6 +6,7 @@ use codex_protocol::models::ContentItemMetadata;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::input_text;
 use codex_utils_string::plan_token_truncation;
+use std::sync::Arc;
 
 /// Content, classification and attribution travel together through edits and truncation.
 #[derive(Clone, Debug, PartialEq)]
@@ -149,12 +150,66 @@ pub fn message_from_parts(role: impl Into<String>, parts: Vec<AnnotatedContent>)
         encrypted_content: None,
         id: None,
         role: role.into(),
-        content: Vec::new(),
+        content: Vec::new().into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
     set_annotated_content(&mut item, parts);
     item
+}
+
+/// Pads or trims positional annotations without taking the message content.
+pub fn normalize_message_annotations(item: &mut Arc<ResponseItem>) {
+    let ResponseItem::Message {
+        content,
+        internal_chat_message_metadata_passthrough,
+        ..
+    } = item.as_ref()
+    else {
+        return;
+    };
+    let len = content.len();
+    if internal_chat_message_metadata_passthrough
+        .as_ref()
+        .is_some_and(|metadata| {
+            metadata.content_item_kinds.as_ref().map(Vec::len) == Some(len)
+                && metadata
+                    .content_item_metadata
+                    .as_ref()
+                    .is_none_or(|values| {
+                        values.len() == len
+                            && values
+                                .iter()
+                                .any(|value| *value != ContentItemMetadata::default())
+                    })
+        })
+    {
+        return;
+    }
+
+    let ResponseItem::Message {
+        internal_chat_message_metadata_passthrough,
+        ..
+    } = Arc::make_mut(item)
+    else {
+        unreachable!("item variant checked above");
+    };
+    let metadata = internal_chat_message_metadata_passthrough.get_or_insert_default();
+    metadata
+        .content_item_kinds
+        .get_or_insert_default()
+        .resize_with(len, || ContentItemKind("unknown".to_string()));
+    if let Some(values) = &mut metadata.content_item_metadata {
+        values.truncate(len);
+        if values
+            .iter()
+            .all(|value| *value == ContentItemMetadata::default())
+        {
+            metadata.content_item_metadata = None;
+        } else {
+            values.resize_with(len, ContentItemMetadata::default);
+        }
+    }
 }
 
 /// Takes a message's content together with its classification and source metadata.
@@ -181,7 +236,7 @@ pub fn to_annotated_content(item: &mut ResponseItem) -> Option<Vec<AnnotatedCont
         .unwrap_or_default();
 
     Some(
-        std::mem::take(content)
+        Arc::unwrap_or_clone(std::mem::take(content))
             .into_iter()
             .zip(kinds.into_iter().chain(std::iter::repeat_with(|| {
                 ContentItemKind("unknown".to_string())
@@ -223,7 +278,7 @@ pub fn set_annotated_content(
         content_item_kinds.push(kind);
         content_item_metadata.push(metadata);
     }
-    *content = updated_content;
+    *content = updated_content.into();
     let metadata = internal_chat_message_metadata_passthrough.get_or_insert_default();
     metadata.content_item_kinds = Some(content_item_kinds);
     metadata.content_item_metadata = content_item_metadata

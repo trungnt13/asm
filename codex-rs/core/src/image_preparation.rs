@@ -14,6 +14,7 @@ use codex_attachment_store::UploadContent;
 use codex_attachment_store::UploadRequest;
 use codex_attachment_store::UploadResult;
 use codex_context_fragments::AnnotatedContent;
+use codex_context_fragments::normalize_message_annotations;
 use codex_context_fragments::set_annotated_content;
 use codex_context_fragments::to_annotated_content;
 use codex_features::Feature;
@@ -178,6 +179,11 @@ pub(crate) async fn prepare_response_items(
     let mut image_preparations = Vec::new();
     let mut prepared_items = Vec::with_capacity(items.len());
     for mut envelope in std::mem::take(items) {
+        if mode.replay && !has_inline_image(&envelope.item) {
+            normalize_message_annotations(&mut envelope.item);
+            prepared_items.push(envelope);
+            continue;
+        }
         let mut preparation = ImagePreparation {
             mode,
             image_store,
@@ -263,6 +269,49 @@ pub(crate) async fn prepare_response_items(
     }
     *items = prepared_items;
     image_preparations
+}
+
+fn has_inline_image(item: &ResponseItem) -> bool {
+    match item {
+        ResponseItem::Message { content, .. } => content.iter().any(|part| {
+            matches!(
+                part,
+                ContentItem::InputImage {
+                    image: ImageReference::Inline { .. },
+                    ..
+                }
+            )
+        }),
+        ResponseItem::FunctionCallOutput { output, .. }
+        | ResponseItem::CustomToolCallOutput { output, .. } => {
+            output.content_items().is_some_and(|content| {
+                content.iter().any(|part| {
+                    matches!(
+                        part,
+                        FunctionCallOutputContentItem::InputImage {
+                            image: ImageReference::Inline { .. },
+                            ..
+                        }
+                    )
+                })
+            })
+        }
+        ResponseItem::AdditionalTools { .. }
+        | ResponseItem::Reasoning { .. }
+        | ResponseItem::AgentMessage { .. }
+        | ResponseItem::LocalShellCall { .. }
+        | ResponseItem::FunctionCall { .. }
+        | ResponseItem::ToolSearchCall { .. }
+        | ResponseItem::CustomToolCall { .. }
+        | ResponseItem::ToolSearchOutput { .. }
+        | ResponseItem::WebSearchCall { .. }
+        | ResponseItem::ImageGenerationCall { .. }
+        | ResponseItem::Compaction { .. }
+        | ResponseItem::ConfigurationUpdate { .. }
+        | ResponseItem::CompactionTrigger { .. }
+        | ResponseItem::ContextCompaction { .. }
+        | ResponseItem::Other => false,
+    }
 }
 
 fn replay_image_url<'a>(

@@ -628,7 +628,8 @@ async fn paginated_realtime_items_materialize_separately_in_rollout_order() {
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: "use the smaller logo".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -3227,7 +3228,8 @@ fn user_message(message: &str) -> RolloutItem {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: message.to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }

@@ -1127,7 +1127,8 @@ fn user_msg(text: &str) -> ResponseItem {
             annotations: None,
             logprobs: None,
             text: text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }
@@ -1142,7 +1143,8 @@ fn assistant_msg(text: &str) -> ResponseItem {
             annotations: None,
             logprobs: None,
             text: text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }
@@ -3989,7 +3991,8 @@ fn multi_agent_v2_interrupted_marker_uses_developer_input_message() {
                     "<turn_aborted>\n{}\n</turn_aborted>",
                     crate::context::TurnAborted::INTERRUPTED_NEUTRAL_GUIDANCE
                 ),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: Some(
                 InternalChatMessageMetadataPassthrough {

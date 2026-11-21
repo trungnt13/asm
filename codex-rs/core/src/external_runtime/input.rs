@@ -212,7 +212,7 @@ pub(crate) fn context_item(original: &ResponseItem) -> anyhow::Result<ResponseIt
     let context = match original {
         ResponseItem::Message { role, content, .. } => {
             let mut texts = Vec::new();
-            for part in content {
+            for part in content.iter() {
                 match part {
                     ContentItem::InputText { text } | ContentItem::OutputText { text, .. } => {
                         texts.push(text.as_str())
@@ -247,7 +247,7 @@ pub(crate) fn context_item(original: &ResponseItem) -> anyhow::Result<ResponseIt
                 "ASM supplied context (not the user's message); JSON data follows:\n{}\nEnd of ASM supplied context.",
                 serde_json::to_string(&context)?
             ),
-        }],
+        }].into(),
         phase: None,
         internal_chat_message_metadata_passthrough: Some(InternalChatMessageMetadataPassthrough {
             content_item_kinds: Some(vec![ContentItemKind(kind.to_owned())]),

@@ -627,7 +627,8 @@ async fn extension_tool_executors_are_model_visible_and_dispatchable() -> anyhow
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: "extension history".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };

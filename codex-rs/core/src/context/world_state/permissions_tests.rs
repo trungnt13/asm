@@ -284,7 +284,7 @@ fn persisted_permissions_are_detected_inside_bundled_developer_messages() {
     let ResponseItem::Message { content, .. } = &mut bundled_retained else {
         panic!("permissions should render as a message");
     };
-    content.insert(
+    std::sync::Arc::make_mut(content).insert(
         0,
         ContentItem::InputText {
             text: "Other developer instructions.".to_string(),

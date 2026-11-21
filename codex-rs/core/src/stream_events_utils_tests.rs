@@ -49,7 +49,8 @@ fn assistant_output_text_with_phase(text: &str, phase: Option<MessagePhase>) -> 
             annotations: None,
             logprobs: None,
             text: text.to_string(),
-        }],
+        }]
+        .into(),
         phase,
         internal_chat_message_metadata_passthrough: None,
     }

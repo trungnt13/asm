@@ -1161,7 +1161,8 @@ pub enum ResponseItem {
         #[ts(optional, as = "Option<ResponseItemId>")]
         id: Option<ResponseItemId>,
         role: String,
-        content: Vec<ContentItem>,
+        // Keep message content shared when a request edits only its metadata.
+        content: Arc<Vec<ContentItem>>,
         // Optional output-message phase (for example: "commentary", "final_answer").
         // Availability varies by provider/model, so downstream consumers must
         // preserve fallback behavior when this is absent.
@@ -2119,7 +2120,7 @@ impl From<ResponseInputItem> for ResponseItem {
                 status: None,
                 encrypted_content: None,
                 role,
-                content,
+                content: content.into(),
                 id: None,
                 phase,
                 internal_chat_message_metadata_passthrough: None,
@@ -2621,7 +2622,8 @@ mod tests {
                     annotations: None,
                     logprobs: None,
                     text: "answer text".to_string(),
-                }],
+                }]
+                .into(),
                 phase,
                 internal_chat_message_metadata_passthrough: None,
             };
@@ -2739,7 +2741,8 @@ mod tests {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "hello".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough,
         }

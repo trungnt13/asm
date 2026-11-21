@@ -446,7 +446,8 @@ fn restored_input_order_accounts_for_surviving_local_sources() {
                 role: "user".to_owned(),
                 content: vec![ContentItem::InputText {
                     text: "Inspect the deployment.".to_owned(),
-                }],
+                }]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }

@@ -753,7 +753,8 @@ async fn legacy_checkpoint_recovers_root_excerpt_before_discarding_backup(
             };
             *content = vec![ContentItem::InputText {
                 text: "Never publish publicly.".to_owned(),
-            }];
+            }]
+            .into();
             window.push(shortened.into());
             checkpoint.guardian_history = Some(GuardianHistoryCheckpoint(vec![source.into()]));
         }

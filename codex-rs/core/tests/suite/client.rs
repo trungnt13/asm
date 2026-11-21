@@ -1200,7 +1200,8 @@ async fn resume_sends_prior_items() {
         role: "user".to_string(),
         content: vec![codex_protocol::models::ContentItem::InputText {
             text: "resumed user message".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -1226,7 +1227,8 @@ async fn resume_sends_prior_items() {
             annotations: None,
             logprobs: None,
             text: "resumed system instruction".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -1252,7 +1254,8 @@ async fn resume_sends_prior_items() {
             annotations: None,
             logprobs: None,
             text: "resumed assistant message".to_string(),
-        }],
+        }]
+        .into(),
         phase: Some(MessagePhase::Commentary),
         internal_chat_message_metadata_passthrough: None,
     };
@@ -1435,7 +1438,8 @@ async fn resume_replays_legacy_js_repl_image_rollout_shapes() {
                         image_url: legacy_image_url.to_string(),
                     },
                     detail: Some(DEFAULT_IMAGE_DETAIL),
-                }],
+                }]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }),
@@ -2018,7 +2022,8 @@ async fn send_request_with_provider(provider: ModelProviderInfo) {
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: "hello".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }));
@@ -3718,7 +3723,8 @@ async fn azure_responses_request_does_not_store_and_preserves_prefixed_item_ids(
             annotations: None,
             logprobs: None,
             text: "message".into(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }));

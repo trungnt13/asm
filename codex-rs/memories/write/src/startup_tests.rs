@@ -1400,7 +1400,8 @@ async fn seed_stage1_candidate(
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
                     text: "remember this startup test conversation".to_string(),
-                }],
+                }]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }

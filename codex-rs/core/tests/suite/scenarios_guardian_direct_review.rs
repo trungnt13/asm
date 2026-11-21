@@ -337,7 +337,7 @@ async fn direct_exec_review_honors_hook_denial_before_assessment() -> Result<()>
     assert!(history.items.iter().any(|entry| {
         matches!(entry, RolloutItem::ResponseItem(item)
             if matches!(item.item.as_ref(), ResponseItem::Message { role, content, .. }
-                if role == "developer" && content == &[input_text(reason)]))
+                if role == "developer" && content.as_slice() == &[input_text(reason)]))
     }));
 
     assert!(!harness.path_exists("guardian-original").await?);

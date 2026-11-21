@@ -17,7 +17,7 @@ fn message(content: Vec<ContentItem>) -> ResponseItem {
         encrypted_content: None,
         id: None,
         role: "user".to_string(),
-        content,
+        content: content.into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }
@@ -222,7 +222,7 @@ fn file_audio_cutoff_does_not_backfill_older_uncharged_media() {
         let [ResponseItem::Message { content, .. }] = actual.as_slice() else {
             panic!("expected one truncated user message");
         };
-        assert_eq!(content, std::slice::from_ref(&trailing_text));
+        assert_eq!(content.as_slice(), std::slice::from_ref(&trailing_text));
     }
 }
 
@@ -276,7 +276,7 @@ fn older_media_keeps_both_labels_or_is_dropped_after_file_audio_fits() {
                 let ResponseItem::Message { content, .. } = item.as_ref() else {
                     panic!("expected message")
                 };
-                assert_eq!(content, &expected);
+                assert_eq!(content.as_ref(), &expected);
             }
         }
     }
@@ -335,7 +335,7 @@ fn later_image_parts_preserve_labels_audio_and_annotations() {
         else {
             unreachable!()
         };
-        *content = parts[start..].to_vec();
+        *content = parts[start..].to_vec().into();
         internal_chat_message_metadata_passthrough
             .as_mut()
             .unwrap()

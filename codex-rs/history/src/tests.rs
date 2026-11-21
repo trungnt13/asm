@@ -253,7 +253,8 @@ fn response_item_envelope_accessors_preserve_item() {
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: "hello".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -271,7 +272,8 @@ fn response_item_envelope_accessors_preserve_item() {
             annotations: None,
             logprobs: None,
             text: "goodbye".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -872,17 +874,17 @@ fn uploaded_audio_round_trips_in_canonical_message_content() -> Result<()> {
     let ResponseItem::Message { content, .. } = &mut message else {
         unreachable!()
     };
-    content.push(ContentItem::InputAudio {
+    std::sync::Arc::make_mut(content).push(ContentItem::InputAudio {
         audio: AudioReference::Inline {
             audio_url: "data:audio/wav;base64,aGVsbG8=".to_string(),
         },
     });
-    content.push(ContentItem::InputAudio {
+    std::sync::Arc::make_mut(content).push(ContentItem::InputAudio {
         audio: AudioReference::File {
             file_id: "file_audio".to_string(),
         },
     });
-    content.push(ContentItem::InputText {
+    std::sync::Arc::make_mut(content).push(ContentItem::InputText {
         text: "after audio".to_string(),
     });
     let envelope = ResponseItemEnvelope::new(message);
@@ -1170,7 +1172,8 @@ fn response_message(role: &str) -> ResponseItem {
         role: role.to_string(),
         content: vec![ContentItem::InputText {
             text: "hello".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }

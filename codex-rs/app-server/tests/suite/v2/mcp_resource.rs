@@ -676,7 +676,7 @@ async fn metadata_and_mcp_requests_complete_while_unrelated_resume_loads_config(
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
                     text: "Resume this unrelated thread.".to_string(),
-                }],
+                }].into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }]),

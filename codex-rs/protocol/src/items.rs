@@ -774,7 +774,7 @@ pub fn build_hook_prompt_message(fragments: &[HookPromptFragment]) -> Option<Res
         encrypted_content: None,
         id: None,
         role: "user".to_string(),
-        content,
+        content: content.into(),
         phase: None,
         internal_chat_message_metadata_passthrough: metadata
             .iter()

@@ -629,7 +629,8 @@ impl From<CompactedItem> for ResponseItem {
                 annotations: None,
                 logprobs: None,
                 text: value.message,
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }

@@ -229,7 +229,8 @@ async fn history_injection_skips_skill_discovery_after_initial_context() -> Resu
         role: "developer".to_string(),
         content: vec![ContentItem::InputText {
             text: text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };

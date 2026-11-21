@@ -33,7 +33,8 @@ fn preparation_canonicalizes_data_urls_and_rejects_remote_urls() {
                     audio_url: "https://example.com/audio.mp3".to_string(),
                 },
             },
-        ],
+        ]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }];
@@ -66,7 +67,8 @@ fn preparation_canonicalizes_data_urls_and_rejects_remote_urls() {
                 ContentItem::InputText {
                     text: "audio content omitted because it could not be processed".to_string(),
                 },
-            ],
+            ]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }]
@@ -91,7 +93,8 @@ fn preparation_replaces_invalid_message_audio_with_placeholders() {
                     audio_url: "data:audio/flac;base64,YXVkaW8=".to_string(),
                 },
             },
-        ],
+        ]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }];
@@ -112,7 +115,7 @@ fn preparation_replaces_invalid_message_audio_with_placeholders() {
                 ContentItem::InputText {
                     text: "audio content omitted because its format is not supported; use wav, mp3, m4a, webm, or ogg".to_string(),
                 },
-            ],
+            ].into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }]

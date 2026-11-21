@@ -63,30 +63,86 @@ impl AudioPreparationError {
 /// Canonicalizes audio inputs and replaces unsupported inputs with text placeholders.
 pub fn prepare_response_items(items: &mut [ResponseItem]) {
     for item in items {
-        match item {
-            ResponseItem::Message { content, .. } => prepare_message_content(content),
-            ResponseItem::FunctionCallOutput { output, .. }
-            | ResponseItem::CustomToolCallOutput { output, .. } => {
-                if let Some(content) = output.content_items_mut() {
-                    prepare_tool_output_content(content);
-                }
-            }
-            ResponseItem::AdditionalTools { .. }
-            | ResponseItem::Reasoning { .. }
-            | ResponseItem::AgentMessage { .. }
-            | ResponseItem::LocalShellCall { .. }
-            | ResponseItem::FunctionCall { .. }
-            | ResponseItem::ToolSearchCall { .. }
-            | ResponseItem::CustomToolCall { .. }
-            | ResponseItem::ToolSearchOutput { .. }
-            | ResponseItem::WebSearchCall { .. }
-            | ResponseItem::ImageGenerationCall { .. }
-            | ResponseItem::Compaction { .. }
-            | ResponseItem::ConfigurationUpdate { .. }
-            | ResponseItem::CompactionTrigger { .. }
-            | ResponseItem::ContextCompaction { .. }
-            | ResponseItem::Other => {}
+        if has_inline_audio(item) {
+            prepare_response_item(item);
         }
+    }
+}
+
+/// Keep shared history items intact when they have no inline audio to prepare.
+pub fn prepare_shared_response_item(item: &mut Arc<ResponseItem>) {
+    if has_inline_audio(item) {
+        prepare_response_item(Arc::make_mut(item));
+    }
+}
+
+fn has_inline_audio(item: &ResponseItem) -> bool {
+    match item {
+        ResponseItem::Message { content, .. } => content.iter().any(|part| {
+            matches!(
+                part,
+                ContentItem::InputAudio {
+                    audio: AudioReference::Inline { .. }
+                }
+            )
+        }),
+        ResponseItem::FunctionCallOutput { output, .. }
+        | ResponseItem::CustomToolCallOutput { output, .. } => {
+            output.content_items().is_some_and(|content| {
+                content.iter().any(|part| {
+                    matches!(
+                        part,
+                        FunctionCallOutputContentItem::InputAudio {
+                            audio: AudioReference::Inline { .. }
+                        }
+                    )
+                })
+            })
+        }
+        ResponseItem::AdditionalTools { .. }
+        | ResponseItem::Reasoning { .. }
+        | ResponseItem::AgentMessage { .. }
+        | ResponseItem::LocalShellCall { .. }
+        | ResponseItem::FunctionCall { .. }
+        | ResponseItem::ToolSearchCall { .. }
+        | ResponseItem::CustomToolCall { .. }
+        | ResponseItem::ToolSearchOutput { .. }
+        | ResponseItem::WebSearchCall { .. }
+        | ResponseItem::ImageGenerationCall { .. }
+        | ResponseItem::Compaction { .. }
+        | ResponseItem::ConfigurationUpdate { .. }
+        | ResponseItem::CompactionTrigger { .. }
+        | ResponseItem::ContextCompaction { .. }
+        | ResponseItem::Other => false,
+    }
+}
+
+fn prepare_response_item(item: &mut ResponseItem) {
+    match item {
+        ResponseItem::Message { content, .. } => {
+            prepare_message_content(Arc::make_mut(content).as_mut_slice());
+        }
+        ResponseItem::FunctionCallOutput { output, .. }
+        | ResponseItem::CustomToolCallOutput { output, .. } => {
+            if let Some(content) = output.content_items_mut() {
+                prepare_tool_output_content(content);
+            }
+        }
+        ResponseItem::AdditionalTools { .. }
+        | ResponseItem::Reasoning { .. }
+        | ResponseItem::AgentMessage { .. }
+        | ResponseItem::LocalShellCall { .. }
+        | ResponseItem::FunctionCall { .. }
+        | ResponseItem::ToolSearchCall { .. }
+        | ResponseItem::CustomToolCall { .. }
+        | ResponseItem::ToolSearchOutput { .. }
+        | ResponseItem::WebSearchCall { .. }
+        | ResponseItem::ImageGenerationCall { .. }
+        | ResponseItem::Compaction { .. }
+        | ResponseItem::ConfigurationUpdate { .. }
+        | ResponseItem::CompactionTrigger { .. }
+        | ResponseItem::ContextCompaction { .. }
+        | ResponseItem::Other => {}
     }
 }
 

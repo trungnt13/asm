@@ -636,7 +636,7 @@ async fn repro_16086_context_only_host_handoff() -> Result<()> {
                 return false;
             };
             matches!(envelope.item.as_ref(), ResponseItem::Message { role, content, .. }
-            if role == "developer" && content == &expected)
+            if role == "developer" && content.as_ref() == &expected)
         })
         .count();
     let requests = responses::received_responses_requests(&server).await;
@@ -674,7 +674,7 @@ async fn suspend_and_check_recoverable_prompt(
                 return false;
             };
             matches!(item.item.as_ref(), ResponseItem::Message { role, content, .. }
-            if role == "user" && content == &expected_content)
+            if role == "user" && content.as_ref() == &expected_content)
         })
         .count();
     assert_eq!(saved_prompts, 1);

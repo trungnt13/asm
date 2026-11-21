@@ -356,7 +356,7 @@ fn request_body<'a>(
             return Err(DecisionsError::UnsupportedInputItem);
         };
         let mut parts = Vec::with_capacity(content.len());
-        for part in content {
+        for part in content.iter() {
             match part {
                 ContentItem::InputText { .. } | ContentItem::OutputText { .. } => {
                     parts.push(json!(part));

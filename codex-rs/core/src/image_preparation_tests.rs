@@ -111,7 +111,8 @@ async fn replay_regenerates_the_recorded_jpeg_from_its_original() {
         content: vec![ContentItem::InputImage {
             image: ImageReference::Inline { image_url: source },
             detail: Some(ImageDetail::High),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -167,7 +168,8 @@ async fn preparation_preserves_small_image_bytes_and_replaces_remote_urls() {
                 },
                 detail: Some(ImageDetail::Low),
             },
-        ],
+        ]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }];
@@ -181,7 +183,8 @@ async fn preparation_preserves_small_image_bytes_and_replaces_remote_urls() {
                 image_url: "https://example.com/developer-image.png".to_string(),
             },
             detail: Some(ImageDetail::High),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     });
@@ -220,7 +223,8 @@ async fn preparation_preserves_small_image_bytes_and_replaces_remote_urls() {
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
                 text: REMOTE_IMAGE_URL_PLACEHOLDER.to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: Some(
                 InternalChatMessageMetadataPassthrough {
@@ -273,7 +277,8 @@ async fn detail_policies_apply_the_expected_budgets() {
             content: vec![ContentItem::InputImage {
                 image: ImageReference::Inline { image_url },
                 detail,
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }];
@@ -368,7 +373,8 @@ async fn upload_failure_keeps_resized_image_inline() {
         content: vec![ContentItem::InputImage {
             image: ImageReference::Inline { image_url },
             detail: Some(ImageDetail::High),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }];
@@ -434,7 +440,8 @@ async fn resize_notices_count_file_backed_images_and_skip_failed_images() {
                     },
                     detail: Some(ImageDetail::High),
                 },
-            ],
+            ]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: Some(
                 InternalChatMessageMetadataPassthrough {
@@ -560,7 +567,8 @@ async fn resize_notices_count_file_backed_images_and_skip_failed_images() {
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
                 text: expected_user_notice.to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: Some(
                 InternalChatMessageMetadataPassthrough {
@@ -616,7 +624,7 @@ async fn resize_notices_count_file_backed_images_and_skip_failed_images() {
                     "</image_resize_notice>"
                 )
                 .to_string(),
-            }],
+            }].into(),
             phase: None,
             internal_chat_message_metadata_passthrough: Some(
                 InternalChatMessageMetadataPassthrough {

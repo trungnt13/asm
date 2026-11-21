@@ -413,13 +413,13 @@ async fn collect_response(mut upstream: ModelResponseStream) -> SampleResult {
             ResponseEvent::OutputItemDone(ResponseItem::Message { role, content, .. })
                 if role == "assistant" =>
             {
-                for item in content {
+                for item in content.iter() {
                     match item {
                         ContentItem::OutputText { text: part, .. } => {
                             if text.len().saturating_add(part.len()) > MAX_OUTPUT_BYTES {
                                 return Err(internal_error("sample output exceeds limit"));
                             }
-                            text.push_str(&part);
+                            text.push_str(part);
                         }
                         _ => text_only = false,
                     }

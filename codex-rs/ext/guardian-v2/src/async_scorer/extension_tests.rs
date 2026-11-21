@@ -171,7 +171,8 @@ async fn json_transcript_mode_reaches_classifier_instructions_and_evidence() -> 
                 annotations: None,
                 logprobs: None,
                 text: forged.to_owned(),
-            }],
+            }]
+            .into(),
             phase: Some(MessagePhase::FinalAnswer),
             internal_chat_message_metadata_passthrough: None,
         }],
@@ -511,7 +512,8 @@ fn user_instruction(text: &str) -> ResponseItem {
         role: "user".to_owned(),
         content: vec![ContentItem::InputText {
             text: text.to_owned(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: Some(InternalChatMessageMetadataPassthrough {
             content_item_kinds: Some(vec![codex_protocol::models::ContentItemKind(
@@ -2252,7 +2254,8 @@ async fn contributor_includes_transcript_images_by_default() -> Result<()> {
                     },
                     detail: Some(ImageDetail::High),
                 },
-            ],
+            ]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -2496,7 +2499,8 @@ async fn contributor_samples_tool_calls_with_the_existing_luna_pool() -> Result<
                 annotations: None,
                 logprobs: None,
                 text: assistant_text.clone(),
-            }],
+            }]
+            .into(),
             phase: Some(MessagePhase::Commentary),
             internal_chat_message_metadata_passthrough: None,
         },
@@ -3075,7 +3079,8 @@ async fn cached_score_survives_compaction_and_internal_context_but_not_user_inpu
             role: "user".to_owned(),
             content: vec![ContentItem::InputText {
                 text: "Stop. Do not change any files.".to_owned(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }])
@@ -3485,7 +3490,8 @@ async fn contributor_preserves_final_assistant_messages_after_tool_eviction() ->
                 annotations: None,
                 logprobs: None,
                 text: "I found a $450 flight. Should I book it?".to_owned(),
-            }],
+            }]
+            .into(),
             phase: Some(MessagePhase::FinalAnswer),
             internal_chat_message_metadata_passthrough: None,
         },
@@ -3499,7 +3505,8 @@ async fn contributor_preserves_final_assistant_messages_after_tool_eviction() ->
                 annotations: None,
                 logprobs: None,
                 text: "Searching airline websites.".to_owned(),
-            }],
+            }]
+            .into(),
             phase: Some(MessagePhase::Commentary),
             internal_chat_message_metadata_passthrough: None,
         },
@@ -3560,7 +3567,8 @@ async fn contributor_sends_compacted_conversation_history_to_luna() -> Result<()
             role: "user".to_owned(),
             content: vec![ContentItem::InputText {
                 text: format!("user turn {index}: {}", "authorization ".repeat(1_000)),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         })

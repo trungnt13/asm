@@ -729,7 +729,8 @@ async fn preconnected_sampler_reuses_authenticated_websocket_for_classifications
                         ContentItem::InputText {
                             text: "The assistant inspected README.md.".to_owned(),
                         },
-                    ],
+                    ]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 }

@@ -73,7 +73,8 @@ fn assistant_message(text: impl Into<String>, phase: MessagePhase) -> ResponseIt
             annotations: None,
             logprobs: None,
             text: text.into(),
-        }],
+        }]
+        .into(),
         phase: Some(phase),
         internal_chat_message_metadata_passthrough: None,
     }
@@ -89,7 +90,8 @@ fn transcript_keeps_conversation_and_configured_sources() {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "Inspect the workspace.".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -128,7 +130,7 @@ fn transcript_keeps_conversation_and_configured_sources() {
             encrypted_content: None,
             id: None,
             role: "developer".to_string(),
-            content: Vec::new(),
+            content: Vec::new().into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -201,7 +203,8 @@ fn transcript_keeps_conversation_and_configured_sources() {
             content: expected_text
                 .into_iter()
                 .map(|text| ContentItem::InputText { text })
-                .collect(),
+                .collect::<Vec<_>>()
+                .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }]
@@ -691,7 +694,8 @@ fn transcript_does_not_protect_legacy_inter_agent_instructions() {
                 logprobs: None,
                 text: serde_json::to_string(&communication)
                     .expect("legacy inter-agent communication should serialize"),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -704,7 +708,8 @@ fn transcript_does_not_protect_legacy_inter_agent_instructions() {
                 annotations: None,
                 logprobs: None,
                 text: "I found a $450 flight. Should I book it?".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -760,7 +765,8 @@ fn transcript_reserves_separate_budget_for_recent_tool_evidence() {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: format!("user turn {index}: {}", "authorization ".repeat(1_000)),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         })
@@ -897,7 +903,8 @@ fn transcript_preserves_newest_manual_approval_when_message_budget_overflows() {
                 annotations: None,
                 logprobs: None,
                 text: older_text,
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -908,7 +915,8 @@ fn transcript_preserves_newest_manual_approval_when_message_budget_overflows() {
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
                 text: approval_text,
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -948,7 +956,8 @@ fn rejected_message_does_not_evict_retained_tool_entries() {
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: user_text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }];
@@ -972,7 +981,8 @@ fn rejected_message_does_not_evict_retained_tool_entries() {
             annotations: None,
             logprobs: None,
             text: "This message has no remaining budget.".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     });
@@ -1021,7 +1031,8 @@ fn transcript_evicts_non_user_entries_in_cacheable_chunks() {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "Inspect the workspace.".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }];
@@ -1159,7 +1170,7 @@ fn configured_reasoning_counts_against_message_budget() {
                     encrypted_content: None,
                     id: None,
                     role: "user".to_string(),
-                    content: vec![ContentItem::InputText { text }],
+                    content: vec![ContentItem::InputText { text }].into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 }
@@ -1225,7 +1236,8 @@ fn transcript_omits_media_payloads_and_keeps_readable_content() {
                         audio_url: "data:audio/wav;base64,audio-payload".to_string(),
                     },
                 },
-            ],
+            ]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -1380,7 +1392,7 @@ fn transcript_preserves_encrypted_agent_messages_and_omits_other_encrypted_field
     let text = context
         .iter()
         .filter_map(|item| match item {
-            ResponseItem::Message { content, .. } => Some(content),
+            ResponseItem::Message { content, .. } => Some(content.as_slice()),
             _ => None,
         })
         .flatten()

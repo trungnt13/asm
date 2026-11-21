@@ -306,7 +306,8 @@ fn missing_retained_fragment_is_rendered_again() {
         role: "developer".to_string(),
         content: vec![ContentItem::InputText {
             text: "<extension_test>current catalog</extension_test>".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };

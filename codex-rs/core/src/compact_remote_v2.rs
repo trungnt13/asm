@@ -1009,7 +1009,8 @@ mod tests {
             role: role.to_string(),
             content: vec![ContentItem::InputText {
                 text: text.to_string(),
-            }],
+            }]
+            .into(),
             phase,
             internal_chat_message_metadata_passthrough: None,
         }
@@ -1290,7 +1291,8 @@ mod tests {
                     },
                     detail: None,
                 },
-            ],
+            ]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }];
@@ -1327,7 +1329,8 @@ mod tests {
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {
                         text: "midd…1 tokens truncated…1234".to_string(),
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: Some(
                         InternalChatMessageMetadataPassthrough {
@@ -1372,7 +1375,8 @@ mod tests {
                     },
                     detail: None,
                 },
-            ],
+            ]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: Some(
                 InternalChatMessageMetadataPassthrough {
@@ -1443,7 +1447,8 @@ mod tests {
                         },
                         detail: None,
                     },
-                ],
+                ]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: Some(
                     InternalChatMessageMetadataPassthrough {
@@ -1473,7 +1478,8 @@ mod tests {
                     image_url: "data:image/png;base64,abc".to_string(),
                 },
                 detail: None,
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         };
@@ -1501,7 +1507,8 @@ mod tests {
                     image_url: "data:image/png;base64,abc".to_string(),
                 },
                 detail: None,
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         };

@@ -1024,7 +1024,7 @@ async fn run_guardian_subagent_review(
                 encrypted_content: None,
                 id: None,
                 role: "user".to_string(),
-                content: vec![ContentItem::InputText { text }],
+                content: vec![ContentItem::InputText { text }].into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }),
@@ -1032,20 +1032,23 @@ async fn run_guardian_subagent_review(
     }
     if matches!(root_context, RootContext::RetainedAtMessageLimit) {
         // The newest final answer must share the cap with user instructions and Q&A.
-        root_history_items.extend((0..14).map(|index| ResponseItem::Message {
-            status: None,
-            encrypted_content: None,
-            id: Some(ResponseItemId::with_suffix("root-instruction", index)),
-            role: "user".to_owned(),
-            content: vec![ContentItem::InputText {
-                text: if index == 1 {
-                    oversized_instruction.clone()
-                } else {
-                    format!("Root instruction {index}.")
-                },
-            }],
-            phase: None,
-            internal_chat_message_metadata_passthrough: None,
+        root_history_items.extend((0..14).map(|index| {
+            ResponseItem::Message {
+                status: None,
+                encrypted_content: None,
+                id: Some(ResponseItemId::with_suffix("root-instruction", index)),
+                role: "user".to_owned(),
+                content: vec![ContentItem::InputText {
+                    text: if index == 1 {
+                        oversized_instruction.clone()
+                    } else {
+                        format!("Root instruction {index}.")
+                    },
+                }]
+                .into(),
+                phase: None,
+                internal_chat_message_metadata_passthrough: None,
+            }
         }));
         let mut final_update = ev_assistant_message("root-final-update", ROOT_FINAL_UPDATE);
         final_update["item"]["phase"] = json!("final_answer");

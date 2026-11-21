@@ -100,7 +100,8 @@ fn response_item(metadata: InternalChatMessageMetadataPassthrough) -> ResponseIt
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: "hello".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: Some(metadata),
     }

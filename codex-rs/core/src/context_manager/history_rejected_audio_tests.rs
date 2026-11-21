@@ -28,7 +28,7 @@ fn message(content: Vec<ContentItem>) -> ResponseItem {
         status: None,
         id: None,
         role: "user".to_string(),
-        content,
+        content: content.into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }
@@ -261,7 +261,7 @@ fn projection_removes_only_rejected_audio_and_keeps_metadata_aligned() {
         panic!("expected retained first message")
     };
     assert_eq!(
-        content,
+        content.as_slice(),
         &[ContentItem::InputText {
             text: "first".to_string()
         }]

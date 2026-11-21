@@ -365,7 +365,8 @@ fn user_message(text: &str) -> ResponseItem {
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: Some(InternalChatMessageMetadataPassthrough {
             content_item_kinds: Some(vec![ContentItemKind("unknown".to_string())]),
@@ -418,7 +419,8 @@ fn assistant_message(text: &str) -> ResponseItem {
             annotations: None,
             logprobs: None,
             text: text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: Some(InternalChatMessageMetadataPassthrough {
             content_item_kinds: Some(vec![ContentItemKind("unknown".to_string())]),
@@ -632,7 +634,8 @@ fn skill_message(text: &str) -> ResponseItem {
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }
@@ -2941,7 +2944,8 @@ async fn prepares_resumed_history_before_installing_it() {
             ContentItem::InputText {
                 text: "keep me".to_string(),
             },
-        ],
+        ]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -2977,7 +2981,8 @@ async fn prepares_resumed_history_before_installing_it() {
                 ContentItem::InputText {
                     text: "keep me".to_string(),
                 },
-            ],
+            ]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: Some(
                 InternalChatMessageMetadataPassthrough {
@@ -4056,7 +4061,8 @@ async fn record_initial_history_assigns_and_persists_id_for_forked_response_item
         role: "developer".to_string(),
         content: vec![ContentItem::InputText {
             text: "Subagent guidance.".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: Some(InternalChatMessageMetadataPassthrough {
             content_item_kinds: Some(vec![ContentItemKind(
@@ -11167,7 +11173,8 @@ async fn record_context_updates_and_set_reference_context_item_reinjects_full_co
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: format!("{}\nsummary", crate::compact::SUMMARY_PREFIX),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -12519,7 +12526,8 @@ async fn task_finish_emits_turn_item_lifecycle_for_leftover_pending_user_input()
                 },
                 detail: Some(ImageDetail::Original),
             },
-        ],
+        ]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };
@@ -12698,7 +12706,8 @@ async fn abort_empty_active_turn_preserves_pending_input() {
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: "late pending input".to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     };

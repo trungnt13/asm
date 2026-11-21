@@ -812,7 +812,7 @@ pub(super) fn user_message(content: Vec<ContentItem>) -> ResponseItem {
         encrypted_content: None,
         id: None,
         role: "user".to_owned(),
-        content,
+        content: content.into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }

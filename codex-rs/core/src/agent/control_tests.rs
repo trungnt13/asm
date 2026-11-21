@@ -225,7 +225,8 @@ fn user_message(text: &str) -> ResponseItem {
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }
@@ -241,7 +242,8 @@ fn assistant_message(text: &str, phase: Option<MessagePhase>) -> ResponseItem {
             annotations: None,
             logprobs: None,
             text: text.to_string(),
-        }],
+        }]
+        .into(),
         phase,
         internal_chat_message_metadata_passthrough: None,
     }
@@ -2599,7 +2601,8 @@ async fn spawn_agent_fork_from_paginated_parent_uses_model_context_prefix(
                 role: "developer".to_string(),
                 content: vec![ContentItem::InputText {
                     text: "id-less inherited context".to_string(),
-                }],
+                }]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }),
@@ -3124,7 +3127,7 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
                     role: "developer".to_string(),
                     content: vec![ContentItem::InputText {
                         text: "Parent root guidance.".to_string(),
-                    }],
+                    }].into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 },
@@ -3135,7 +3138,7 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
                     role: "developer".to_string(),
                     content: vec![ContentItem::InputText {
                         text: "Parent subagent guidance.".to_string(),
-                    }],
+                    }].into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 },
@@ -3165,7 +3168,7 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
                         ContentItem::InputText {
                             text: replacement_fragment.clone(),
                         },
-                    ],
+                    ].into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: Some(
                         InternalChatMessageMetadataPassthrough {
@@ -3320,7 +3323,7 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
             ContentItem::InputText {
                 text: replacement_fragment,
             },
-        ],
+        ].into(),
         phase: None,
         internal_chat_message_metadata_passthrough: Some(
             InternalChatMessageMetadataPassthrough {
@@ -3515,7 +3518,7 @@ async fn spawn_agent_fork_strips_parent_usage_hints_from_compacted_history() {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "compacted parent summary".to_string(),
-            }],
+            }].into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -3528,7 +3531,7 @@ async fn spawn_agent_fork_strips_parent_usage_hints_from_compacted_history() {
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
                 text: "Previous parent root guidance.".to_string(),
-            }],
+            }].into(),
             phase: None,
             internal_chat_message_metadata_passthrough: Some(
                 InternalChatMessageMetadataPassthrough {
@@ -3554,7 +3557,7 @@ async fn spawn_agent_fork_strips_parent_usage_hints_from_compacted_history() {
                 ContentItem::InputText {
                     text: "Preserved compacted developer context.".to_string(),
                 },
-            ],
+            ].into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -3775,7 +3778,8 @@ async fn spawn_agent_full_fork_restores_instructions_after_compaction_discards_p
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "compacted parent summary".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -3786,7 +3790,8 @@ async fn spawn_agent_full_fork_restores_instructions_after_compaction_discards_p
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
                 text: "Preserved compacted developer context.".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         },
@@ -3811,7 +3816,8 @@ async fn spawn_agent_full_fork_restores_instructions_after_compaction_discards_p
                 role: "developer".to_string(),
                 content: vec![ContentItem::InputText {
                     text: "Parent developer instructions.".to_string(),
-                }],
+                }]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }),
@@ -3996,7 +4002,8 @@ async fn spawn_agent_full_fork_legacy_compaction_rebuilds_child_instructions_onc
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: "parent task before legacy compaction".to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         };
@@ -4049,7 +4056,8 @@ async fn spawn_agent_full_fork_legacy_compaction_rebuilds_child_instructions_onc
                 role: "developer".to_string(),
                 content: vec![ContentItem::InputText {
                     text: instructions.to_string(),
-                }],
+                }]
+                .into(),
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }));
@@ -4061,7 +4069,8 @@ async fn spawn_agent_full_fork_legacy_compaction_rebuilds_child_instructions_onc
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
                 text: stale_managed_fragment.to_string(),
-            }],
+            }]
+            .into(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }));
@@ -4195,7 +4204,7 @@ async fn spawn_agent_full_fork_legacy_compaction_rebuilds_child_instructions_onc
             if role != "developer" {
                 continue;
             }
-            for content_item in content {
+            for content_item in content.iter() {
                 if let ContentItem::InputText { text } = content_item {
                     instruction_count += usize::from(text == "Child developer instructions.");
                     if ModelInstructions::matches_text(text) {

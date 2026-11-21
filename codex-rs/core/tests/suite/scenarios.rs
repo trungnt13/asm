@@ -800,7 +800,9 @@ async fn unavailable_images_are_rechecked_without_rewriting_history() -> Result<
         .into_iter()
         .filter_map(|item| match item {
             RolloutItem::ResponseItem(envelope) => match envelope.into_item() {
-                ResponseItem::Message { content, .. } => Some(content),
+                ResponseItem::Message { content, .. } => {
+                    Some(std::sync::Arc::unwrap_or_clone(content))
+                }
                 _ => None,
             },
             _ => None,

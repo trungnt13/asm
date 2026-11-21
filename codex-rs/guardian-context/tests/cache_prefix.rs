@@ -61,7 +61,8 @@ fn user_message(texts: Vec<String>) -> ResponseItem {
         content: texts
             .into_iter()
             .map(|text| ContentItem::InputText { text })
-            .collect(),
+            .collect::<Vec<_>>()
+            .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }
@@ -322,7 +323,7 @@ fn elastic_verified_answers_preserve_question_answer_identity() {
         let evidence = messages
             .into_iter()
             .flat_map(|message| match message {
-                ResponseItem::Message { content, .. } => content,
+                ResponseItem::Message { content, .. } => std::sync::Arc::unwrap_or_clone(content),
                 _ => panic!("text evidence"),
             })
             .filter_map(|item| match item {

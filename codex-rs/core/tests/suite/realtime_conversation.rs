@@ -3796,7 +3796,7 @@ async fn conversation_startup_context_current_thread_selects_many_turns_by_budge
                     encrypted_content: None,
                     id: None,
                     role: "user".to_string(),
-                    content: vec![ContentItem::InputText { text: user_turn }],
+                    content: vec![ContentItem::InputText { text: user_turn }].into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 },
@@ -3809,7 +3809,8 @@ async fn conversation_startup_context_current_thread_selects_many_turns_by_budge
                         annotations: None,
                         logprobs: None,
                         text: assistant_turn,
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 },

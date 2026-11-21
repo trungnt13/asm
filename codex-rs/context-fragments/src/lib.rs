@@ -12,6 +12,7 @@ pub use additional_context::AdditionalContextUserFragment;
 pub use additional_context::MAX_ADDITIONAL_CONTEXT_VALUE_TOKENS;
 pub use annotated_content::AnnotatedContent;
 pub use annotated_content::message_from_parts;
+pub use annotated_content::normalize_message_annotations;
 pub use annotated_content::set_annotated_content;
 pub use annotated_content::to_annotated_content;
 pub use annotated_content::truncate_annotated_text;

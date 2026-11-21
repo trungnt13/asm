@@ -5875,7 +5875,8 @@ mod tests {
                     role: "user".into(),
                     content: vec![codex_protocol::models::ContentItem::InputText {
                         text: "plain text".into(),
-                    }],
+                    }]
+                    .into(),
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
                 }

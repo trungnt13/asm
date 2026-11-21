@@ -130,7 +130,7 @@ fn preparation_preserves_committed_prefix_and_selects_only_new_entries_and_image
         version: 1,
     };
     if let ResponseItem::Message { content, .. } = &mut history.items[0] {
-        content.push(images[1].clone());
+        std::sync::Arc::make_mut(content).push(images[1].clone());
     }
     let mut state = ConversationState::default();
     let config = sample_request("parent");

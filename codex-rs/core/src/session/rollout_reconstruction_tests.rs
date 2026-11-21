@@ -217,7 +217,8 @@ fn user_message(text: &str) -> ResponseItem {
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }
@@ -233,7 +234,8 @@ fn assistant_message(text: &str) -> ResponseItem {
             annotations: None,
             logprobs: None,
             text: text.to_string(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }
@@ -272,7 +274,8 @@ fn inter_agent_assistant_message(text: &str) -> ResponseItem {
             annotations: None,
             logprobs: None,
             text: serde_json::to_string(&communication).unwrap(),
-        }],
+        }]
+        .into(),
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }

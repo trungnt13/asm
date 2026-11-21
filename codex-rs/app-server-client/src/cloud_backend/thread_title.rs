@@ -180,10 +180,10 @@ impl CloudTitleClient {
                         ..
                     }) if role == "assistant" && phase != Some(MessagePhase::Commentary) => {
                         let mut text = String::new();
-                        for item in content {
+                        for item in content.iter() {
                             if let ContentItem::OutputText { text: part, .. } = item {
                                 ensure!(text.len() + part.len() <= 8 * 1024, "Cloud title is too large");
-                                text.push_str(&part);
+                                text.push_str(part);
                             }
                         }
                         title = Some(text);

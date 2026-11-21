@@ -174,7 +174,8 @@ mod tests {
                                 },
                                 detail: None,
                             },
-                        ],
+                        ]
+                        .into(),
                         phase: None,
                         internal_chat_message_metadata_passthrough: None,
                     }])),
