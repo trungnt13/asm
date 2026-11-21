@@ -573,9 +573,9 @@ pub(super) async fn prepare_forked_history(
         &mut forked_rollout_items,
         parent_thread
             .session
-            .clone_history()
+            .shared_history_items()
             .await
-            .annotated_items(),
+            .as_slice(),
     );
     if preserve_fork_prefix {
         forked_rollout_items.push(RolloutItem::ResponseItem(

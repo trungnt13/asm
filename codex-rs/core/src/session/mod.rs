@@ -5861,6 +5861,11 @@ impl Session {
         state.clone_history()
     }
 
+    pub(crate) async fn shared_history_items(&self) -> Arc<Vec<ResponseItemEnvelope>> {
+        let state = self.state.lock().await;
+        state.history.shared_annotated_items()
+    }
+
     /// Captures the history lifetime without exposing mutable session state.
     pub(crate) async fn history_reset(&self) -> (u64, CancellationToken) {
         let state = self.state.lock().await;
