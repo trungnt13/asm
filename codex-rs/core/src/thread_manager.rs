@@ -2966,6 +2966,9 @@ impl ThreadManagerState {
             config.apply_subagent_tools().map_err(|err| {
                 CodexErr::InvalidRequest(format!("invalid subagent_tools policy: {err}"))
             })?;
+            if !config.subagent_tools.collaboration {
+                thread_extension_init.remove::<codex_message_board::LocalBoardConnection>();
+            }
             if config.subagent_mcp_disabled {
                 thread_extension_init.insert(crate::mcp::SubagentMcpDisabled);
             }
@@ -3038,8 +3041,10 @@ impl ThreadManagerState {
         if portable {
             prompt_cache_key = PromptCacheKey::default();
             if session_source.is_non_root_agent() {
-                config.base_instructions = None;
-                config.base_instructions_provenance = None;
+                if !config.has_role_base_instructions {
+                    config.base_instructions = None;
+                    config.base_instructions_provenance = None;
+                }
                 config.developer_instructions =
                     config.role_developer_instructions.clone().or_else(|| {
                         config

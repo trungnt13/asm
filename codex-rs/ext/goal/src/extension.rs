@@ -123,6 +123,13 @@ where
                         .ok()
                         .filter(|_| input.session_source.is_non_root_agent())
                 })
+                .filter(|_| {
+                    enabled
+                        || matches!(
+                            input.session_source,
+                            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+                        )
+                })
                 .and_then(|parent_thread_id| {
                     self.goal_service
                         .runtime_for_thread(parent_thread_id)
@@ -462,12 +469,12 @@ where
             let Some(runtime) = goal_runtime_handle(thread_store) else {
                 return;
             };
-            if !runtime.is_enabled() {
-                return;
-            }
-
+            // A child without goal tools still spends its root goal's budget.
             if let Some(root_accounting_state) = runtime.root_accounting_state() {
                 root_accounting_state.record_descendant_token_usage(&token_usage.last_token_usage);
+            }
+            if !runtime.is_enabled() {
+                return;
             }
             let _ = runtime
                 .accounting_state()

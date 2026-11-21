@@ -436,6 +436,7 @@ pub struct ModelClient {
     event_sender: Option<Sender<ProtocolEvent>>,
     http_client_factory: HttpClientFactory,
     restored_history: bool,
+    subagent_collaboration_disabled: bool,
     continue_when_model_at_capacity: bool,
     request_contributors: Vec<Arc<dyn codex_extension_api::ModelRequestContributor>>,
     budget_policy: Option<crate::rollout_budget::ThreadBudgetPolicy>,
@@ -854,6 +855,7 @@ impl ModelClient {
             event_sender: None,
             http_client_factory,
             restored_history: false,
+            subagent_collaboration_disabled: false,
             continue_when_model_at_capacity: false,
             request_contributors,
             budget_policy: None,
@@ -866,6 +868,11 @@ impl ModelClient {
 
     pub(crate) fn with_executed_tool_calls(mut self, recorder: ExecutedToolCalls) -> Self {
         self.executed_tool_calls = Some(recorder);
+        self
+    }
+
+    pub(crate) fn with_subagent_collaboration_disabled(mut self, disabled: bool) -> Self {
+        self.subagent_collaboration_disabled = disabled;
         self
     }
 
@@ -1401,6 +1408,11 @@ impl ModelClient {
         include_internal: bool,
     ) -> Result<ResponsesApiRequest> {
         let mut input = prompt.get_formatted_input_for_request(model_info);
+        if self.subagent_collaboration_disabled {
+            // A preserved fork can advertise an ancestor's tools. Filter the request
+            // for sampling and compaction without changing the persisted transcript.
+            crate::session::multi_agents::remove_collaboration_role_instructions(&mut input);
+        }
         if !self.reasoning_effort_override_enabled(model_info) {
             // Unsupported models and disabled overrides must also accept saved history.
             // Filter only the request copy; persisted history remains unchanged.
