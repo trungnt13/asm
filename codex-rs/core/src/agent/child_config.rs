@@ -193,6 +193,12 @@ fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, String> {
     config.role_model_context_window = None;
     config.has_role_base_instructions = false;
     config.role_developer_instructions = None;
+    if let Some(rubric) = config.role_system1_base_rubric.take() {
+        config.system1.rubric_instructions = rubric;
+        config.config_layer_stack = config
+            .config_layer_stack
+            .without_last_session_section_key("system1", "rubric_instructions");
+    }
     if let Some((min, max)) = config.role_system1_base_bounds.take() {
         let reset = toml::Value::try_from(serde_json::json!({
             "system1": { "min_effort": min, "max_effort": max }
