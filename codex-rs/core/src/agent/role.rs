@@ -56,6 +56,7 @@ struct System1RoleOverride {
     enabled: Option<bool>,
     min_effort: Option<ReasoningEffort>,
     max_effort: Option<ReasoningEffort>,
+    rubric_instructions: Option<String>,
 }
 
 /// Applies typed role overrides to the existing parent-derived configuration.
@@ -104,11 +105,14 @@ async fn apply_role_to_config_inner(
     let system1_override = role_config
         .system1
         .as_ref()
-        .filter(|_| disables_system1 || has_min || has_max)
+        .filter(|settings| {
+            disables_system1 || has_min || has_max || settings.rubric_instructions.is_some()
+        })
         .map(|settings| System1RoleOverride {
             enabled: disables_system1.then_some(false),
             min_effort: has_min.then(|| settings.min_effort.clone()),
             max_effort: has_max.then(|| settings.max_effort.clone()),
+            rubric_instructions: settings.rubric_instructions.clone(),
         });
     let mut overrides = AgentRoleOverrides {
         developer_instructions: role_config.developer_instructions,
@@ -288,8 +292,14 @@ mod role_overrides {
                 if let Some(max) = &system1.max_effort {
                     next_config.system1.max_effort = max.clone();
                 }
-                next_config.system1.validate().map_err(|err| anyhow!(err))?;
             }
+            if let Some(rubric) = &system1.rubric_instructions {
+                next_config
+                    .role_system1_base_rubric
+                    .get_or_insert_with(|| config.system1.rubric_instructions.clone());
+                next_config.system1.rubric_instructions = Some(rubric.clone());
+            }
+            next_config.system1.validate().map_err(|err| anyhow!(err))?;
         }
         for key in overrides.features.keys() {
             if let Some(feature) = feature_for_key(key) {

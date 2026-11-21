@@ -691,6 +691,41 @@ impl ConfigLayerStack {
         Ok(self)
     }
 
+    /// Remove the newest session override for this key to restore earlier preferences.
+    pub fn without_last_session_section_key(mut self, section: &str, key: &str) -> Self {
+        if let Some(index) = self.layers.iter().rposition(|layer| {
+            layer.name == ConfigLayerSource::SessionFlags
+                && !layer.is_disabled()
+                && layer
+                    .config
+                    .get(section)
+                    .and_then(|table| table.get(key))
+                    .is_some()
+        }) {
+            let mut table = self.layers[index]
+                .config
+                .as_table()
+                .expect("session config table")
+                .clone();
+            let section_table = table[section]
+                .as_table_mut()
+                .expect("session section table");
+            section_table.remove(key);
+            if section_table.is_empty() {
+                table.remove(section);
+            }
+            if table.is_empty() {
+                self.layers.remove(index);
+            } else {
+                self.layers[index] = Arc::new(ConfigLayerEntry::new(
+                    ConfigLayerSource::SessionFlags,
+                    TomlValue::Table(table),
+                ));
+            }
+        }
+        self
+    }
+
     pub fn with_session_plugins(self, plugins: TomlValue) -> std::io::Result<Self> {
         self.with_session_section("plugins", plugins)
     }

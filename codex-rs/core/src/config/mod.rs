@@ -1166,6 +1166,8 @@ pub struct Config {
     pub(crate) role_system1_disabled: bool,
     /// Restores inherited bounds before a new child applies its own role.
     pub(crate) role_system1_base_bounds: Option<(ReasoningEffort, ReasoningEffort)>,
+    /// Saves the pre-role rubric, including its absence, for child configuration.
+    pub(crate) role_system1_base_rubric: Option<Option<String>>,
     /// Runtime-only revision seed when an evicted child session is reloaded.
     pub system1_initial_revision: u64,
     pub system1_initial_error: Option<codex_protocol::protocol::System1Error>,
@@ -5161,6 +5163,7 @@ impl Config {
             system1,
             role_system1_disabled: false,
             role_system1_base_bounds: None,
+            role_system1_base_rubric: None,
             system1_initial_revision: 0,
             system1_initial_error: None,
             system1_initial_failure_episode: 0,
