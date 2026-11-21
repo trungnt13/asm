@@ -805,7 +805,10 @@ impl App {
                         self.chat_widget.current_reasoning_effort();
                     if let Some((model, effort, service_tier)) = model_selection {
                         match crate::boxed_future!(self.load_new_session_config(app_server, Some(&model))).await {
-                            Ok((config, _)) => fork_config.model_provider_id = config.model_provider_id,
+                            Ok((config, _)) => {
+                                fork_config.model_provider_id = config.model_provider_id;
+                                fork_config.model_providers = config.model_providers;
+                            }
                             Err(err) => {
                                 self.chat_widget.fork_in_progress = false;
                                 self.chat_widget.add_error_message(err.to_string());
@@ -842,6 +845,7 @@ impl App {
                         selected_profile.as_ref(),
                     ).await {
                         Ok(mut forked) => {
+                            let handoff = switching_model.then(|| self.chat_widget.pause_input_for_resume_handoff());
                             let draft = switching_model.then(|| self.chat_widget.composer_draft_snapshot());
                             let retained_input = (!switching_model && from_locked_thread)
                                 .then(|| self.chat_widget.capture_thread_input_state())
@@ -863,16 +867,19 @@ impl App {
                                 None
                             };
                             self.retain_thread_subscriptions();
-                            match self
-                                .replace_chat_widget_with_app_server_thread(
+                            let attached = self
+                                .replace_chat_widget_with_account(
                                     tui,
                                     app_server,
                                     forked,
                                     ThreadAttachPresentation::SessionLineage,
                                     /*initial_user_message*/ None,
+                                    /*account*/ None,
+                                    switching_model.then_some(thread_id),
                                 )
-                                .await
-                            {
+                                .await;
+                            drop(handoff);
+                            match attached {
                                 Ok(()) => {
                                     if selected_profile.is_some() {
                                         self.adopt_inherited_server_selection();

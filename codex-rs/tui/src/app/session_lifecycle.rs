@@ -1809,7 +1809,7 @@ impl App {
         init.initial_plan_type = account.plan;
     }
 
-    async fn replace_chat_widget_with_account(
+    pub(super) async fn replace_chat_widget_with_account(
         &mut self,
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
