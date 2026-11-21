@@ -304,11 +304,12 @@ fn collect_transcript_for_review(
                         .native_multi_agent_namespace
                         .as_deref()
                         .is_some_and(|configured| {
-                            namespace
+                            let recorded = namespace
                                 .as_deref()
                                 .filter(|namespace| !namespace.is_empty())
-                                .unwrap_or("functions")
-                                == configured
+                                .unwrap_or("functions");
+                            recorded == configured
+                                || (recorded == "collaboration" && configured == "agents")
                         })
                     && matches!(
                         name.as_str(),

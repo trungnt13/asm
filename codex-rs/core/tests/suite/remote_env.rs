@@ -3070,7 +3070,7 @@ async fn deferred_executor_spawn_agent_inherits_ready_step_environments() -> Res
     let wait_call_id = "wait-for-spawn-environment";
     let spawn_call_id = "spawn-in-ready-environment";
     let message = "inspect the ready step environment";
-    let namespace = "collaboration";
+    let namespace = "agents";
     let spawn_arguments =
         json!({ "message": message, "task_name": "worker", "fork_turns": "all" }).to_string();
     let response_mock = mount_sse_sequence(

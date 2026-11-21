@@ -777,6 +777,40 @@ fn request_copy_needs_edit(
             ))
 }
 
+fn without_legacy_agent_declarations(
+    tools: &[serde_json::Value],
+) -> Option<Vec<serde_json::Value>> {
+    let is_agent_function = |tool: &serde_json::Value| {
+        tool["type"] == "function"
+            && tool["name"]
+                .as_str()
+                .is_some_and(crate::tools::multi_agent_tool::is_multi_agent_v2_tool)
+    };
+    let mut filtered = None;
+    for (index, tool) in tools.iter().enumerate() {
+        if tool["type"] == "namespace"
+            && tool["name"] == crate::config::LEGACY_MULTI_AGENT_V2_TOOL_NAMESPACE
+            && let Some(members) = tool["tools"].as_array()
+            && members.iter().any(is_agent_function)
+        {
+            let remaining: Vec<_> = members
+                .iter()
+                .filter(|member| !is_agent_function(member))
+                .cloned()
+                .collect();
+            let filtered = filtered.get_or_insert_with(|| tools[..index].to_vec());
+            if !remaining.is_empty() {
+                let mut tool = tool.clone();
+                tool["tools"] = serde_json::Value::Array(remaining);
+                filtered.push(tool);
+            }
+        } else if let Some(filtered) = &mut filtered {
+            filtered.push(tool.clone());
+        }
+    }
+    filtered
+}
+
 impl ModelClient {
     #[allow(clippy::too_many_arguments)]
     /// Creates a new session-scoped `ModelClient`.
@@ -1420,6 +1454,31 @@ impl ModelClient {
         }
         let is_openai = self.state.provider.info().is_openai();
         let request_ids = self.state.context_ids.request_ids(self.state.thread_id);
+        if is_openai {
+            // Old incremental declarations can be rejected even after the namespace was
+            // withdrawn. Keep saved history and unchanged request items intact.
+            input.retain_mut(|item| {
+                let ResponseItem::AdditionalTools { id, role, tools } = item.as_ref() else {
+                    return true;
+                };
+                let Some(tools) = without_legacy_agent_declarations(tools) else {
+                    return true;
+                };
+                if tools.is_empty() {
+                    return false;
+                }
+                let id = id.as_ref().map(|id| {
+                    let identity = serde_json::json!([id, &tools]).to_string();
+                    request_ids.id_by_content("at", identity.as_bytes())
+                });
+                *item = Arc::new(ResponseItem::AdditionalTools {
+                    id,
+                    role: role.clone(),
+                    tools: Arc::from(tools),
+                });
+                true
+            });
+        }
         let mut prefix = Vec::new();
         let tools = if model_info.use_responses_lite {
             if !prompt.tools.is_empty() {

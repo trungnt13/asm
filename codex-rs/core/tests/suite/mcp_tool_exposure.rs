@@ -351,12 +351,7 @@ async fn root_and_spawned_subagent_receive_distinct_mcp_session_sources() -> Res
         },
         sse(vec![
             ev_response_created("resp-parent-spawn"),
-            ev_function_call_with_namespace(
-                SPAWN_CALL_ID,
-                "collaboration",
-                "spawn_agent",
-                &spawn_args,
-            ),
+            ev_function_call_with_namespace(SPAWN_CALL_ID, "agents", "spawn_agent", &spawn_args),
             ev_completed("resp-parent-spawn"),
         ]),
     )

@@ -42,7 +42,7 @@ async fn spawn_inherits_captured_settings_after_a_turn_update(
         } else {
             "none"
         });
-    let namespace = "collaboration";
+    let namespace = "agents";
     if let Some(effort) = &requested_effort {
         spawn_arguments["reasoning_effort"] = json!(effort);
     }

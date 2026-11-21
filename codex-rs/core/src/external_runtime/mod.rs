@@ -47,6 +47,7 @@ use codex_async_utils::OrCancelExt;
 use codex_external_runtime::ExternalTurnFailure;
 use codex_history::RolloutItem;
 use codex_protocol::error::CodexErr;
+use codex_protocol::models::ContentItemNamespace;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::NativeRuntime;
 use codex_protocol::openai_models::ReasoningEffort;
@@ -455,6 +456,13 @@ async fn run_conversation(
                 (None, Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
                     let inherited = portable::inherited_prefix(original_history.annotated_items())?;
                     let local = original_history.raw_items().skip(inherited.len());
+                    let agent_namespace = turn
+                        .config
+                        .multi_agent_v2
+                        .tool_namespace
+                        .clone()
+                        .map(ContentItemNamespace::from)
+                        .unwrap_or(ContentItemNamespace::Functions);
                     let previous_input = local.clone().filter(|item| {
                         !matches!(item, ResponseItem::Message {
                             role, content, internal_chat_message_metadata_passthrough: Some(metadata), ..
@@ -474,7 +482,9 @@ async fn run_conversation(
                                 ) || role == "developer"
                                     && matches!(&part.provenance,
                                         codex_protocol::models::ContentItemProvenance::Tool {
-                                            namespace: Some(codex_protocol::models::ContentItemNamespace::Collaboration) })
+                                            namespace: Some(namespace) }
+                                            if *namespace == ContentItemNamespace::Collaboration
+                                                || *namespace == agent_namespace)
                                     && metadata.content_item_kinds.as_ref().and_then(|kinds| kinds.get(index))
                                         .is_some_and(|kind| matches!(kind.as_str(),
                                             "multi_agent.mode_instructions" | codex_prompts::MultiAgentRoleInstructions::KIND)))
