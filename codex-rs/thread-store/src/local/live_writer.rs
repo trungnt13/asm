@@ -289,7 +289,7 @@ async fn seal_realtime_records(
         let mut items = into_persisted_rollout_items(items, history_mode);
         let next = codex_rollout::stamp_item_ordinals(*cursor, &mut items);
         recorder
-            .record_canonical_items(&items)
+            .record_canonical_items_owned(items)
             .await
             .map_err(thread_store_io_error)?;
         *cursor = next;
@@ -556,7 +556,7 @@ async fn write_and_project(
             }
             let next = codex_rollout::stamp_item_ordinals(*cursor, &mut items);
             recorder
-                .record_canonical_items(&items)
+                .record_canonical_items_owned(items)
                 .await
                 .map_err(thread_store_io_error)?;
             // Once queued, the recorder owns the batch even if flush is cancelled or retried.

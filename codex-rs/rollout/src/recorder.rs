@@ -1117,11 +1117,19 @@ impl RolloutRecorder {
     }
 
     pub async fn record_canonical_items(&self, items: &[RolloutItem]) -> std::io::Result<()> {
+        self.record_canonical_items_owned(items.to_vec()).await
+    }
+
+    /// Queues an already-filtered batch without copying its items.
+    pub async fn record_canonical_items_owned(
+        &self,
+        items: Vec<RolloutItem>,
+    ) -> std::io::Result<()> {
         if items.is_empty() {
             return Ok(());
         }
         self.tx
-            .send(RolloutCmd::AddItems(items.to_vec()))
+            .send(RolloutCmd::AddItems(items))
             .await
             .map_err(|e| {
                 self.writer_task.terminal_failure().unwrap_or_else(|| {
