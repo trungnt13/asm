@@ -49,6 +49,13 @@ struct AgentRoleOverrides {
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     features: BTreeMap<String, bool>,
     skills: Option<SkillsConfig>,
+    subagent_tools: Option<SubagentToolsRoleOverride>,
+}
+
+/// Projects a role's collaboration restriction into the child's `[subagent_tools]` layer.
+#[derive(Serialize)]
+struct SubagentToolsRoleOverride {
+    collaboration: bool,
 }
 
 #[derive(Serialize)]
@@ -90,7 +97,7 @@ async fn apply_role_to_config_inner(
     let Some(config_file) = role.config_file.as_ref() else {
         return Ok(None);
     };
-    let (role_layer_toml, base_instructions) =
+    let (role_layer_toml, base_instructions, collaboration) =
         load_role_layer_toml(config, config_file, is_built_in, role_name).await?;
     let system1 = role_layer_toml
         .get("system1")
@@ -127,6 +134,9 @@ async fn apply_role_to_config_inner(
             .web_search
             .filter(|mode| *mode == WebSearchMode::Disabled),
         system1: system1_override,
+        subagent_tools: (collaboration == Some(false)).then_some(SubagentToolsRoleOverride {
+            collaboration: false,
+        }),
         ..Default::default()
     };
 
@@ -185,13 +195,13 @@ async fn load_role_layer_toml(
     config_file: &Path,
     is_built_in: bool,
     role_name: &str,
-) -> anyhow::Result<(TomlValue, Option<String>)> {
-    let (role_config_toml, role_config_base, base_instructions) = if is_built_in {
+) -> anyhow::Result<(TomlValue, Option<String>, Option<bool>)> {
+    let (role_config_toml, role_config_base, base_instructions, collaboration) = if is_built_in {
         let role_config_contents = built_in::config_file_contents(config_file)
             .map(str::to_owned)
             .ok_or(anyhow!("No corresponding config content"))?;
         let role_config_toml: TomlValue = toml::from_str(&role_config_contents)?;
-        (role_config_toml, config.codex_home.as_path(), None)
+        (role_config_toml, config.codex_home.as_path(), None, None)
     } else {
         let role_config_contents = read_sensitive_file_to_string(config_file).await?;
         let role_config_base = config_file
@@ -203,13 +213,19 @@ async fn load_role_layer_toml(
             role_config_base,
             Some(role_name),
         )?;
-        (parsed.config, role_config_base, parsed.base_instructions)
+        (
+            parsed.config,
+            role_config_base,
+            parsed.base_instructions,
+            parsed.collaboration,
+        )
     };
 
     deserialize_config_toml_with_base(role_config_toml.clone(), role_config_base)?;
     Ok((
         resolve_relative_paths_in_config_toml(role_config_toml, role_config_base)?,
         base_instructions,
+        collaboration,
     ))
 }
 
@@ -312,6 +328,9 @@ mod role_overrides {
                     })?;
                 next_config.system1.rubric_instructions = Some(rubric.to_owned());
             }
+        }
+        if overrides.subagent_tools.is_some() {
+            next_config.subagent_tools.collaboration = false;
         }
         for key in overrides.features.keys() {
             if let Some(feature) = feature_for_key(key) {

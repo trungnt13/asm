@@ -27,6 +27,7 @@ struct RawAgentRoleFileToml {
     nickname_candidates: Option<Vec<String>>,
     fork_turns: Option<AgentRoleForkTurns>,
     base_instructions: Option<String>,
+    collaboration: Option<bool>,
     #[serde(flatten)]
     config: ConfigToml,
 }
@@ -38,6 +39,8 @@ pub struct ResolvedAgentRoleFile {
     pub nickname_candidates: Option<Vec<String>>,
     pub fork_turns: Option<AgentRoleForkTurns>,
     pub base_instructions: Option<String>,
+    /// `Some(false)` removes collaboration tools from this role's spawned agents.
+    pub collaboration: Option<bool>,
     pub config: TomlValue,
 }
 
@@ -129,6 +132,7 @@ pub fn parse_agent_role_file_contents(
     config_table.remove("nickname_candidates");
     config_table.remove("fork_turns");
     config_table.remove("base_instructions");
+    config_table.remove("collaboration");
 
     Ok(ResolvedAgentRoleFile {
         role_name,
@@ -136,6 +140,7 @@ pub fn parse_agent_role_file_contents(
         nickname_candidates,
         fork_turns: parsed.fork_turns,
         base_instructions: parsed.base_instructions,
+        collaboration: parsed.collaboration,
         config,
     })
 }

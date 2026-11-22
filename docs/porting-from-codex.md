@@ -594,6 +594,8 @@ Apply the policy before preparing a multi-agent V2 child, even when the parent r
 
 Role TOML can explicitly disable web search with `web_search = "disabled"` or System1 with `[system1] enabled = false`. Apply only explicit disabling. Omission keeps inheritance, including the parent's live System1 toggle. Roles cannot enable either against parent restrictions. Keep System1 restrictions through child spawn/reload.
 
+Role TOML can set top-level `collaboration = false` to apply `[subagent_tools] collaboration = false` to that role's spawned agents only: no messaging, message-board, or spawn tools, while the final result still reaches the parent. `true` or omission inherits the parent setting.
+
 Roles can independently override `[system1] min_effort` and `max_effort`; omitted bounds inherit. Validate the merged ordinary-effort range. Intersect it with model-supported efforts; fewer than two choices skips Decisions. Keep role bounds through model changes/reload. New children resolve their own role, without ancestor role bounds. Bounds constrain decision choices, not manual effort or fallback.
 
 Role TOML may also set `[system1] rubric_instructions` to replace the rubric for that role's subagents. Use the same nonblank, 4096 UTF-8 byte limit as the base setting. Higher-precedence managed rubrics win in both the effective config and Decisions. Omission inherits the non-role rubric or uses the built-in rubric. Restore the non-role setting before applying a nested child's own role. Keep selection choices and all other System1 settings unchanged.
