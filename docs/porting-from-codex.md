@@ -150,6 +150,8 @@ For syncs or saved-cache/wire-format changes, apply this gate even after conflic
 
 #### Known upstream cold-history limitation
 
+For the sync through `cf3ff1530d821ec2d26452da4971d8e3e7d18d25`, the owner accepted this stock Codex limitation for this revision only. Independent stock Codex alpha.11 returned an empty cold timeline. One resume and a warm reopen recovered both saved items without changing the original rollout. This exception does not cover voice history or waive other checks.
+
 For PR #245, the owner accepted the stock cold-history limitation through `140815f19c05a24a70ebc273016bd54ff71ced7c` only. ASM passed cold search, timeline, turn, and item reads. Independent stock Codex alpha.11 returned an empty cold timeline. One resume and a warm reopen recovered both saved items without changing the original rollout. This exception does not cover voice history or waive other checks.
 
 For PR #240, the owner accepted the stock cold-history limitation through `ddfaef91b258da5a0217951ed5f6e0039add5e02` only. ASM passed cold search, timeline, turn, and item reads. Independent stock alpha.11 returned an empty cold timeline. One resume and a warm reopen recovered both saved items without changing the rollout. This exception does not cover voice history or waive other checks.
@@ -214,7 +216,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `140815f19c05a24a70ebc273016bd54ff71ced7c`, 2026-11-21. Subject: Fix clipboard text fallback and guard pending pastes in the TUI (#63022).
+Last incorporated commit: `cf3ff1530d821ec2d26452da4971d8e3e7d18d25`, 2026-11-22. Subject: Show a loading indicator while the resume picker starts (#63102).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 
