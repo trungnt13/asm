@@ -1,6 +1,6 @@
 ---
 source: tui/src/app/tests.rs
-assertion_line: 4721
+assertion_line: 4728
 expression: "frames.join(\"\\n\\n\")"
 ---
 100 columns, hidden
