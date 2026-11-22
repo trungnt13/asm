@@ -244,6 +244,7 @@ use codex_config::CONFIG_TOML_FILE;
 use codex_config::ConfigLayerSource;
 use codex_config::types::McpServerConfig;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::ResponseIncompleteError;
@@ -978,15 +979,25 @@ impl Session {
             ));
         }
         let uses_native_runtime = native_runtime.is_some();
+        let initializes_side_tier = !matches!(&conversation_history, InitialHistory::Resumed(_))
+            && matches!(
+                thread_source.as_ref().map(ThreadSource::as_str),
+                Some(ThreadSource::TUI_SIDE_CHAT_SOURCE | ThreadSource::DESKTOP_SIDE_CHAT_SOURCE)
+            );
         if uses_native_runtime
             && config
                 .service_tier
                 .as_deref()
-                .is_some_and(|tier| tier != "default")
+                .is_some_and(|tier| tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE)
         {
-            return Err(CodexErr::InvalidRequest(
-                "Native runtimes do not support service tiers; select the default tier".to_string(),
-            ));
+            if !initializes_side_tier {
+                return Err(CodexErr::InvalidRequest(
+                    "Native runtimes do not support service tiers; select the default tier"
+                        .to_string(),
+                ));
+            }
+            Arc::make_mut(&mut config).service_tier =
+                Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string());
         }
         // Compare concrete runtimes so Claude and Cursor sessions never resume each other.
         let temporary_claude_fork = config.ephemeral
@@ -1122,6 +1133,19 @@ impl Session {
                 &model_info_overrides.models_manager_config(&model, config.personality),
             )
             .await;
+        if initializes_side_tier
+            && config.model_provider_id != OPENAI_PROVIDER_ID
+            && config.service_tier.as_deref().is_some_and(|tier| {
+                tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE
+                    && !model_info
+                        .service_tiers
+                        .iter()
+                        .any(|supported| supported.id == tier)
+            })
+        {
+            Arc::make_mut(&mut config).service_tier =
+                Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string());
+        }
         if !uses_native_runtime
             && thread_extension_init.get::<crate::handoff::PortableHistory>().is_some()
             && matches!(&conversation_history, InitialHistory::Forked(_))
