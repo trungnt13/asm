@@ -23,6 +23,25 @@ Remove external-agent configuration/session migration engines, import UI/RPCs, i
 - While the PR is pending, keep its checkout and lease. After merge, complete [post-merge cleanup](#post-merge-cleanup), including checkout release. Never clear another owner's lease or discard work. Inspect and coordinate abandoned leases.
 - Preserve existing work. If blocked, use another worktree. Get permission before committing or stashing unrelated work. Keep authorized stashes until restoration is verified. Never overwrite others' work to clean a checkout.
 
+### Git status performance
+
+Keep Git status tuning opt-in per worktree. For background status, do not write Git configuration, enable optional index writes, or reuse a completed scan for a later request.
+
+On a large local checkout, consider Git's [native untracked-file cache](https://git-scm.com/docs/git-update-index#_untracked_cache). Record any existing worktree overrides first. Run this from the target checkout; stop if worktree-specific configuration is not already enabled or the filesystem check fails.
+
+```sh
+test "$(git config --local --type=bool --get extensions.worktreeConfig)" = true &&
+  git update-index --test-untracked-cache &&
+  git config --worktree core.untrackedCache true &&
+  git status --short
+```
+
+Run the final status with optional locks enabled so Git can populate its on-disk cache. ASM still runs Git for a fresh result; its background status does not write the cache. The override affects other Git commands in this checkout too.
+
+On low-latency storage, benchmark `git config --worktree core.preloadIndex false` separately. Both settings lowered process CPU in a local multi-agent benchmark, but round latency depended on the workload. Keep preload at its default if the benefit does not repeat; [parallel preload](https://git-scm.com/docs/git-config#Documentation/git-config.txt-corepreloadIndex) can help on slower filesystems.
+
+To roll back, restore previous worktree values. If neither was set before, remove the overrides with `git config --worktree --unset core.untrackedCache` and `git config --worktree --unset core.preloadIndex`, as applicable. If you also want to discard the cached data from this worktree's index, run `git update-index --no-untracked-cache`.
+
 ### Build the binary first
 
 Before local builds or binary handoffs, use [asm-build](../.agents/skills/asm-build/SKILL.md). Keep the CLI/helper pair from matching source, target, and profile. Preserve copied-pair identity and require permission before installed-binary replacement.
