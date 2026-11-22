@@ -8,6 +8,7 @@ use crate::ConfigLayerStack;
 use crate::config_toml::ConfigToml;
 use crate::format_config_layer_source;
 use crate::shell_environment_policy::ShellEnvironmentPolicyFilterConfigToml;
+use crate::strict_config::deserialize_toml_value;
 use codex_utils_absolute_path::AbsolutePathBufGuard;
 use serde_path_to_error::Path as SerdePath;
 use serde_path_to_error::Segment as SerdeSegment;
@@ -138,10 +139,10 @@ enum DiagnosticSchema {
 }
 
 impl DiagnosticSchema {
-    fn deserialize_error<'de, D: serde::Deserializer<'de>>(
+    fn deserialize_text_error(
         self,
-        deserializer: D,
-    ) -> Option<serde_path_to_error::Error<D::Error>> {
+        deserializer: toml::de::Deserializer<'_>,
+    ) -> Option<serde_path_to_error::Error<toml::de::Error>> {
         match self {
             Self::Config => serde_path_to_error::deserialize::<_, ConfigToml>(deserializer).err(),
             Self::ShellEnvironmentFilters => serde_path_to_error::deserialize::<
@@ -173,13 +174,22 @@ fn config_error_from_typed_toml_for_source(
         Err(err) => return Some(config_error_from_toml_for_source(source, contents, err)),
     };
 
-    let mut err = schema.deserialize_error(deserializer)?;
+    let mut err = schema.deserialize_text_error(deserializer)?;
     // Diagnose the same effective fields against the text we just read from disk.
     if let Some(layer) = layer
         && let Ok(raw) = toml::from_str(contents)
         && let std::borrow::Cow::Owned(effective) = layer.effective_values(&raw)
     {
-        err = schema.deserialize_error(effective)?;
+        err = match schema {
+            DiagnosticSchema::Config => {
+                deserialize_toml_value::<ConfigToml>(effective, /*ignored_paths*/ None).err()?
+            }
+            DiagnosticSchema::ShellEnvironmentFilters => serde_path_to_error::deserialize::<
+                _,
+                ShellEnvironmentPolicyFilterConfigToml,
+            >(effective)
+            .err()?,
+        };
     }
     let path_hint = err.path().clone();
     let toml_err: toml::de::Error = err.into_inner();

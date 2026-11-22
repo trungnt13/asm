@@ -11,6 +11,7 @@ use crate::browser_use::BrowserUseConfigToml;
 use crate::computer_use::ComputerUseConfigToml;
 use crate::permissions_toml::PermissionsToml;
 use crate::profile_toml::ConfigProfile;
+use crate::strict_config::deserialize_toml_value;
 use crate::types::AnalyticsConfigToml;
 use crate::types::ApprovalsReviewer;
 use crate::types::AppsConfigToml;
@@ -1077,10 +1078,9 @@ pub fn effective_sandbox_mode(
 impl TryFrom<toml::Value> for ConfigToml {
     type Error = toml::de::Error;
 
-    // Keep the generated TOML deserializer in this crate, shared by all callers.
-    #[inline(never)]
     fn try_from(value: toml::Value) -> Result<Self, Self::Error> {
-        value.try_into()
+        deserialize_toml_value(value, /*ignored_paths*/ None)
+            .map_err(serde_path_to_error::Error::into_inner)
     }
 }
 
