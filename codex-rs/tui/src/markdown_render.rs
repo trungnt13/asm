@@ -548,6 +548,7 @@ struct Writer<'a, 'policy> {
     list_spacing: ListSpacing,
     link: Option<LinkState>,
     needs_newline: bool,
+    copy_block_break_before: bool,
     pending_marker_line: bool,
     last_task_marker_end: usize,
     in_paragraph: bool,
@@ -596,6 +597,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
             list_spacing: ListSpacing::default(),
             link: None,
             needs_newline: false,
+            copy_block_break_before: false,
             pending_marker_line: false,
             last_task_marker_end: 0,
             in_paragraph: false,
@@ -870,6 +872,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
         if self.in_table_cell() {
             return;
         }
+        self.copy_block_break_before |= self.needs_newline;
         self.push_line(Line::default());
         self.needs_newline = false;
         self.in_paragraph = true;
@@ -1097,6 +1100,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
 
     fn start_list(&mut self, index: Option<u64>) {
         self.flush_current_line();
+        self.copy_block_break_before |= self.list_indices.is_empty() && self.needs_newline;
         self.list_indices.push(index);
         self.list_needs_blank_before_next_item.push(false);
     }
@@ -1179,6 +1183,12 @@ impl<'a, 'policy> Writer<'a, 'policy> {
 
     fn start_codeblock(&mut self, lang: Option<String>, indent: Option<Span<'static>>) {
         self.flush_current_line();
+        let first_item_block = self.pending_marker_line
+            && self
+                .indent_stack
+                .last()
+                .is_some_and(|context| context.is_list);
+        self.copy_block_break_before |= !self.text.is_empty() && !first_item_block;
         self.in_code_block = true;
 
         // Extract the language token from the info string.  CommonMark info
@@ -1255,6 +1265,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
         self.needs_newline = true;
         self.in_code_block = false;
         self.fence_start = None;
+        self.copy_block_break_before = false;
         self.indent_stack.pop();
     }
 
@@ -2613,6 +2624,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
             .cloned()
             .unwrap_or_default();
         copy.block = self.blocks.current();
+        copy.block_break_before = std::mem::take(&mut self.copy_block_break_before);
         copy.code_source = self.transformed_code_source.clone();
         copy.quote_source = self.quote_sources.first().cloned();
         copy.prefix = self.copy_prefix(pending_marker_line);
@@ -2646,6 +2658,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
         self.current_line_style = style;
         self.copy_line = crate::markdown_copy::CopyLine::default();
         self.copy_line.block = self.blocks.current();
+        self.copy_line.block_break_before = std::mem::take(&mut self.copy_block_break_before);
         self.copy_line.prefix = self.copy_prefix(was_pending);
         self.copy_line.continuation = self.copy_prefix(/*pending_marker_line*/ false);
         self.copy_line.item_prefix = self.copy_prefix(/*pending_marker_line*/ true);

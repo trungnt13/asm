@@ -1,6 +1,6 @@
 ---
 source: tui/src/app/tests.rs
-assertion_line: 4721
+assertion_line: 4728
 expression: "frames.join(\"\\n\\n\")"
 ---
 100 columns, hidden
@@ -25,17 +25,17 @@ parent-29
 
 100 columns, reopened
 parent-24                                                      │ Side chat ×                     +
-                                                               │
-parent-25                                                      │child-25
-                                                               │
-parent-26                                                      │child-26
-                                                               │
-parent-27                                                      │child-27
-                                                               │
-parent-28                                                      │child-28
-                                                               │
-parent-29                                                      │child-29
-                                                               │
+                                                               │child-24
+parent-25                                                      │
+                                                               │child-25
+parent-26                                                      │
+                                                               │child-26
+parent-27                                                      │
+                                                               │child-27
+parent-28                                                      │
+                                                               │child-28
+parent-29                                                      │
+                                                               │child-29
                                                                │
                                                                │                               Side
 › parent draft-                                                │› child draft!
@@ -45,6 +45,7 @@ parent-29                                                      │child-29
 
 99 columns, reopened
  Side chat           ×                                                                          +
+child-24
 
 child-25
 

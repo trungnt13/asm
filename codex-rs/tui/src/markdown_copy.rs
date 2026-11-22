@@ -133,6 +133,8 @@ pub(crate) struct CopyLine {
     pub(crate) rule: bool,
     pub(crate) heading: usize,
     pub(crate) hard_break: bool,
+    /// A block break omitted from the compact transcript display.
+    pub(crate) block_break_before: bool,
     /// A visual separator inserted between sibling list items, never source content.
     pub(crate) omit: bool,
     runs: Vec<(Range<usize>, Vec<Inline>)>,
@@ -529,7 +531,16 @@ fn render_selection(
     let mut indentation: Option<usize> = None;
     while let Some(line) = lines.next() {
         if !first {
-            out.push_str(line.separator(output));
+            let separator = line.separator(output);
+            out.push_str(separator);
+            if blocks
+                && separator.ends_with('\n')
+                && let Some(copy) = &line.source.copy
+                && copy.block_break_before
+            {
+                out.push_str(output.prefix(&copy.continuation, indentation).trim_end());
+                out.push('\n');
+            }
         }
         let prefix = line.source.copy.as_ref().map_or("", |copy| {
             if !blocks && indentation.is_none() && !line.range.is_empty() && lines.peek().is_some()
@@ -609,10 +620,16 @@ fn render_selection(
                 }
                 out.push_str(row);
             }
-            if lines
-                .peek()
-                .is_some_and(|next| next.separator == "\n" && !next.range.is_empty())
-            {
+            if lines.peek().is_some_and(|next| {
+                next.separator == "\n"
+                    && !next.range.is_empty()
+                    && !(blocks
+                        && next
+                            .source
+                            .copy
+                            .as_ref()
+                            .is_some_and(|copy| copy.block_break_before))
+            }) {
                 out.push('\n');
                 out.push_str(continuation.trim_end());
             }
