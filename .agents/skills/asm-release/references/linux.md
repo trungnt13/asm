@@ -44,10 +44,25 @@ from CI, or a CI result. Start CI after its own checks. Do not wait for the v3
 build or a skip decision. If v3 is blocked, report the blocker and ask the owner
 whether to skip v3 for this release. Keep CI running.
 
-The current workflow creates new candidates in its CI preparation job. To meet
-this rule for new releases, change the workflow to accept a candidate pinned
-before dispatch. Until then, report the dependency. Do not build from unpinned
-`main` or create a separate version for v3.
+In a clean task checkout of current `origin/main`, run the pin command. It
+selects the version and commits only the workspace version files. Record the
+full commit SHA and tag that it prints. Use that checkout for v3; do not build
+from unpinned `main` or create a separate version for v3.
+
+```bash
+GITHUB_REPOSITORY=trungnt13/asm python3 .github/scripts/prepare-fork-release.py pin
+git tag "$tag" "$sha"  # Local only; use a task-owned checkout.
+```
+
+Start the local build using the recipe below. To hand the same commit to the
+standard workflow, push it without tags:
+
+```bash
+git push --no-follow-tags origin "$sha:refs/heads/agent/pin-release-$sha"
+```
+
+After the workflow records `agent/release-<run-id>` at the pinned SHA, the
+transport branch is no longer needed. Never replace an existing pin or tag.
 
 Check glibc for full v3 support on the current machine. Do not infer support
 from AVX2 alone. Build in a clean checkout of the pinned candidate. Use a

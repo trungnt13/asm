@@ -534,14 +534,45 @@ def output(revision, tag="", candidate_ref="", complete=False, publish=False):
             print(f"{key}={value}", file=stream)
 
 
+def select_release_version():
+    tags = list(upstream_prereleases())
+    if not tags:
+        raise ValueError("No upstream Rust prerelease tag found")
+    return next_release_version(max(tags, key=lambda tag: tag[0])[1])
+
+
+def pin():
+    base = git("rev-parse", "HEAD")
+    if base != remote_ref("refs/heads/main") or git("status", "--porcelain"):
+        raise ValueError("Pin from a clean checkout of current origin/main")
+    new_version = select_release_version()
+    git("checkout", "--detach", base)
+    for path, contents in rewritten_files(base, new_version).items():
+        Path(path).write_text(contents)
+    git("add", "--", MANIFEST, LOCKFILE)
+    git("commit", "-m", CANDIDATE_SUBJECT.format(version=new_version))
+    revision = git("rev-parse", "HEAD")
+    validate_candidate(revision)
+    print(f"Pinned {revision} for v{new_version}")
+
+
 def prepare():
     revision = os.environ["GITHUB_SHA"]
     reference = os.environ["GITHUB_REF"]
     publish = os.environ.get("PUBLISH_RELEASE", "false")
+    pinned_sha = os.environ.get("PINNED_CANDIDATE_SHA", "")
+    resume_run_id = os.environ.get("RESUME_RUN_ID", "")
+    if pinned_sha and (
+        publish != "true"
+        or reference != "refs/heads/main"
+        or resume_run_id
+        or not re.fullmatch(r"[0-9a-f]{40}", pinned_sha)
+    ):
+        raise ValueError("A pinned candidate SHA requires publication on main, without resume")
     if publish not in {"true", "false"}:
         raise ValueError("PUBLISH_RELEASE must be true or false")
     if publish == "false":
-        if os.environ.get("RESUME_RUN_ID", ""):
+        if resume_run_id:
             raise ValueError("Resuming a release requires PUBLISH_RELEASE=true")
         output(revision)
         return
@@ -554,7 +585,6 @@ def prepare():
         return
     if reference != "refs/heads/main":
         raise ValueError("New releases must be explicitly dispatched on main")
-    resume_run_id = os.environ.get("RESUME_RUN_ID", "")
     run_id = resume_run_id or os.environ["GITHUB_RUN_ID"]
     if not re.fullmatch(r"[1-9][0-9]*", run_id):
         raise ValueError("Release run ID must be a positive decimal integer")
@@ -563,36 +593,23 @@ def prepare():
     if candidate_sha:
         git("fetch", "--no-tags", "origin", candidate_ref)
         revision = git("rev-parse", "FETCH_HEAD^{commit}")
-        if revision != candidate_sha:
-            raise ValueError("Candidate changed during lookup")
+        if revision != candidate_sha or (pinned_sha and revision != pinned_sha):
+            raise ValueError("Candidate changed during lookup or does not match the pin")
         base = validate_candidate(revision)
         if not resume_run_id and base != os.environ["GITHUB_SHA"]:
             raise ValueError("Candidate belongs to a different source commit")
     else:
         if resume_run_id:
             raise ValueError("Requested candidate run does not exist")
-        tags = list(upstream_prereleases())
-        if not tags:
-            raise ValueError("No upstream Rust prerelease tag found")
-        upstream = max(tags, key=lambda tag: tag[0])[1]
-        new_version = next_release_version(upstream)
-        git("checkout", "--detach", revision)
-        for path, contents in rewritten_files(revision, new_version).items():
-            Path(path).write_text(contents)
-        git("add", "--", MANIFEST, LOCKFILE)
-        git(
-            "-c",
-            f"user.name={AUTHOR}",
-            "-c",
-            f"user.email={EMAIL}",
-            "commit",
-            "--allow-empty",
-            "-m",
-            CANDIDATE_SUBJECT.format(version=new_version),
-        )
-        revision = git("rev-parse", "HEAD")
-        validate_candidate(revision)
-        git("push", "origin", f"HEAD:{candidate_ref}")
+        if not pinned_sha:
+            raise ValueError("Pin the release candidate before dispatch")
+        git("fetch", "--no-tags", "origin", f"refs/heads/agent/pin-release-{pinned_sha}")
+        revision = git("rev-parse", "FETCH_HEAD^{commit}")
+        if revision != pinned_sha or validate_candidate(revision) != os.environ["GITHUB_SHA"]:
+            raise ValueError("Pinned candidate does not match this source commit")
+        if version(revision) != select_release_version():
+            raise ValueError("Pinned version no longer matches the next available release")
+        git("push", "--no-follow-tags", "origin", f"{revision}:{candidate_ref}")
     tag = f"v{version(revision)}"
     output(
         revision, tag, candidate_ref, complete_candidate(tag, revision), publish=True
@@ -651,7 +668,9 @@ if __name__ == "__main__":
     for role in ("AUTHOR", "COMMITTER"):
         os.environ[f"GIT_{role}_NAME"] = AUTHOR
         os.environ[f"GIT_{role}_EMAIL"] = EMAIL
-    if sys.argv[1:] == ["prepare"]:
+    if sys.argv[1:] == ["pin"]:
+        pin()
+    elif sys.argv[1:] == ["prepare"]:
         prepare()
     elif sys.argv[1:] == ["sync-main"]:
         sync_main()
@@ -659,5 +678,5 @@ if __name__ == "__main__":
         verify_base_release(*sys.argv[2:])
     else:
         raise SystemExit(
-            "Usage: prepare-fork-release.py prepare|sync-main|verify-base RUN_ID TAG SHA"
+            "Usage: prepare-fork-release.py pin|prepare|sync-main|verify-base RUN_ID TAG SHA"
         )

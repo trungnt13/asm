@@ -7,6 +7,10 @@ on:
         description: 'Prepare, publish, verify, then update main (only on main)'
         type: boolean
         default: false
+      pinned_candidate_sha:
+        description: 'Commit pinned before dispatch (required for a new release)'
+        type: string
+        default: ''
       resume_run_id:
         description: 'Resume the immutable candidate from an earlier release run'
         type: string
@@ -49,6 +53,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PUBLISH_RELEASE: ${{ inputs.publish_release == true || (startsWith(github.ref, 'refs/tags/v') && inputs.macos_concurrency_experiment != true) }}
           RESUME_RUN_ID: ${{ inputs.resume_run_id }}
+          PINNED_CANDIDATE_SHA: ${{ inputs.pinned_candidate_sha }}
           BUILD_EXPERIMENT: ${{ inputs.macos_concurrency_experiment }}
         run: |
           if [[ "$BUILD_EXPERIMENT" == true && ( "$PUBLISH_RELEASE" == true || -n "$RESUME_RUN_ID" ) ]]; then
