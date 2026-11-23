@@ -3676,7 +3676,7 @@
           "type": "boolean"
         },
         "expose_spawn_agent_service_tier": {
-          "description": "Allow V1 and V2 `spawn_agent` to select a `service_tier` for one child. Defaults to false.",
+          "description": "Allow V2 `spawn_agent` to select a `service_tier` for one child. Defaults to false.",
           "type": "boolean"
         },
         "hide_spawn_agent_metadata": {
