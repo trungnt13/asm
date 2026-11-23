@@ -71,18 +71,24 @@ pub fn create_spawn_agent_tool_v2(
     options: SpawnAgentToolOptions,
     description_override: Option<&str>,
 ) -> ToolSpec {
+    let require_model =
+        options.require_spawn_agent_model && options.expose_spawn_agent_model_overrides;
     let available_models_description = (options.include_model_catalog_in_spawn_agent_list
         && !options.model_catalog_in_context
         && options.expose_spawn_agent_model_overrides)
         .then(|| {
+            let heading = if require_model {
+                "Available model overrides"
+            } else {
+                "Available model overrides (optional; inherited parent model is preferred)"
+            };
             spawn_agent_models_description(
                 &options.available_models,
                 options.multi_agent_version,
                 options.subagent_model_list.as_deref(),
+                heading,
             )
         });
-    let require_model =
-        options.require_spawn_agent_model && options.expose_spawn_agent_model_overrides;
     let model_guidance = if require_model {
         Some(SPAWN_AGENT_REQUIRED_MODEL_GUIDANCE)
     } else if options.model_catalog_in_context {
@@ -512,6 +518,7 @@ fn spawn_agent_models_description(
     models: &[ModelPreset],
     multi_agent_version: MultiAgentVersion,
     configured: Option<&[String]>,
+    heading: &str,
 ) -> String {
     let visible_models = match crate::agent::model_catalog::advertised_models(
         models,
@@ -566,7 +573,7 @@ fn spawn_agent_models_description(
         })
         .collect::<Vec<_>>()
         .join("\n");
-    format!("Available model overrides:\n{model_descriptions}")
+    format!("{heading}:\n{model_descriptions}")
 }
 
 fn wait_agent_tool_parameters_v2(options: WaitAgentTimeoutOptions) -> JsonSchema {
