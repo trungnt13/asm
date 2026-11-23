@@ -632,7 +632,13 @@ impl ChatWidget {
                 && correcting
                 && self.is_agent_turn_running()
                 && self.last_turn_id().is_some_and(|active| active != turn_id));
-        if from_replay && !unrelated_activity && item.phase == Some(MessagePhase::FinalAnswer) {
+        // Keep the matching stream intact so completion can replace its text instead of
+        // flushing a provisional copy before rendering the final answer.
+        if from_replay
+            && !owns_stream
+            && !unrelated_activity
+            && item.phase == Some(MessagePhase::FinalAnswer)
+        {
             self.fold_turn_activity(turn_id);
         }
         let latest_copy_order = self
