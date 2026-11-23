@@ -1,3 +1,4 @@
+pub(crate) mod chat;
 pub(crate) mod responses;
 mod responses_error;
 

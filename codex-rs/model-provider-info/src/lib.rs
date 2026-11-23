@@ -120,12 +120,16 @@ pub enum WireApi {
     /// The Responses API exposed by OpenAI at `/v1/responses`.
     #[default]
     Responses,
+    /// Chat Completions over HTTP at `/v1/chat/completions`.
+    #[serde(rename = "chat_completions")]
+    ChatCompletions,
 }
 
 impl fmt::Display for WireApi {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match self {
             Self::Responses => "responses",
+            Self::ChatCompletions => "chat_completions",
         };
         f.write_str(value)
     }
@@ -139,8 +143,12 @@ impl<'de> Deserialize<'de> for WireApi {
         let value = String::deserialize(deserializer)?;
         match value.as_str() {
             "responses" => Ok(Self::Responses),
+            "chat_completions" => Ok(Self::ChatCompletions),
             "chat" => Err(serde::de::Error::custom(CHAT_WIRE_API_REMOVED_ERROR)),
-            _ => Err(serde::de::Error::unknown_variant(&value, &["responses"])),
+            _ => Err(serde::de::Error::unknown_variant(
+                &value,
+                &["responses", "chat_completions"],
+            )),
         }
     }
 }
@@ -195,7 +203,7 @@ pub struct ModelProviderInfo {
     /// Which wire protocol this provider expects.
     #[serde(default)]
     pub wire_api: WireApi,
-    /// Optional API capability overrides for a custom Responses-compatible provider.
+    /// Optional API capability overrides for a custom provider.
     /// Unspecified capabilities retain their existing provider defaults.
     pub capabilities: Option<ModelProviderCapabilities>,
     /// Optional query parameters to append to the base URL.
@@ -360,6 +368,26 @@ other non-default provider fields are not supported"
     }
 
     pub fn validate(&self) -> std::result::Result<(), String> {
+        if self.wire_api == WireApi::ChatCompletions {
+            if self
+                .base_url
+                .as_deref()
+                .is_none_or(|url| url.trim().is_empty())
+            {
+                return Err("chat_completions requires an explicit base_url".into());
+            }
+            if self.requires_openai_auth || self.is_openai() {
+                return Err("chat_completions cannot use OpenAI login".into());
+            }
+            if self.supports_websockets
+                || self.capabilities.and_then(|caps| caps.remote_compaction)
+                    == Some(RemoteCompactionSupport::V2)
+            {
+                return Err(
+                    "chat_completions does not support WebSockets or remote compaction".into(),
+                );
+            }
+        }
         if self.is_gcp() {
             self.validate_gcp_credential_file()?;
         }

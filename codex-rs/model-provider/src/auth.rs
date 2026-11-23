@@ -336,6 +336,7 @@ pub(crate) fn auth_manager_for_provider(
                 })
             }
         }
+        None if provider.wire_api == codex_model_provider_info::WireApi::ChatCompletions => None,
         None => auth_manager,
     }
 }
