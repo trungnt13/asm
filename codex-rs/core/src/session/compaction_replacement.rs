@@ -88,7 +88,7 @@ impl<'a> PrefixCompactionInstallation<'a> {
             };
             !matches!(
                 metadata.content_item_kinds.as_deref(),
-                Some([kind]) if matches!(kind.0.as_str(), "token_budget.reminder" | "compaction.auto_fallback_prompt")
+                Some([kind]) if matches!(kind.0.as_str(), "token_budget.reminder" | "compaction.auto_fallback_prompt" | "compaction.new_context_completed")
             )
         }).cloned());
         // The retained suffix already contains updates through this baseline.

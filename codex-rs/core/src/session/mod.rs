@@ -307,7 +307,7 @@ mod system1_evidence;
 mod system1_task;
 mod thread_settings;
 pub(crate) mod time_reminder;
-mod token_budget;
+pub(crate) mod token_budget;
 pub(crate) mod turn;
 pub(crate) mod turn_context;
 mod turn_input;
@@ -4891,11 +4891,7 @@ impl Session {
         } else {
             self.dynamic_tools().await
         };
-        let token_budget = token_budget::resolve_token_budget(
-            turn_context.configured_token_budget.as_ref(),
-            turn_context.use_model_token_budget_defaults,
-            settings.model_info.as_ref(),
-        );
+        let token_budget = turn_context.token_budget_for_model(&settings.model_info);
         let session_telemetry = settings.telemetry(&turn_context.session_telemetry);
         let environments = environments.or_cancel(cancellation_token).await?;
         let inherited_environments = inherited_environments.unwrap_or_else(|| environments.clone());

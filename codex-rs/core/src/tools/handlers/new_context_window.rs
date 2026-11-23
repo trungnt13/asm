@@ -1,5 +1,6 @@
 use crate::compact::AutoCompactionDisabled;
 use crate::function_tool::FunctionCallError;
+use crate::session::token_budget::ContextWindowAction;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
@@ -11,17 +12,14 @@ use codex_protocol::openai_models::ToolMessage;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 
-pub(crate) const NEW_CONTEXT_WINDOW_MESSAGE: &str =
-    "A new context window will start without summarizing conversation history.";
-
 pub struct NewContextWindowHandler {
     spec: ToolSpec,
 }
 
 impl NewContextWindowHandler {
-    pub(crate) fn new(messages: Option<&ToolMessage>) -> Self {
+    pub(crate) fn new(action: ContextWindowAction, messages: Option<&ToolMessage>) -> Self {
         Self {
-            spec: super::new_context_window_spec::create_new_context_window_tool(messages),
+            spec: super::new_context_window_spec::create_new_context_window_tool(action, messages),
         }
     }
 }
@@ -54,14 +52,23 @@ impl ToolExecutor<ToolInvocation> for NewContextWindowHandler {
                 .is_some()
             {
                 return Err(FunctionCallError::RespondToModel(
-                    "Context resets are disabled for this thread.".to_string(),
+                    "Context changes are disabled for this thread.".to_string(),
                 ));
             }
 
             invocation.session.request_new_context_window().await;
 
+            let message = match invocation
+                .turn
+                .context_window_action(&invocation.step_context.settings.model_info)
+            {
+                ContextWindowAction::ResetWithNotes => {
+                    "A new context window will start without summarizing conversation history."
+                }
+                ContextWindowAction::Summarize => "Context compaction requested to keep a summary.",
+            };
             Ok(boxed_tool_output(FunctionToolOutput::from_text(
-                NEW_CONTEXT_WINDOW_MESSAGE.to_string(),
+                message.to_string(),
                 Some(true),
             )))
         })

@@ -1319,6 +1319,7 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
         let messages = model_messages.context_management();
         registry.add_with_exposure(
             NewContextWindowHandler::new(
+                turn_context.context_window_action(context.model_info),
                 messages.and_then(|messages| messages.new_context.as_ref()),
             ),
             ToolExposure::DirectModelOnly,

@@ -50,6 +50,21 @@ pub(super) fn enabled(turn_context: &TurnContext) -> bool {
         )
 }
 
+pub(super) fn threshold_reached(
+    step_context: &StepContext,
+    token_status: &ContextWindowTokenStatus,
+) -> bool {
+    step_context
+        .settings
+        .model_info
+        .resolved_context_window()
+        .is_some_and(|limit| {
+            i128::from(token_status.active_context_tokens) * 100
+                >= i128::from(limit)
+                    * i128::from(step_context.turn.config.async_compaction_threshold_percent)
+        })
+}
+
 pub(super) async fn maybe_start(
     sess: &Arc<Session>,
     step_context: &Arc<StepContext>,
@@ -69,15 +84,7 @@ pub(super) async fn maybe_start(
         || token_status.token_limit_reached
         || (matches!(phase, CompactionPhase::PostTurn)
             && token_status.turn_end_compaction_threshold_reached)
-        || step_context
-            .settings
-            .model_info
-            .resolved_context_window()
-            .is_none_or(|limit| {
-                i128::from(token_status.active_context_tokens) * 100
-                    < i128::from(limit)
-                        * i128::from(turn_context.config.async_compaction_threshold_percent)
-            })
+        || !threshold_reached(step_context, token_status)
     {
         return;
     }

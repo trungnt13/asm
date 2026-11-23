@@ -490,7 +490,6 @@ async fn token_budget_uses_model_message_defaults() -> Result<()> {
     let mut model_defaults = model_token_budget_config();
     model_defaults.enabled = true;
     model_defaults.use_history_notes_extension = true;
-    let expected_guidance = model_defaults.guidance_message.clone();
     let test = test_codex()
         .with_model_info_override("gpt-5.2", move |model_info| {
             model_info.supports_experimental_context = true;
@@ -517,11 +516,12 @@ async fn token_budget_uses_model_message_defaults() -> Result<()> {
             .starts_with(&format!("{CONTEXT_WINDOW_OPEN_TAG}\nAgent name: /root\n"))
     );
     let developer_texts = request.message_input_texts("developer");
-    assert!(developer_texts.iter().any(|text| {
-        text == &format!(
-            "{CONTEXT_WINDOW_GUIDANCE_OPEN_TAG}\n{expected_guidance}\n{CONTEXT_WINDOW_GUIDANCE_CLOSE_TAG}"
-        )
-    }));
+    assert!(
+        !developer_texts
+            .iter()
+            .any(|text| text.starts_with(CONTEXT_WINDOW_GUIDANCE_OPEN_TAG)),
+        "model defaults must not inject notes instructions without native notes"
+    );
 
     Ok(())
 }
@@ -601,6 +601,7 @@ async fn token_budget_defaults_follow_the_active_model(activation: Feature) -> R
                 .token_budget = Some(defaults);
         })
         .with_model_info_override("gpt-5.4", |model_info| {
+            model_info.supports_experimental_context = true;
             let mut defaults = model_token_budget_config();
             defaults.guidance_message = "Use second-model context-window guidance.".to_string();
             model_info
@@ -621,32 +622,49 @@ async fn token_budget_defaults_follow_the_active_model(activation: Feature) -> R
         .build_with_auto_env(&server)
         .await?;
 
-    test.submit_turn("inspect first-model guidance").await?;
+    let notes_active = activation == Feature::ContextManagement;
+    let thread = if notes_active {
+        let mut options = test.start_thread_options().await;
+        options
+            .thread_extension_init
+            .insert(codex_core::HistoryNotesAvailable);
+        test.thread_manager.start_thread(options).await?.thread
+    } else {
+        Arc::clone(&test.codex)
+    };
+    thread
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "inspect first-model guidance".to_string(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    wait_for_event(&thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
     core_test_support::submit_thread_settings(
-        &test.codex,
+        &thread,
         ThreadSettingsOverrides {
             model: Some("gpt-5.4".to_string()),
             ..Default::default()
         },
     )
     .await?;
-    test.codex
+    thread
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
             text: "inspect second-model guidance".to_string(),
             text_elements: Vec::new(),
         }]))
         .await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
+    wait_for_event(&thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let requests = responses.requests();
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[1].body_json()["model"], "gpt-5.4");
-    assert!(requests[0].body_contains_text("Use first-model context-window guidance."));
-    assert!(
+    assert_eq!(
+        requests[0].body_contains_text("Use first-model context-window guidance."),
+        notes_active,
+    );
+    assert_eq!(
         requests[1].body_contains_text("Use first-model context-window guidance."),
+        notes_active,
         "switching models must preserve the existing conversation history"
     );
     let developer_texts = requests[1].message_input_texts("developer");
@@ -656,6 +674,7 @@ async fn token_budget_defaults_follow_the_active_model(activation: Feature) -> R
             .any(|text| text.contains("<model_switch>")),
         "switching models should preserve the existing model-switch message"
     );
+
     let expected_guidance = format!(
         "{CONTEXT_WINDOW_GUIDANCE_OPEN_TAG}\nThis context-window guidance replaces all previously provided context-window guidance.\n\nUse second-model context-window guidance.\n{CONTEXT_WINDOW_GUIDANCE_CLOSE_TAG}"
     );
@@ -664,8 +683,8 @@ async fn token_budget_defaults_follow_the_active_model(activation: Feature) -> R
             .iter()
             .filter(|text| **text == expected_guidance)
             .count(),
-        1,
-        "the active model's guidance should be emitted once by world state"
+        usize::from(notes_active),
+        "only the active notes workflow should inject the active model's notes guidance"
     );
 
     Ok(())
@@ -1533,6 +1552,7 @@ async fn token_budget_auto_compact_fallback_uses_buffer_until_new_context() -> R
                 ev_function_call(new_context_call_id, "new_context", "{}"),
                 ev_completed_with_tokens("new-context-resp", /*total_tokens*/ 10_500),
             ]),
+            compacted_response(),
             sse(vec![
                 ev_response_created("resp-2"),
                 ev_assistant_message("msg-2", "done"),
@@ -1543,7 +1563,6 @@ async fn token_budget_auto_compact_fallback_uses_buffer_until_new_context() -> R
     .await;
     let test = test_codex()
         .with_config(|config| {
-            config.model_provider.name = "OpenAI (test)".into();
             config.model_context_window = Some(50_000);
             config.model_auto_compact_token_limit = Some(9_000);
             config.token_budget = Some(TokenBudgetConfig {
@@ -1562,7 +1581,7 @@ async fn token_budget_auto_compact_fallback_uses_buffer_until_new_context() -> R
     test.submit_turn("trigger auto compact fallback").await?;
 
     let requests = responses.requests();
-    assert_eq!(requests.len(), 4);
+    assert_eq!(requests.len(), 5);
     let fallback_request = &requests[1];
     assert!(
         fallback_request
@@ -1589,7 +1608,7 @@ async fn token_budget_auto_compact_fallback_uses_buffer_until_new_context() -> R
     assert!(requests[2].body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT));
     assert!(requests[2].body_contains_text(fallback_call_id));
     let (_, _, initial_window_id) = token_budget_window_ids(&initial_context[0], "/root");
-    let follow_up_context = token_budget_contexts(&requests[3]);
+    let follow_up_context = token_budget_contexts(&requests[4]);
     let (_, previous_window_id, follow_up_window_id) =
         token_budget_window_ids(&follow_up_context[0], "/root");
     assert_eq!(
@@ -1597,9 +1616,10 @@ async fn token_budget_auto_compact_fallback_uses_buffer_until_new_context() -> R
         Some(initial_window_id.as_str())
     );
     assert_ne!(follow_up_window_id, initial_window_id);
-    assert!(!requests[3].body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT));
+    assert!(!requests[4].body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT));
+    assert!(requests[4].body_contains_text("TOKEN_BUDGET_COMPACTION_SUMMARY"));
     assert_eq!(
-        requests[3].function_call_output_text(fallback_call_id),
+        requests[4].function_call_output_text(fallback_call_id),
         None
     );
     assert_eq!(
@@ -1716,9 +1736,23 @@ async fn new_context_tool_skips_auto_compact_fallback() -> Result<()> {
         cloud_skill_enabled: config.cloud_skill_enabled,
         shadow_selection_enabled: config.features.enabled(Feature::SkillSearch),
     });
+    let backend_url = format!("{}/backend-api/codex", server.uri());
     let test = test_codex()
+        .with_model_info_override("gpt-5.2", |model| {
+            model.supports_experimental_context = true;
+        })
+        .with_auth(CodexAuth::from_external_chatgpt_tokens(
+            "header.e30.signature",
+            "account-123",
+            Some("plus"),
+        )?)
         .with_extensions(Arc::new(extensions.build()))
-        .with_config(|config| {
+        .with_config(move |config| {
+            config.model_provider.base_url = Some(backend_url);
+            config
+                .features
+                .enable(Feature::ContextManagement)
+                .expect("test config should allow Context Management");
             config.update_plan_enabled = true;
             config.model_context_window = Some(10_000);
             config.token_budget = Some(TokenBudgetConfig {
@@ -1734,7 +1768,18 @@ async fn new_context_tool_skips_auto_compact_fallback() -> Result<()> {
         .build(&server)
         .await?;
 
-    test.submit_turn("request new context window").await?;
+    let mut options = test.start_thread_options().await;
+    options
+        .thread_extension_init
+        .insert(codex_core::HistoryNotesAvailable);
+    let thread = test.thread_manager.start_thread(options).await?.thread;
+    thread
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "request new context window".to_string(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    wait_for_event(&thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let requests = responses.requests();
     assert_eq!(requests.len(), 3);

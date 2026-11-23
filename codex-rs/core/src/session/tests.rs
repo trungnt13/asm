@@ -307,11 +307,7 @@ impl StepContext {
                 .features
                 .enabled(Feature::InstantInterrupt)
                 .then(tokio_util::sync::CancellationToken::new),
-            token_budget: token_budget::resolve_token_budget(
-                turn.configured_token_budget.as_ref(),
-                turn.use_model_token_budget_defaults,
-                settings.model_info.as_ref(),
-            ),
+            token_budget: turn.token_budget_for_model(&settings.model_info),
             settings: Arc::new(settings),
             settings_before_tier_inheritance: None,
             session_telemetry: turn.session_telemetry.clone(),
@@ -6982,6 +6978,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         session_configuration.cwd().clone(),
         "turn_id".to_string(),
         skills_snapshot,
+        &session.services.thread_extension_data,
     );
     session.mark_mcp_runtime_dirty(McpRefreshReason::ExplicitInvalidation);
     crate::guardian::test_host::install(&session, &turn_context.config);
@@ -9354,6 +9351,7 @@ where
         session_configuration.cwd().clone(),
         "turn_id".to_string(),
         skills_snapshot,
+        &session.services.thread_extension_data,
     ));
     session.mark_mcp_runtime_dirty(McpRefreshReason::ExplicitInvalidation);
     crate::guardian::test_host::install(&session, &turn_context.config);

@@ -1,5 +1,8 @@
 use super::step_settings::ResolvedStepSettings;
+use super::token_budget::ContextWindowAction;
+use super::token_budget::HistoryNotesAvailable;
 use super::token_budget::has_explicit_settings;
+use super::token_budget::official_context_is_eligible;
 use super::token_budget::resolve_token_budget;
 use super::*;
 use crate::config::TokenBudgetConfig;
@@ -359,6 +362,7 @@ pub struct TurnContext {
     pub(crate) configured_token_budget: Option<TokenBudgetConfig>,
     /// Captured once so later steps do not re-read config layers to detect user preferences.
     pub(crate) use_model_token_budget_defaults: bool,
+    official_notes_available: bool,
     pub(crate) auth_manager: Option<Arc<AuthManager>>,
     /// Frozen settings used to construct this context. Legacy turn consumers
     /// keep this view even when later steps use different settings.
@@ -427,6 +431,26 @@ enum TurnContextBuildMode {
 }
 
 impl TurnContext {
+    pub(crate) fn context_window_action(&self, model_info: &ModelInfo) -> ContextWindowAction {
+        if self.official_notes_available && model_info.supports_experimental_context {
+            ContextWindowAction::ResetWithNotes
+        } else {
+            ContextWindowAction::Summarize
+        }
+    }
+
+    pub(super) fn token_budget_for_model(
+        &self,
+        model_info: &ModelInfo,
+    ) -> Option<TokenBudgetConfig> {
+        resolve_token_budget(
+            self.configured_token_budget.as_ref(),
+            self.use_model_token_budget_defaults,
+            model_info,
+            self.context_window_action(model_info),
+        )
+    }
+
     /// Returns the resolved causal root for this admitted turn.
     pub(crate) fn root_turn_id(&self) -> String {
         self.turn_metadata_state
@@ -459,6 +483,7 @@ impl TurnContext {
             configured_token_budget: config.token_budget.clone(),
             use_model_token_budget_defaults: config.features.enabled(Feature::TokenBudget)
                 && !has_explicit_settings(&config),
+            official_notes_available: self.official_notes_available,
             config,
             auth_manager: self.auth_manager.clone(),
             initial_settings: Arc::clone(&step_settings),
@@ -905,6 +930,7 @@ impl TurnContext {
                 .clone(),
             configured_token_budget: self.configured_token_budget.clone(),
             use_model_token_budget_defaults: self.use_model_token_budget_defaults,
+            official_notes_available: self.official_notes_available,
             auth_manager: self.auth_manager.clone(),
             initial_settings: Arc::clone(&step_settings),
             disabled_plugin_ids: self.disabled_plugin_ids.clone(),
@@ -1109,6 +1135,7 @@ impl Session {
         cwd: AbsolutePathBuf,
         sub_id: String,
         skills_snapshot: HostSkillsSnapshot,
+        thread_store: &codex_extension_api::ExtensionData,
     ) -> TurnContext {
         let model_info = &step_settings.model_info;
         let session_telemetry_for_context = step_settings.telemetry(session_telemetry);
@@ -1120,10 +1147,23 @@ impl Session {
         let use_model_token_budget_defaults =
             per_turn_config.features.enabled(Feature::TokenBudget)
                 && !has_explicit_settings(&per_turn_config);
+        let official_notes_available = thread_store.get::<HistoryNotesAvailable>().is_some()
+            && official_context_is_eligible(
+                &per_turn_config,
+                auth_manager
+                    .as_ref()
+                    .and_then(|manager| manager.auth_cached())
+                    .as_ref(),
+            );
         per_turn_config.token_budget = resolve_token_budget(
             configured_token_budget.as_ref(),
             use_model_token_budget_defaults,
             model_info,
+            if official_notes_available && model_info.supports_experimental_context {
+                ContextWindowAction::ResetWithNotes
+            } else {
+                ContextWindowAction::Summarize
+            },
         );
         if per_turn_config
             .features
@@ -1182,6 +1222,7 @@ impl Session {
             overridden_direct_only_tool_namespaces: None,
             configured_token_budget,
             use_model_token_budget_defaults,
+            official_notes_available,
             auth_manager,
             initial_settings: Arc::clone(&step_settings),
             disabled_plugin_ids: session_configuration.disabled_plugin_ids.clone(),
@@ -1487,6 +1528,7 @@ impl Session {
                 .as_ref()
                 .map(|discovery| discovery.snapshot.as_ref().clone())
                 .unwrap_or_else(|| HostSkillsSnapshot::new(Arc::new(SkillLoadOutcome::default()))),
+            &self.services.thread_extension_data,
         );
         if let Some(discovery) = skill_discovery {
             turn_context.extension_data.insert(discovery);

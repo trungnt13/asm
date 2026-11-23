@@ -45,11 +45,7 @@ pub(crate) async fn context_window_token_status_for_model(
         return context_window_token_status_with_config(sess, config, model_info).await;
     };
     let mut config = config.clone();
-    config.token_budget = super::token_budget::resolve_token_budget(
-        actor_turn.configured_token_budget.as_ref(),
-        actor_turn.use_model_token_budget_defaults,
-        model_info,
-    );
+    config.token_budget = actor_turn.token_budget_for_model(model_info);
     context_window_token_status_with_config(sess, &config, model_info).await
 }
 

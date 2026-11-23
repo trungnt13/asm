@@ -115,6 +115,7 @@ enum CompactionRequestTransport<'a> {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CompactionFallback {
     Foreground,
+    ForegroundOnly,
     Skip,
 }
 

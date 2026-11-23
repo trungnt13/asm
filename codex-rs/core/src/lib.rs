@@ -305,6 +305,7 @@ pub use exec_policy::check_execpolicy_for_warnings;
 pub use exec_policy::format_exec_policy_error_with_source;
 pub use exec_policy::load_exec_policy;
 pub mod compact;
+pub use session::token_budget::HistoryNotesAvailable;
 mod memory_usage;
 pub mod otel_init;
 

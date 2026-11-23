@@ -751,7 +751,7 @@ Apply `[agents] max_depth` to V2 creation, with root at 0. Default 1 permits dir
 
 ### Context budget and compaction
 
-`token_budget` adds context tracking, reminders, and optional notes without changing the normal manual, foreground, or background summary compaction paths. Only an explicit `new_context` tool call resets the window without a summary.
+`token_budget` adds a read-only budget counter and reminders without disabling summary compaction. Use catalog notes instructions and allow `new_context` to reset without a summary only while official Context Management and its native notes tools are active. Otherwise, `new_context` requests summary compaction. Reuse or await eligible background work; below the async threshold, use foreground compaction.
 
 ### Subagent context windows, reasoning defaults, service tiers, and picker
 

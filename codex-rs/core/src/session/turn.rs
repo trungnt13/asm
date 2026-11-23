@@ -85,6 +85,8 @@ use codex_analytics::TurnResolvedConfigFact;
 use codex_analytics::build_track_events_context;
 use codex_async_utils::OrCancelExt;
 use codex_connectors::AppToolPolicyEvaluator;
+use codex_context_fragments::AnnotatedContent;
+use codex_context_fragments::message_from_parts;
 use codex_core_plugins::RecommendedPluginCandidatesInput;
 use codex_extension_api::ExtensionData;
 use codex_extension_api::TurnInputContext;
@@ -108,6 +110,8 @@ use codex_protocol::items::TurnItem;
 use codex_protocol::items::build_hook_prompt_message;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ContentItem;
+use codex_protocol::models::ContentItemKind;
+use codex_protocol::models::ContentItemMetadata;
 use codex_protocol::models::MessagePhase;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::InputModality;
@@ -811,9 +815,16 @@ pub(crate) async fn run_turn(
                 let needs_follow_up = model_needs_follow_up || has_pending_input;
                 let token_limit_reached = token_status.token_limit_reached;
 
-                let reset_requested = auto_compaction_enabled
+                let new_context_requested = auto_compaction_enabled
                     && needs_follow_up
                     && sess.take_new_context_window_request().await;
+                let reset_requested = new_context_requested
+                    && step_context
+                        .turn
+                        .context_window_action(&step_context.settings.model_info)
+                        == super::token_budget::ContextWindowAction::ResetWithNotes;
+                let below_async_threshold = new_context_requested
+                    && !super::async_compaction::threshold_reached(&step_context, &token_status);
                 if !reset_requested {
                     super::async_compaction::maybe_start(
                         &sess,
@@ -863,19 +874,19 @@ pub(crate) async fn run_turn(
                     );
                 }
 
-                let candidate = if needs_follow_up && !reset_requested {
+                let candidate = if needs_follow_up && !reset_requested && !below_async_threshold {
                     super::async_compaction::take_ready(&sess, &turn_context).await
                 } else {
                     None
                 };
                 let should_roll_over = auto_compaction_enabled
                     && needs_follow_up
-                    && (reset_requested || token_limit_reached || candidate.is_some());
+                    && (new_context_requested || token_limit_reached || candidate.is_some());
                 if auto_compaction_enabled {
                     let allow_auto_compact_fallback = !should_roll_over && !token_limit_reached;
                     super::token_budget::maybe_record(
                         sess.as_ref(),
-                        turn_context.as_ref(),
+                        &step_context,
                         token_status.base_window_tokens_remaining,
                         allow_auto_compact_fallback,
                     )
@@ -892,7 +903,11 @@ pub(crate) async fn run_turn(
                             Arc::clone(&step_context),
                             Arc::clone(&step_context),
                             &mut client_session,
-                            CompactionReason::ContextLimit,
+                            if new_context_requested {
+                                CompactionReason::UserRequested
+                            } else {
+                                CompactionReason::ContextLimit
+                            },
                             CompactionPhase::MidTurn,
                             candidate,
                         )
@@ -900,6 +915,23 @@ pub(crate) async fn run_turn(
                     };
                     match compacted {
                         Ok(true) => {
+                            if new_context_requested {
+                                // The replaced history may keep the request but lose the tool result.
+                                let result = message_from_parts(
+                                    "developer",
+                                    vec![AnnotatedContent::text(
+                                        "The new_context call completed. Continue the task without repeating that call.".to_string(),
+                                        ContentItemKind("compaction.new_context_completed".to_string()),
+                                        ContentItemMetadata::harness(),
+                                    )],
+                                );
+                                sess.record_conversation_items(
+                                    &turn_context,
+                                    &step_context.settings.model_info,
+                                    &[result],
+                                )
+                                .await;
+                            }
                             if run_pending_session_start_hooks(
                                 &sess,
                                 &turn_context,
@@ -2027,6 +2059,13 @@ async fn run_auto_compact(
                 } else {
                     crate::compact_remote_v2::CompactionFallback::Skip
                 }
+            } else if matches!(reason, CompactionReason::UserRequested)
+                && !super::async_compaction::threshold_reached(
+                    &step_context,
+                    &super::context_window::context_window_token_status(sess, turn_context).await,
+                )
+            {
+                crate::compact_remote_v2::CompactionFallback::ForegroundOnly
             } else {
                 crate::compact_remote_v2::CompactionFallback::Foreground
             };
