@@ -44,7 +44,6 @@ pub(super) fn enabled(turn_context: &TurnContext) -> bool {
     features.enabled(Feature::AsyncCompaction)
         && !(features.enabled(Feature::AsyncCompactionRootOnly)
             && turn_context.session_source.is_non_root_agent())
-        && !features.enabled(Feature::TokenBudget)
         && matches!(
             turn_context.provider.capabilities().remote_compaction,
             RemoteCompactionSupport::V2

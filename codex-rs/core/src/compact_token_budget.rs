@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use crate::context::world_state::WorldState;
 use crate::hook_runtime::PostCompactHookOutcome;
 use crate::hook_runtime::PreCompactHookOutcome;
 use crate::hook_runtime::run_post_compact_hooks;
@@ -13,39 +12,24 @@ use codex_protocol::error::Result as CodexResult;
 use codex_protocol::items::ContextCompactionItem;
 use codex_protocol::items::TurnItem;
 
-/// Runs token-budget manual compaction as a normal compaction lifecycle.
-///
-/// Token-budget compaction skips model/server summarization and installs a fresh context window
-/// instead. It is still modeled as compaction so compact hooks and `ContextCompaction` turn items
-/// observe the same lifecycle as local or remote compaction.
-pub(crate) async fn run_manual_compact_task(
-    sess: Arc<Session>,
-    step_context: Arc<StepContext>,
-    world_state: Arc<WorldState>,
-) -> CodexResult<()> {
-    run_compact_task_inner(&sess, &step_context, world_state, CompactionTrigger::Manual).await
-}
-
-/// Runs token-budget inline auto-compaction as a normal compaction lifecycle.
-///
-/// Token-budget compaction skips model/server summarization and installs a fresh context window
-/// instead. It is still modeled as compaction so compact hooks and `ContextCompaction` turn items
-/// observe the same lifecycle as local or remote compaction.
-pub(crate) async fn run_inline_auto_compact_task(
-    sess: Arc<Session>,
-    step_context: Arc<StepContext>,
-    world_state: Arc<WorldState>,
-) -> CodexResult<()> {
-    run_compact_task_inner(&sess, &step_context, world_state, CompactionTrigger::Auto).await
-}
-
-async fn run_compact_task_inner(
+/// Honor an explicit `new_context` request without summarizing the old window.
+pub(crate) async fn run_context_reset(
     sess: &Arc<Session>,
-    step_context: &Arc<StepContext>,
-    world_state: Arc<WorldState>,
-    trigger: CompactionTrigger,
-) -> CodexResult<()> {
+    step_context: &StepContext,
+) -> CodexResult<bool> {
     let turn_context = &step_context.turn;
+    if !sess.inline_compaction_allowed(turn_context)? {
+        return Ok(false);
+    }
+    let world_state = Arc::new(
+        sess.build_world_state_for_step(step_context, /*new_window*/ true)
+            .await?,
+    );
+    if !sess.inline_compaction_allowed(turn_context)? {
+        return Ok(false);
+    }
+    let _profile_guard = turn_context.turn_timing_state.begin_compaction();
+    let trigger = CompactionTrigger::Auto;
     let pre_compact_outcome = run_pre_compact_hooks(sess, turn_context, trigger).await;
     match pre_compact_outcome {
         PreCompactHookOutcome::Continue => {}
@@ -72,5 +56,5 @@ async fn run_compact_task_inner(
         return Err(CodexErr::TurnAborted);
     }
 
-    Ok(())
+    Ok(true)
 }

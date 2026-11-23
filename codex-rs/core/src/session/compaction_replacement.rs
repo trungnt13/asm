@@ -73,8 +73,20 @@ impl<'a> PrefixCompactionInstallation<'a> {
                 .into_iter()
                 .map(ResponseItemEnvelope::new),
         );
-        items.extend_from_slice(suffix);
-        // The unchanged suffix already contains updates through this baseline.
+        // A warning appended while compaction was running describes the old window.
+        items.extend(suffix.iter().filter(|envelope| {
+            let ResponseItem::Message {
+                internal_chat_message_metadata_passthrough: Some(metadata),
+                ..
+            } = envelope.item.as_ref() else {
+                return true;
+            };
+            !matches!(
+                metadata.content_item_kinds.as_deref(),
+                Some([kind]) if matches!(kind.0.as_str(), "token_budget.reminder" | "compaction.auto_fallback_prompt")
+            )
+        }).cloned());
+        // The retained suffix already contains updates through this baseline.
         if let Some(checkpoint) = state.history.world_state_checkpoint() {
             world_state_baseline = WorldStateSnapshot::from(&checkpoint.state);
         }
