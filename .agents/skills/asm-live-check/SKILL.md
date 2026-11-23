@@ -10,7 +10,7 @@ Follow the [fork guide](../../../docs/porting-from-codex.md). For Desktop SSH ch
 ## Plan
 
 - Except for [local-only upstream rebases](../../../docs/porting-from-codex.md#local-validation-for-upstream-rebases), every PR needs a successful live check before readiness.
-- Select the smallest scenario that checks the changed behavior and fork interactions. State the expected result. Builds, offline checks, and mocks do not replace a required live check.
+- Select the smallest scenario that exercises the implementation changes and relevant fork interactions. Include the necessary turns and agents. For example, use multiple turns and agents to check cache changes that affect them. State the expected result. Builds, offline checks, and mocks do not replace a required live check.
 - Choose the cheapest available compatible model from any provider. Use current prices and include required helper calls. Do not select the interactive model only because it is configured.
 - Use the lowest adequate reasoning effort and standard speed. Apply overrides only in isolated test state. Do not change personal defaults.
 - Before calls, record model selection evidence and a cost estimate. Set request, turn, time, and supported token limits. Minimize input and requested output.
