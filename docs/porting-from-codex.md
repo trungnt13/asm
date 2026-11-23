@@ -54,6 +54,8 @@ Local profile rules:
 
 Select checks from changed inputs, fork interactions, conflicts, failures, and unresolved concerns—not sync size. Do not retest untouched upstream behavior by default. Record checks, reused evidence, and uncertainty. Narrow scope does not reduce required evidence. Never call unchecked behavior verified; a clean merge is not validation. Verify upstream CI before claiming it passed.
 
+Before PR readiness, use [asm-live-check](../.agents/skills/asm-live-check/SKILL.md) for live-check requirements.
+
 - **Documentation:** review wording and links; run `git diff --check`. No rebuild is required.
 - **Behavior:** accept changed fork behavior with the built binary in a small real user scenario. Mocked/simulated responses are not acceptance evidence. Do not add mock tests or run them by default.
 - **Rust:** when needed, run existing non-mock checks with `just test -p <crate> <test-filter>`, not `cargo test`. Use scoped formatting and targeted Clippy. Update affected assertions/snapshots together; exclude unrelated stale expectations.
@@ -126,7 +128,7 @@ Before syncs or targeted ports, use [asm-upstream-sync](../.agents/skills/asm-up
 
 ### Shared compatibility gate
 
-For syncs or saved-cache/wire-format changes, apply this gate even after conflict-free rebases. Follow narrow validation and [live-check](../.agents/skills/asm-live-check/SKILL.md) rules; this gate grants no new provider, paid-matrix, broader-check, or test-authoring authority.
+For syncs or saved-cache/wire-format changes, apply this gate even after conflict-free rebases. Follow narrow validation and [live-check](../.agents/skills/asm-live-check/SKILL.md) rules. This gate does not authorize paid matrices, broader checks, or new tests.
 
 1. Map all affected writers and readers, including stock consumers. Trace caches, migrations, serialization, app-server responses, raw events, and live notifications. Review consumers, not only producers. For new mandatory handshakes, inspect existing clients, fixtures, and reconnects.
 2. Keep fork-only formats/migrations in ASM-owned versioned caches, never stock caches. Preserve native canonical rollouts, thread IDs, and shared metadata. For incompatible formats or migration-number/checksum collisions, change the ASM namespace. Never rewrite applied migration checksums.

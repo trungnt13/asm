@@ -25,4 +25,4 @@ Keep commands and config consistent with the candidate version.
 
 Use the worktree scenario only for worktree changes. For other experiments,
 select a small Desktop scenario that checks the requested behavior.
-Skill use does not authorize deployment, cleanup, or model calls.
+Skill use does not authorize deployment or cleanup.
