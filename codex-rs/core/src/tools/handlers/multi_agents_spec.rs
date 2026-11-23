@@ -7,7 +7,7 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeMap;
 
-const SPAWN_AGENT_REQUIRED_MODEL_GUIDANCE: &str = "Specify the model for every spawn. Use your current model unless the user or task instructions call for a different one.";
+const SPAWN_AGENT_REQUIRED_MODEL_GUIDANCE: &str = "Specify the model for every spawn.  Pick model overrides from the latest `<model_catalog>` listing using instructions from user or task.";
 const SPAWN_AGENT_INHERITED_MODEL_GUIDANCE: &str = "Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed.";
 const SPAWN_AGENT_INHERITED_MODEL_GUIDANCE_V2: &str = "Spawned agents inherit your current model by default. Do not set the `model` field unless the user explicitly asks for a different model.";
 const SPAWN_AGENT_MODEL_CATALOG_GUIDANCE: &str =
@@ -132,8 +132,7 @@ pub fn create_spawn_agent_tool_v2(
                 available_models_description.as_deref(),
                 options.include_model_catalog_in_spawn_agent_list
                     && options.model_catalog_in_context,
-                options
-                    .expose_spawn_agent_model_overrides
+                (options.expose_spawn_agent_model_overrides && !require_model)
                     .then_some(SPAWN_AGENT_MODEL_CATALOG_GUIDANCE),
                 model_guidance,
                 options.usage_hint_text,
