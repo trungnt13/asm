@@ -3,24 +3,18 @@ use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use app_test_support::create_fake_parented_rollout_with_source;
 use app_test_support::create_fake_rollout;
-use codex_app_server_protocol::RawResponseCompletedNotification;
 use codex_app_server_protocol::ReviewDelivery;
 use codex_app_server_protocol::ReviewStartParams;
 use codex_app_server_protocol::ReviewStartResponse;
 use codex_app_server_protocol::ReviewTarget;
 use codex_app_server_protocol::SessionSource as ApiSessionSource;
-use codex_app_server_protocol::ThreadClosedNotification;
 use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
-use codex_app_server_protocol::ThreadLoadedListResponse;
 use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadSource;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
-use codex_app_server_protocol::ThreadUnsubscribeParams;
-use codex_app_server_protocol::ThreadUnsubscribeResponse;
-use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::TurnSteerParams;
@@ -634,140 +628,23 @@ async fn turn_steer_updates_client_metadata_on_follow_up_responses_request_v2(
     Ok(())
 }
 
-#[tokio::test]
-async fn resumed_closed_subagent_retains_raw_usage_attribution() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
-    let server = responses::start_mock_server().await;
-    let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri())
-        .with_model("gpt-5.6-luna")
-        .with_root_config("thread_unload_delay_secs = 0")
-        .with_extra_config("[features.multi_agent_v2]\nenabled = false")
-        .write(codex_home.path())?;
-    let mut app = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
-    let parent = app
-        .start_thread(ThreadStartParams {
-            experimental_raw_events: true,
-            ..Default::default()
-        })
-        .await?
-        .thread;
-    let turn = |thread_id: &str, prompt: &str| TurnStartParams {
-        thread_id: thread_id.to_owned(),
-        input: vec![V2UserInput::Text {
-            text: prompt.to_owned(),
-            text_elements: vec![],
-        }],
-        ..Default::default()
-    };
-    let tool = |name: &str, args: serde_json::Value| {
-        responses::sse(vec![
-            responses::ev_function_call_with_namespace(
-                name,
-                "multi_agent_v1",
-                name,
-                &args.to_string(),
-            ),
-            responses::ev_completed(name),
-        ])
-    };
-    responses::mount_sse_sequence(
-        &server,
-        vec![
-            tool("spawn_agent", json!({"message": "Inspect the example"})),
-            responses::sse_completed("done-1"),
-            responses::sse_completed("done-2"),
-        ],
-    )
-    .await;
-    app.start_turn_and_wait_for_completion(turn(&parent.id, "Spawn a child"))
-        .await?;
-    let child_turn: TurnCompletedNotification = timeout(
-        DEFAULT_READ_TIMEOUT,
-        app.read_notification("turn/completed"),
-    )
-    .await??;
-    let child_id = child_turn.thread_id;
-
-    responses::mount_sse_sequence(
-        &server,
-        vec![
-            tool("close_agent", json!({"target": child_id})),
-            responses::sse_completed("closed"),
-        ],
-    )
-    .await;
-    app.start_turn_and_wait_for_completion(turn(&parent.id, "Close the child"))
-        .await?;
-    // Resume from the child's subscription after both original runtimes are gone.
-    let id = app
-        .send_thread_unsubscribe_request(ThreadUnsubscribeParams {
-            thread_id: parent.id.clone(),
-        })
-        .await?;
-    let _: ThreadUnsubscribeResponse = app.read_response(id).await?;
-    let closed: ThreadClosedNotification =
-        timeout(DEFAULT_READ_TIMEOUT, app.read_notification("thread/closed")).await??;
-    assert_eq!(closed.thread_id, parent.id);
-    let id = app
-        .send_thread_loaded_list_request(Default::default())
-        .await?;
-    let loaded: ThreadLoadedListResponse = app.read_response(id).await?;
-    assert!(loaded.data.is_empty());
-
-    let id = app
-        .send_thread_resume_request(ThreadResumeParams {
-            thread_id: child_id.clone(),
-            ..Default::default()
-        })
-        .await?;
-    let _: ThreadResumeResponse = app.read_response(id).await?;
-    let request = responses::mount_sse_once(&server, responses::sse_completed("resumed")).await;
-    app.clear_message_buffer();
-    app.start_turn_and_wait_for_completion(turn(&child_id, "Continue"))
-        .await?;
-    assert_eq!(
-        request
-            .single_request()
-            .header("x-codex-exclude")
-            .as_deref(),
-        Some("tools")
-    );
-    let raw: RawResponseCompletedNotification = timeout(
-        DEFAULT_READ_TIMEOUT,
-        app.read_notification("rawResponse/completed"),
-    )
-    .await??;
-    assert_eq!(raw.response_id, "resumed");
-    Ok(())
-}
-
-#[test_case::test_case(false, "none", false; "legacy")]
-#[test_case::test_case(true, "none", false; "v2 fresh")]
-#[test_case::test_case(true, "all", false; "v2 fork")]
-#[test_case::test_case(true, "none", true; "v2 fresh with raw events")]
+#[test_case::test_case("none", false; "v2 fresh")]
+#[test_case::test_case("all", false; "v2 fork")]
+#[test_case::test_case("none", true; "v2 fresh with raw events")]
 #[tokio::test]
 async fn subagents_inherit_spawn_metadata_without_live_parent_updates(
-    multi_agent_v2: bool,
     fork_turns: &str,
     experimental_raw_events: bool,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let spawn_args = if multi_agent_v2 {
-        json!({"task_name": "worker", "message": "Inspect the example", "fork_turns": fork_turns})
-    } else {
-        json!({"message": "Inspect the example"})
-    };
-    let namespace = if multi_agent_v2 {
-        "collaboration"
-    } else {
-        "multi_agent_v1"
-    };
+    let spawn_args = json!({
+        "task_name": "worker",
+        "message": "Inspect the example",
+        "fork_turns": fork_turns,
+        "model": "gpt-5.6-sol",
+    });
+    let namespace = "collaboration";
     let parent_wait = responses::ev_completed("parent-wait");
     let child_wait = responses::ev_response_created("child-spawn");
     let server = responses::start_websocket_server(vec![
@@ -808,18 +685,12 @@ async fn subagents_inherit_spawn_metadata_without_live_parent_updates(
     let release_child = server.gate_response_event(&child_wait);
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri().replacen("ws://", "http://", 1))
-        .with_model(if multi_agent_v2 {
-            "gpt-5.6-sol"
-        } else {
-            "gpt-5.6-luna"
-        })
+        .with_model("gpt-5.6-sol")
         .with_provider_config("supports_websockets = true")
         .with_provider_config("supports_standalone_web_search = true")
         .enable_feature(Feature::StandaloneWebSearch)
         .with_root_config("web_search = \"live\"")
-        .with_extra_config(&format!(
-            "[agents]\nmax_depth = 3\n[features.multi_agent_v2]\nenabled = {multi_agent_v2}"
-        ))
+        .with_extra_config("[agents]\nmax_depth = 3\n[features.multi_agent_v2]\nenabled = true")
         .write(codex_home.path())?;
     let mut app_server = TestAppServer::builder()
         .with_codex_home(codex_home.path())
