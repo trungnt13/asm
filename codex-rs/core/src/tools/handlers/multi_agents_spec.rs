@@ -7,6 +7,7 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeMap;
 
+const SPAWN_AGENT_REQUIRED_MODEL_GUIDANCE: &str = "Specify the model for every spawn.  Pick model overrides from the latest `<model_catalog>` listing using instructions from user or task.";
 const SPAWN_AGENT_INHERITED_MODEL_GUIDANCE: &str = "Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed.";
 const SPAWN_AGENT_INHERITED_MODEL_GUIDANCE_V2: &str = "Spawned agents inherit your current model by default. Do not set the `model` field unless the user explicitly asks for a different model.";
 const SPAWN_AGENT_MODEL_CATALOG_GUIDANCE: &str =
@@ -23,6 +24,7 @@ pub struct SpawnAgentToolOptions {
     pub expose_agent_type: bool,
     pub hide_agent_type_model_reasoning: bool,
     pub expose_spawn_agent_model_overrides: bool,
+    pub require_spawn_agent_model: bool,
     pub multi_agent_version: MultiAgentVersion,
     pub include_model_catalog_in_spawn_agent_list: bool,
     pub model_catalog_in_context: bool,
@@ -39,6 +41,7 @@ impl Default for SpawnAgentToolOptions {
             expose_agent_type: true,
             hide_agent_type_model_reasoning: false,
             expose_spawn_agent_model_overrides: false,
+            require_spawn_agent_model: false,
             multi_agent_version: MultiAgentVersion::Disabled,
             include_model_catalog_in_spawn_agent_list: true,
             model_catalog_in_context: false,
@@ -68,17 +71,27 @@ pub fn create_spawn_agent_tool_v2(
     options: SpawnAgentToolOptions,
     description_override: Option<&str>,
 ) -> ToolSpec {
+    let require_model =
+        options.require_spawn_agent_model && options.expose_spawn_agent_model_overrides;
     let available_models_description = (options.include_model_catalog_in_spawn_agent_list
         && !options.model_catalog_in_context
         && options.expose_spawn_agent_model_overrides)
         .then(|| {
+            let heading = if require_model {
+                "Available model overrides"
+            } else {
+                "Available model overrides (optional; inherited parent model is preferred)"
+            };
             spawn_agent_models_description(
                 &options.available_models,
                 options.multi_agent_version,
                 options.subagent_model_list.as_deref(),
+                heading,
             )
         });
-    let inherited_model_guidance = if options.model_catalog_in_context {
+    let model_guidance = if require_model {
+        Some(SPAWN_AGENT_REQUIRED_MODEL_GUIDANCE)
+    } else if options.model_catalog_in_context {
         options
             .expose_spawn_agent_model_overrides
             .then_some(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE_V2)
@@ -108,6 +121,9 @@ pub fn create_spawn_agent_tool_v2(
         Some(false.into()),
     );
     require_spawn_agent_fork_turns(&mut parameters);
+    if require_model {
+        require_spawn_agent_model(&mut parameters);
+    }
 
     ToolSpec::Function(ResponsesApiTool {
         name: "spawn_agent".to_string(),
@@ -116,10 +132,9 @@ pub fn create_spawn_agent_tool_v2(
                 available_models_description.as_deref(),
                 options.include_model_catalog_in_spawn_agent_list
                     && options.model_catalog_in_context,
-                options
-                    .expose_spawn_agent_model_overrides
+                (options.expose_spawn_agent_model_overrides && !require_model)
                     .then_some(SPAWN_AGENT_MODEL_CATALOG_GUIDANCE),
-                inherited_model_guidance,
+                model_guidance,
                 options.usage_hint_text,
                 description_override,
             ),
@@ -417,6 +432,20 @@ pub(crate) fn require_spawn_agent_fork_turns(parameters: &mut JsonSchema) {
     parameters.required = Some(required.into_boxed_slice());
 }
 
+pub(crate) fn require_spawn_agent_model(parameters: &mut JsonSchema) {
+    parameters.properties.get_or_insert_default().insert(
+        "model".to_string(),
+        JsonSchema::string(Some(
+            "Required model for the new agent. Takes precedence over the role model.".to_string(),
+        )),
+    );
+    let mut required = parameters.required.take().unwrap_or_default().into_vec();
+    if !required.iter().any(|name| name == "model") {
+        required.push("model".to_string());
+    }
+    parameters.required = Some(required.into_boxed_slice());
+}
+
 fn append_external_model_aliases(
     mut description: String,
     aliases: &[String],
@@ -434,12 +463,12 @@ fn spawn_agent_tool_description_v2(
     available_models_description: Option<&str>,
     model_catalog_in_context: bool,
     model_catalog_guidance: Option<&str>,
-    inherited_model_guidance: Option<&str>,
+    model_guidance: Option<&str>,
     usage_hint_text: Option<String>,
     description: Option<&str>,
 ) -> String {
     let model_catalog_guidance = model_catalog_guidance.unwrap_or_default();
-    let inherited_model_guidance = inherited_model_guidance.unwrap_or_default();
+    let model_guidance = model_guidance.unwrap_or_default();
 
     let (catalog_prefix, catalog_suffix) = if model_catalog_in_context {
         (String::new(), format!("\n{model_catalog_guidance}"))
@@ -454,7 +483,7 @@ fn spawn_agent_tool_description_v2(
         format!(
             r#"
 {catalog_prefix}        {description}
-{inherited_model_guidance}{catalog_suffix}"#
+{model_guidance}{catalog_suffix}"#
         )
     } else {
         format!(
@@ -462,7 +491,7 @@ fn spawn_agent_tool_description_v2(
 {catalog_prefix}        Spawns an agent to work on the specified task. If your current task is `/root/task1` and you spawn_agent with task_name "task_3" the agent will have canonical task name `/root/task1/task_3`.
 You are then able to refer to this agent as `task_3` or `/root/task1/task_3` interchangeably. However an agent `/root/task2/task_3` would only be able to communicate with this agent via its canonical name `/root/task1/task_3`.
 Codex-runtime agents will have the same tools as you and the ability to spawn their own subagents.
-{inherited_model_guidance}{catalog_suffix}
+{model_guidance}{catalog_suffix}
 It will be able to send you and other running agents messages, and its final answer will be provided to you when it finishes.
 The new agent's canonical task name will be provided to it along with the message.
 
@@ -488,6 +517,7 @@ fn spawn_agent_models_description(
     models: &[ModelPreset],
     multi_agent_version: MultiAgentVersion,
     configured: Option<&[String]>,
+    heading: &str,
 ) -> String {
     let visible_models = match crate::agent::model_catalog::advertised_models(
         models,
@@ -542,9 +572,7 @@ fn spawn_agent_models_description(
         })
         .collect::<Vec<_>>()
         .join("\n");
-    format!(
-        "Available model overrides (optional; inherited parent model is preferred):\n{model_descriptions}"
-    )
+    format!("{heading}:\n{model_descriptions}")
 }
 
 fn wait_agent_tool_parameters_v2(options: WaitAgentTimeoutOptions) -> JsonSchema {

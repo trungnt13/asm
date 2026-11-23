@@ -1551,6 +1551,7 @@ pub struct MultiAgentV2Config {
     pub tool_namespace: Option<String>,
     pub hide_spawn_agent_metadata: bool,
     pub expose_spawn_agent_model_overrides: bool,
+    pub require_spawn_agent_model: bool,
     pub subagent_model_list: Option<Vec<String>>,
     pub wait_agent_enabled: bool,
     pub interrupt_at_item_boundary: bool,
@@ -1562,6 +1563,10 @@ pub struct MultiAgentV2Config {
 }
 
 impl MultiAgentV2Config {
+    pub(crate) fn requires_spawn_agent_model(&self) -> bool {
+        self.expose_spawn_agent_model_overrides && self.require_spawn_agent_model
+    }
+
     fn defaults_for_max_concurrency(max_concurrent_threads_per_session: usize) -> Self {
         Self {
             max_concurrent_threads_per_session,
@@ -1577,6 +1582,7 @@ impl MultiAgentV2Config {
             tool_namespace: Some(DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE.to_string()),
             hide_spawn_agent_metadata: true,
             expose_spawn_agent_model_overrides: true,
+            require_spawn_agent_model: false,
             subagent_model_list: None,
             wait_agent_enabled: true,
             interrupt_at_item_boundary: false,
@@ -3200,6 +3206,9 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
         tool_namespace,
         hide_spawn_agent_metadata,
         expose_spawn_agent_model_overrides,
+        require_spawn_agent_model: base
+            .and_then(|config| config.require_spawn_agent_model)
+            .unwrap_or_default(),
         subagent_model_list: config_toml.subagent_model_list.clone(),
         wait_agent_enabled,
         interrupt_at_item_boundary,

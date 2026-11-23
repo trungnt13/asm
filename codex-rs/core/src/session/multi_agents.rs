@@ -142,7 +142,8 @@ pub(crate) fn resolve_usage_hints(
             omit_update_plan_instructions,
             max_concurrency: config.max_concurrent_threads_per_session,
             wait_agent_enabled: config.wait_agent_enabled,
-            expose_model_overrides: config.expose_spawn_agent_model_overrides,
+            expose_model_overrides: config.expose_spawn_agent_model_overrides
+                && !config.requires_spawn_agent_model(),
         })
     };
 

@@ -4,6 +4,7 @@
 use crate::session::session::Session;
 use crate::tools::context::ToolInvocation;
 use crate::tools::handlers::multi_agents_spec::require_spawn_agent_fork_turns;
+use crate::tools::handlers::multi_agents_spec::require_spawn_agent_model;
 use crate::tools::registry::CoreToolRuntime;
 use codex_tools::JsonSchema;
 use codex_tools::ResponsesApiNamespace;
@@ -85,9 +86,20 @@ impl ToolExecutor<ToolInvocation> for MultiAgentV2ToolOverrides {
             {
                 // A composed spawn schema could still impose conflicting requirements
                 // after patching its root. Use the bundled schema for those overrides.
+                let require_model = tool.name == "spawn_agent"
+                    && tool
+                        .parameters
+                        .required
+                        .as_deref()
+                        .is_some_and(|required| required.iter().any(|name| name == "model"));
                 tool.parameters.clone_from(parameters);
                 match tool.name.as_str() {
-                    "spawn_agent" => require_spawn_agent_fork_turns(&mut tool.parameters),
+                    "spawn_agent" => {
+                        require_spawn_agent_fork_turns(&mut tool.parameters);
+                        if require_model {
+                            require_spawn_agent_model(&mut tool.parameters);
+                        }
+                    }
                     "wait_agent" => codex_tools::require_wait_reason(&mut tool.parameters),
                     _ => {}
                 }

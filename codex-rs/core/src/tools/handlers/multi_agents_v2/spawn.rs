@@ -50,7 +50,12 @@ impl ToolExecutor<ToolInvocation> for Handler {
             let turn_id = invocation.step_context.turn.sub_id.clone();
             let call_id = invocation.call_id.to_string();
             let started_at_ms = now_unix_timestamp_ms();
-            let result = handle_spawn_agent(invocation).await;
+            let result = handle_spawn_agent(
+                invocation,
+                self.options.require_spawn_agent_model
+                    && self.options.expose_spawn_agent_model_overrides,
+            )
+            .await;
             let completed_at_ms = now_unix_timestamp_ms();
             let (status, receiver_thread_ids, agents_states) = match &result {
                 Ok((_, thread_id, agent_status, _)) => (
@@ -92,6 +97,7 @@ impl ToolExecutor<ToolInvocation> for Handler {
 
 async fn handle_spawn_agent(
     invocation: ToolInvocation,
+    require_model: bool,
 ) -> Result<
     (
         SpawnAgentResult,
@@ -119,6 +125,16 @@ async fn handle_spawn_agent(
         .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
     let fork_mode = args.fork_mode()?;
     let message = message_content(args.message)?;
+    if require_model
+        && args
+            .model
+            .as_deref()
+            .is_none_or(|model| model.trim().is_empty())
+    {
+        return Err(FunctionCallError::RespondToModel(
+            "model is required; specify the model name".to_string(),
+        ));
+    }
     let role_name = args
         .agent_type
         .as_deref()
