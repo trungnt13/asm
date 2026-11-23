@@ -264,7 +264,6 @@ struct PreparedProcessHandles {
     process: Arc<UnifiedExecProcess>,
     output: OutputHandles,
     pause_state: Option<watch::Receiver<bool>>,
-    session: Option<Arc<crate::session::session::Session>>,
     network_approval: Option<DeferredNetworkApproval>,
     call_id: String,
     hook_command: String,
@@ -303,39 +302,20 @@ impl Drop for InitialExecCommandGuard {
     }
 }
 
-async fn unregister_network_approval_for_entry(entry: &ProcessEntry) {
-    if let Some(network_approval) = entry.network_approval.as_ref()
-        && let Some(session) = entry.session.upgrade()
-    {
-        session
-            .services
-            .network_approval
-            .unregister_call(network_approval.registration_id())
-            .await;
+fn unregister_network_approval_for_entry(entry: &ProcessEntry) {
+    if let Some(network_approval) = entry.network_approval.as_ref() {
+        let _ = network_approval.finish();
     }
 }
 
 async fn finish_network_approval_after_process_exit_for_entry(
     entry: &ProcessEntry,
 ) -> Result<(), String> {
-    let session = entry.session.upgrade();
-    finish_deferred_network_approval_after_process_exit_for_session(
-        session.as_ref(),
-        entry.network_approval.clone(),
-    )
-    .await
+    finish_deferred_network_approval_after_process_exit(entry.network_approval.clone()).await
 }
 
-async fn finish_deferred_network_approval_for_session(
-    session: Option<&Arc<crate::session::session::Session>>,
-    deferred: Option<DeferredNetworkApproval>,
-) -> Result<(), String> {
-    let Some(session) = session else {
-        return Ok(());
-    };
-    finish_deferred_network_approval(session.as_ref(), deferred)
-        .await
-        .map_err(network_approval_error_message)
+fn finish_network_approval(deferred: Option<DeferredNetworkApproval>) -> Result<(), String> {
+    finish_deferred_network_approval(deferred).map_err(network_approval_error_message)
 }
 
 fn network_approval_error_message(err: ToolError) -> String {
@@ -345,14 +325,8 @@ fn network_approval_error_message(err: ToolError) -> String {
     }
 }
 
-async fn network_denial_message_for_session(
-    session: Option<&Arc<crate::session::session::Session>>,
-    deferred: Option<DeferredNetworkApproval>,
-) -> String {
-    let Some(session) = session else {
-        return NETWORK_ACCESS_DENIED_MESSAGE.to_string();
-    };
-    match finish_deferred_network_approval(session.as_ref(), deferred).await {
+fn network_denial_message(deferred: Option<DeferredNetworkApproval>) -> String {
+    match finish_deferred_network_approval(deferred) {
         Ok(()) => NETWORK_ACCESS_DENIED_MESSAGE.to_string(),
         Err(err) => network_approval_error_message(err),
     }
@@ -367,8 +341,7 @@ async fn wait_for_late_network_denial(network_cancelled: &CancellationToken) -> 
     .is_ok()
 }
 
-async fn finish_deferred_network_approval_after_process_exit_for_session(
-    session: Option<&Arc<crate::session::session::Session>>,
+async fn finish_deferred_network_approval_after_process_exit(
     deferred: Option<DeferredNetworkApproval>,
 ) -> Result<(), String> {
     if let Some(approval) = &deferred {
@@ -380,7 +353,7 @@ async fn finish_deferred_network_approval_after_process_exit_for_session(
             _ = wait_for_late_network_denial(&network_cancelled) => {}
         }
     }
-    finish_deferred_network_approval_for_session(session, deferred).await
+    finish_network_approval(deferred)
 }
 
 fn fail_process_with_message(process: &UnifiedExecProcess, message: String) -> UnifiedExecError {
@@ -429,16 +402,20 @@ async fn emit_failed_initial_exec_end_if_unstored(
 }
 
 fn terminate_process_on_network_denial(
-    process: Arc<UnifiedExecProcess>,
-    session: std::sync::Weak<crate::session::session::Session>,
+    process: &Arc<UnifiedExecProcess>,
     deferred: DeferredNetworkApproval,
 ) -> tokio::task::JoinHandle<()> {
     let network_cancelled = deferred.cancellation_token();
     let process_exited = process.cancellation_token();
+    // Startup and the terminal registry own the process; observing it must not keep it alive.
+    let process = Arc::downgrade(process);
     tokio::spawn(async move {
         let denied = tokio::select! {
             _ = network_cancelled.cancelled() => true,
             _ = process_exited.cancelled() => {
+                if process.upgrade().is_none() {
+                    return;
+                }
                 // A yielded process stays registered until its next poll.
                 wait_for_late_network_denial(&network_cancelled).await
             }
@@ -446,9 +423,10 @@ fn terminate_process_on_network_denial(
         if !denied {
             return;
         }
-        let session = session.upgrade();
-        let message = network_denial_message_for_session(session.as_ref(), Some(deferred)).await;
-        process.fail_and_terminate(message);
+        let message = network_denial_message(Some(deferred));
+        if let Some(process) = process.upgrade() {
+            process.fail_and_terminate(message);
+        }
     })
 }
 
@@ -503,7 +481,7 @@ impl UnifiedExecProcessManager {
             store.remove(process_id)
         };
         if let Some(entry) = removed {
-            unregister_network_approval_for_entry(&entry).await;
+            unregister_network_approval_for_entry(&entry);
         }
     }
 
@@ -565,13 +543,9 @@ impl UnifiedExecProcessManager {
         if let Some(completion) = completion.as_ref() {
             let _ = completion.process.set(Arc::clone(&process));
         }
-        let network_denial_monitor = deferred_network_approval.as_ref().map(|deferred| {
-            terminate_process_on_network_denial(
-                Arc::clone(&process),
-                Arc::downgrade(&context.session),
-                deferred.clone(),
-            )
-        });
+        let network_denial_monitor = deferred_network_approval
+            .as_ref()
+            .map(|deferred| terminate_process_on_network_denial(&process, deferred.clone()));
 
         let output_buffer = Arc::clone(&process.output_handles().output_buffer);
         let model_context = context.step_context.model_context();
@@ -693,11 +667,7 @@ impl UnifiedExecProcessManager {
             .as_ref()
             .is_some_and(DeferredNetworkApproval::is_cancelled)
         {
-            let message = network_denial_message_for_session(
-                Some(&context.session),
-                deferred_network_approval.take(),
-            )
-            .await;
+            let message = network_denial_message(deferred_network_approval.take());
             emit_failed_initial_exec_end_if_unstored(
                 process_stored,
                 process.sandbox_type(),
@@ -715,11 +685,7 @@ impl UnifiedExecProcessManager {
             return Err(fail_process_with_message(process.as_ref(), message));
         }
         if let Some(message) = process.failure_message() {
-            let finish_result = finish_deferred_network_approval_for_session(
-                Some(&context.session),
-                deferred_network_approval.take(),
-            )
-            .await;
+            let finish_result = finish_network_approval(deferred_network_approval.take());
             emit_failed_initial_exec_end_if_unstored(
                 process_stored,
                 process.sandbox_type(),
@@ -757,12 +723,10 @@ impl UnifiedExecProcessManager {
                 } => (Some(process_id), exit_code),
                 ProcessStatus::Exited { exit_code, entry } => {
                     entry.process.cancellation_token().cancel();
-                    if let Err(message) =
-                        finish_deferred_network_approval_after_process_exit_for_session(
-                            Some(&context.session),
-                            deferred_network_approval.take(),
-                        )
-                        .await
+                    if let Err(message) = finish_deferred_network_approval_after_process_exit(
+                        deferred_network_approval.take(),
+                    )
+                    .await
                     {
                         return Err(fail_process_with_message(entry.process.as_ref(), message));
                     }
@@ -802,8 +766,7 @@ impl UnifiedExecProcessManager {
         } else {
             // Short-lived command: emit the completed command item immediately
             // using the same helper as the background watcher.
-            let finish_result = finish_deferred_network_approval_after_process_exit_for_session(
-                Some(&context.session),
+            let finish_result = finish_deferred_network_approval_after_process_exit(
                 deferred_network_approval.take(),
             )
             .await;
@@ -1001,7 +964,6 @@ impl UnifiedExecProcessManager {
             process,
             output,
             pause_state,
-            session,
             network_approval,
             call_id,
             hook_command,
@@ -1085,18 +1047,12 @@ impl UnifiedExecProcessManager {
             .as_ref()
             .is_some_and(DeferredNetworkApproval::is_cancelled)
         {
-            let message =
-                network_denial_message_for_session(session.as_ref(), network_approval.clone())
-                    .await;
+            let message = network_denial_message(network_approval.clone());
             self.release_process(process_id, Some(locked_process)).await;
             return Err(fail_process_with_message(process.as_ref(), message));
         }
         if let Some(message) = process.failure_message() {
-            let finish_result = finish_deferred_network_approval_for_session(
-                session.as_ref(),
-                network_approval.clone(),
-            )
-            .await;
+            let finish_result = finish_network_approval(network_approval.clone());
             self.release_process(process_id, Some(locked_process)).await;
             if let Err(message) = finish_result {
                 return Err(fail_process_with_message(process.as_ref(), message));
@@ -1240,13 +1196,10 @@ impl UnifiedExecProcessManager {
             .session
             .upgrade()
             .map(|session| session.subscribe_elicitation_pause_state());
-        let session = entry.session.upgrade();
-
         Ok(PreparedProcessHandles {
             process: Arc::clone(&entry.process),
             output,
             pause_state,
-            session,
             network_approval: entry.network_approval.clone(),
             call_id: entry.call_id.clone(),
             hook_command: entry.hook_command.clone(),
@@ -1316,7 +1269,7 @@ impl UnifiedExecProcessManager {
         );
         // Install the watcher before cancellable cleanup, and outside the process-store lock.
         if let Some(pruned_entry) = pruned_entry {
-            unregister_network_approval_for_entry(&pruned_entry).await;
+            unregister_network_approval_for_entry(&pruned_entry);
             pruned_entry.process.terminate();
         }
     }
@@ -1834,7 +1787,7 @@ impl UnifiedExecProcessManager {
         };
 
         for entry in entries {
-            unregister_network_approval_for_entry(&entry).await;
+            unregister_network_approval_for_entry(&entry);
             entry.process.terminate();
         }
     }
@@ -1908,7 +1861,7 @@ impl UnifiedExecProcessManager {
             entry
         };
 
-        unregister_network_approval_for_entry(&entry).await;
+        unregister_network_approval_for_entry(&entry);
         true
     }
 }

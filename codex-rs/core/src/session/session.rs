@@ -342,6 +342,7 @@ impl SessionConfiguration {
         environment_selections: &[TurnEnvironmentSelection],
     ) -> ThreadSettingsSnapshot {
         ThreadSettingsSnapshot {
+            spawn_service_tier_override: self.step_settings.spawn_service_tier_override.clone(),
             model: self.step_settings.collaboration_mode.model().to_string(),
             model_provider_id: self.original_config_do_not_use.model_provider_id.clone(),
             service_tier: self.step_settings.service_tier.clone(),
@@ -1911,8 +1912,6 @@ impl Session {
                 };
             let executed_tool_calls =
                 crate::state::ExecutedToolCalls::new(&config.features, &initial_history);
-            let codex_responses_headers =
-                thread_extension_data.get::<crate::CodexResponsesHeaders>();
             // Ephemeral title requests use request-level effort even when managed settings
             // enable overrides. The client-supplied tag selects cache behavior, not permissions.
             let title_request = config.ephemeral
@@ -1971,7 +1970,7 @@ impl Session {
                 )
                 .or(prompt_cache_key.map(|key| key.to_string())),
                 tx_event.clone(),
-                codex_responses_headers,
+                &thread_extension_data,
                 crate::cyber_access_program::ApiKeyCyberAccessPrograms::from_config(&config),
                 config.continue_when_model_at_capacity,
                 required_cyber_access_programs,

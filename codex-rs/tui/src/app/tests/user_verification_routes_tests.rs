@@ -286,6 +286,7 @@ async fn inactive_thread_user_verification_preserves_foreground_stream() -> Resu
             } => approved.push((thread_id, server_name, request_id)),
             AppEvent::InsertHistoryCell(cell) => app.insert_history_cell(&mut tui, cell),
             AppEvent::ConsolidateAgentMessage {
+                emitted_cells,
                 source,
                 copy_source,
                 cwd,
@@ -303,6 +304,7 @@ async fn inactive_thread_user_verification_preserves_foreground_stream() -> Resu
                         inline_visualization_context,
                     )
                     .with_copy_source(copy_source),
+                    emitted_cells,
                     scrollback_reflow,
                     deferred_history_cell,
                 )?;

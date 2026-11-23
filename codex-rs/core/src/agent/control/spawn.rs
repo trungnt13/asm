@@ -433,7 +433,11 @@ impl LocalAgentControl {
                 })?;
             config.model_provider_id = stored_model_provider;
         }
-        if !config.subagent_service_tiers.is_empty() {
+        if !config.subagent_service_tiers.is_empty()
+            && initial_history
+                .resumed_thread_settings()
+                .is_none_or(|settings| settings.spawn_service_tier_override.is_none())
+        {
             let model = config.model.as_deref().ok_or_else(|| {
                 CodexErr::InvalidRequest(
                     "could not resolve the reloaded child model for service tier selection"
@@ -1027,6 +1031,7 @@ impl LocalAgentControl {
                 self.clone(),
                 parent_thread_id,
                 inherited_exec_policy,
+                options.service_tier,
             )
             .await
             .map_err(|err| err.with_agent_context(AgentErrorContext::ChildStartup))?;

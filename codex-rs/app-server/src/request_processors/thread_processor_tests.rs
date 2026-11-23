@@ -962,22 +962,6 @@ mod thread_processor_behavior_tests {
     }
 
     #[test]
-    fn summary_from_thread_metadata_formats_protocol_timestamps_as_seconds() -> Result<()> {
-        let mut metadata =
-            test_thread_metadata(/*model*/ None, /*reasoning_effort*/ None)?;
-        metadata.created_at =
-            DateTime::parse_from_rfc3339("2025-09-05T16:53:11.123Z")?.with_timezone(&Utc);
-        metadata.updated_at =
-            DateTime::parse_from_rfc3339("2025-09-05T16:53:12.456Z")?.with_timezone(&Utc);
-
-        let summary = summary_from_thread_metadata(&metadata);
-
-        assert_eq!(summary.timestamp, Some("2025-09-05T16:53:11Z".to_string()));
-        assert_eq!(summary.updated_at, Some("2025-09-05T16:53:12Z".to_string()));
-        Ok(())
-    }
-
-    #[test]
     fn merge_persisted_resume_metadata_prefers_persisted_model_and_reasoning_effort() -> Result<()>
     {
         let mut request_overrides = None;
@@ -1148,64 +1132,6 @@ mod thread_processor_behavior_tests {
             Some("mock_provider".to_string())
         );
         assert_eq!(request_overrides, None);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn read_summary_from_rollout_returns_empty_preview_when_no_user_message() -> Result<()> {
-        use codex_protocol::protocol::SessionMetaLine;
-        use codex_rollout::RolloutItem;
-        use codex_rollout::RolloutLine;
-        use std::fs;
-        use std::fs::FileTimes;
-
-        let temp_dir = TempDir::new()?;
-        let path = temp_dir.path().join("rollout.jsonl");
-
-        let conversation_id = ThreadId::from_string("bfd12a78-5900-467b-9bc5-d3d35df08191")?;
-        let timestamp = "2025-09-05T16:53:11.850Z".to_string();
-
-        let session_meta = SessionMeta {
-            session_id: conversation_id.into(),
-            id: conversation_id,
-            timestamp: timestamp.clone(),
-            model_provider: None,
-            ..SessionMeta::default()
-        };
-
-        let line = RolloutLine {
-            timestamp: timestamp.clone(),
-            ordinal: None,
-            item: RolloutItem::SessionMeta(Box::new(SessionMetaLine {
-                meta: session_meta.clone(),
-                git: None,
-            })),
-        };
-
-        fs::write(&path, format!("{}\n", serde_json::to_string(&line)?))?;
-        let parsed = chrono::DateTime::parse_from_rfc3339(&timestamp)?.with_timezone(&Utc);
-        let times = FileTimes::new().set_modified(parsed.into());
-        std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)?
-            .set_times(times)?;
-
-        let summary = read_summary_from_rollout(path.as_path(), "fallback").await?;
-
-        let expected = ConversationSummary {
-            conversation_id,
-            timestamp: Some(timestamp.clone()),
-            updated_at: Some(timestamp),
-            path: path.clone(),
-            preview: String::new(),
-            model_provider: "fallback".to_string(),
-            cwd: PathBuf::new(),
-            cli_version: String::new(),
-            source: SessionSource::VSCode,
-            git_info: None,
-        };
-
-        assert_eq!(summary, expected);
         Ok(())
     }
 

@@ -2121,8 +2121,7 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn spawn_agent_requested_model_and_reasoning_override_inherited_settings_without_role()
--> Result<()> {
+async fn spawn_agent_overrides_inherited_model_settings_without_role() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -2131,10 +2130,12 @@ async fn spawn_agent_requested_model_and_reasoning_override_inherited_settings_w
         json!({
             "message": CHILD_PROMPT,
             "model": REQUESTED_MODEL,
+            "service_tier": "flex",
             "reasoning_effort": REQUESTED_REASONING_EFFORT,
         }),
         |builder| {
             builder.with_config(|config| {
+                config.multi_agent_v2.expose_spawn_agent_service_tier = true;
                 config.agent_default_subagent_model = Some(INHERITED_MODEL.to_string());
                 config.agent_default_subagent_reasoning_effort = Some(ReasoningEffort::High);
             })
@@ -2142,6 +2143,7 @@ async fn spawn_agent_requested_model_and_reasoning_override_inherited_settings_w
     )
     .await?;
 
+    assert_eq!(child_snapshot.service_tier.as_deref(), Some("flex"));
     assert_eq!(child_snapshot.model, REQUESTED_MODEL);
     assert_eq!(
         child_snapshot.reasoning_effort,

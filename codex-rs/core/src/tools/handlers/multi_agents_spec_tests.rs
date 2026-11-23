@@ -12,6 +12,7 @@ fn spawn_agent_tool_v2_requires_task_name_message_and_fork_turns() {
             expose_agent_type: true,
             hide_agent_type_model_reasoning: false,
             expose_spawn_agent_model_overrides: true,
+            expose_service_tier: true,
             usage_hint_text: None,
             ..Default::default()
         },
@@ -62,7 +63,7 @@ fn spawn_agent_tool_v2_requires_task_name_message_and_fork_turns() {
             .and_then(|schema| schema.description.as_deref()),
         Some("Reasoning effort override for the new agent. Omit to inherit the parent effort.")
     );
-    assert!(!properties.contains_key("service_tier"));
+    assert!(properties.contains_key("service_tier"));
     assert_eq!(
         parameters.required.as_deref(),
         Some(
@@ -179,6 +180,7 @@ fn spawn_agent_tool_keeps_model_controls_when_spawn_metadata_is_hidden(
             expose_agent_type: false,
             hide_agent_type_model_reasoning: true,
             expose_spawn_agent_model_overrides: true,
+            expose_service_tier: true,
             include_model_catalog_in_spawn_agent_list,
             model_catalog_in_context,
             usage_hint_text: None,
@@ -203,7 +205,7 @@ fn spawn_agent_tool_keeps_model_controls_when_spawn_metadata_is_hidden(
     assert!(!properties.contains_key("agent_type"));
     assert!(properties.contains_key("model"));
     assert!(properties.contains_key("reasoning_effort"));
-    assert!(!properties.contains_key("service_tier"));
+    assert!(properties.contains_key("service_tier"));
     assert!(!description.contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE));
     assert_eq!(
         description.contains("<model_catalog>"),
@@ -223,6 +225,7 @@ fn spawn_agent_tool_hides_model_controls_without_override_exposure() {
             expose_agent_type: false,
             hide_agent_type_model_reasoning: true,
             expose_spawn_agent_model_overrides: false,
+            expose_service_tier: true,
             usage_hint_text: None,
             ..Default::default()
         },

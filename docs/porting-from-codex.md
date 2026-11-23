@@ -54,7 +54,9 @@ Local profile rules:
 
 Select checks from changed inputs, fork interactions, conflicts, failures, and unresolved concerns—not sync size. Do not retest untouched upstream behavior by default. Record checks, reused evidence, and uncertainty. Narrow scope does not reduce required evidence. Never call unchecked behavior verified; a clean merge is not validation. Verify upstream CI before claiming it passed.
 
-- **Documentation:** review wording/links; run `git diff --check`. No rebuild is required. Every PR still needs the live check below.
+Before PR readiness, use [asm-live-check](../.agents/skills/asm-live-check/SKILL.md) for live-check requirements.
+
+- **Documentation:** review wording and links; run `git diff --check`. No rebuild is required.
 - **Behavior:** accept changed fork behavior with the built binary in a small real user scenario. Mocked/simulated responses are not acceptance evidence. Do not add mock tests or run them by default.
 - **Rust:** when needed, run existing non-mock checks with `just test -p <crate> <test-filter>`, not `cargo test`. Use scoped formatting and targeted Clippy. Update affected assertions/snapshots together; exclude unrelated stale expectations.
 - **Workflows/scripts:** run `actionlint` on changed workflows and small checks of the actual script. Build natively only for affected packaging or approved experiments.
@@ -66,20 +68,9 @@ Select checks from changed inputs, fork interactions, conflicts, failures, and u
 
 After approved integration, reuse checks and the verified binary pair only with matching effective source, generated files, dependencies, toolchain, features, flags, and pair provenance. Preserve checkout-wrapper isolation; never copy fingerprints to fake freshness. For integration changes or version bumps, rebuild affected binaries and repeat affected checks.
 
-### Real-session checks
-
-Before real-provider validation, use [asm-live-check](../.agents/skills/asm-live-check/SKILL.md). Follow its isolation, evidence, and cleanup procedure.
-
-- For isolated live-test CLI launches, including interactive TUI handoffs, pass `--dangerously-bypass-approvals-and-sandbox`. This disables approvals and the ASM sandbox for that run. Use a private test home and a controlled workspace. Omit the flag when testing approvals or sandboxing, or when managed policy requires those controls. Do not change build or installed defaults.
-- Except for [local-only upstream rebases](#local-validation-for-upstream-rebases), every PR needs a successful real-provider live check before readiness. Select the smallest changed-behavior/fork-interaction scenario; state the expected result. Builds, offline checks, and mocks are not substitutes when a live check is required. Missing credentials, budget, or compatible setup block readiness. Do not replay unrelated upstream features or whole sessions.
-- Always choose the cheapest available model that supports the behavior being validated, using current prices and including required helper calls. Do not inherit the interactive model merely because it is configured. Use the lowest adequate reasoning effort and standard speed; apply overrides only in isolated validation state, never personal defaults. Record the model, selection evidence, and budget before calling. If the behavior requires a more expensive model, ask before making that exception.
-- Before calls, set request/turn counts and a time limit. Minimize input/requested output; set supported token limits. Stop at proof or first failure, then inspect evidence. Do not default to broad replays, model matrices, benchmarks, or repeated cold builds.
-- Use existing sign-in only as authorized. No separate spend approval is needed when the conservative estimate for the entire live check is strictly below US$1.00. Record the estimate before making calls, using current provider pricing and the planned request and token limits, including required runtime helper calls. If the cost cannot be estimated or the estimate is US$1.00 or more, get approval for the endpoint, model, request/token limits, and spend cap before making calls.
-- Do not trigger unrelated billable retries, warmups, Decisions calls, or extra subagents. Budget required runtime helpers. Record calls, elapsed time, and reported tokens. Report cost only when known; otherwise mark unknown. Missing prerequisites mean blocked, not verified.
-
 ### Desktop SSH tests
 
-For isolated Desktop SSH tests, use [asm-desktop-ssh-test](../.agents/skills/asm-desktop-ssh-test/SKILL.md): setup, reuse, candidate updates, and Desktop checks. Preserve the normal backend. Follow the build and real-session rules.
+For isolated Desktop SSH tests, use [asm-desktop-ssh-test](../.agents/skills/asm-desktop-ssh-test/SKILL.md). Preserve the normal backend. Follow the build and [live-check](../.agents/skills/asm-live-check/SKILL.md) rules.
 
 ### Commit, open a PR, report
 
@@ -137,7 +128,7 @@ Before syncs or targeted ports, use [asm-upstream-sync](../.agents/skills/asm-up
 
 ### Shared compatibility gate
 
-For syncs or saved-cache/wire-format changes, apply this gate even after conflict-free rebases. Follow narrow validation and real-session rules; this gate grants no new provider, paid-matrix, broader-check, or test-authoring authority.
+For syncs or saved-cache/wire-format changes, apply this gate even after conflict-free rebases. Follow narrow validation and [live-check](../.agents/skills/asm-live-check/SKILL.md) rules. This gate does not authorize paid matrices, broader checks, or new tests.
 
 1. Map all affected writers and readers, including stock consumers. Trace caches, migrations, serialization, app-server responses, raw events, and live notifications. Review consumers, not only producers. For new mandatory handshakes, inspect existing clients, fixtures, and reconnects.
 2. Keep fork-only formats/migrations in ASM-owned versioned caches, never stock caches. Preserve native canonical rollouts, thread IDs, and shared metadata. For incompatible formats or migration-number/checksum collisions, change the ASM namespace. Never rewrite applied migration checksums.
@@ -149,6 +140,8 @@ For syncs or saved-cache/wire-format changes, apply this gate even after conflic
 8. For stock-cache contamination by older ASM, recover manually only. Verify host, actual reader executable/version/hash, and home. Stop all writers. Back up the derived database and WAL/SHM. Quarantine/rebuild only that cache; preserve canonical history/shared state. Never reuse the older writer against the recovered home.
 
 #### Known upstream cold-history limitation
+
+The owner accepts this known stock Codex limitation for future syncs: ordinary text history can have an empty cold timeline, turns, or items before stock resume builds its history cache. Do not ask for approval again when isolated checks show that ASM reads the history cold, stock resume and warm reopen recover the exact saved history, and the original rollout bytes stay unchanged. Report the stock cold result as a known limitation, not a pass. Ask if the behavior changes or the checks cannot establish these conditions. This acceptance does not cover voice history, data loss, ASM regressions, or other validation failures.
 
 For the sync through `cf3ff1530d821ec2d26452da4971d8e3e7d18d25`, the owner accepted this stock Codex limitation for this revision only. Independent stock Codex alpha.11 returned an empty cold timeline. One resume and a warm reopen recovered both saved items without changing the original rollout. This exception does not cover voice history or waive other checks.
 
@@ -216,7 +209,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `cf3ff1530d821ec2d26452da4971d8e3e7d18d25`, 2026-11-22. Subject: Show a loading indicator while the resume picker starts (#63102).
+Last incorporated commit: `00696090d65a747848e0a40661e1da8badb1f146`, 2026-11-23. Subject: Preserve slash command selection across TUI connection changes (#63419).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 
@@ -258,7 +251,7 @@ Delete every thread-private runtime file (linkage, Cursor configuration, diagnos
 - DeepSeek V4.1 Flash 1017 selects `fireworks`, alias `fireworks/deepseek-v4.1-flash`, without a profile or custom role. Default its context to 300,000 tokens; allow explicit overrides through 1,000,000. Select direct tools: live checks could not execute Code Mode's custom tool through Fireworks.
 - Show picker aliases but retain canonical identity. Native aliases `claude/…` and `cursor/…` retain `claude-code/…` and `cursor-agent/…` IDs. Do not add HTTP bindings or change native model/runtime selection. Picker changes that require a new runtime fork the current context into the selected model. Blank sessions still start fresh. Existing same-provider in-place model changes stay in place.
 - Admit valid bound/native input and resume independently of the global HTTP-provider default. Validate saved/requested identities separately. Overrides cannot exempt unrelated saved chats. Preserve mandatory policy, configuration errors, missing-provider checks, and history/runtime boundaries. Require the current provider definition and valid configuration. Classify routes from in-memory bindings/runtime detection, not discovery. Unbound API models retain upstream saved-provider admission.
-- V2 `spawn_agent` requires `fork_turns="none"` or `"all"`; legacy positive integer strings still select full history. Roles configured with `fork_turns = "none"` always start fresh.
+- V2 `spawn_agent` requires `fork_turns="none"` or `"all"`; legacy positive integer strings still select full history. Roles configured with `fork_turns = "none"` always start fresh. Set `require_spawn_agent_model = true` under `[features.multi_agent_v2]` to require an explicit model on the V2 tool. This only applies when `expose_spawn_agent_model_overrides` is enabled; it does not change app-server RPCs or internal spawns.
 - Cross-provider subagents use the same portable handoff for `fork_turns="all"`; `"none"` transfers no history. The child task is separate from inherited context. Preserve destination provider identity on resume. Bound models use their own provider-specific model manager, not parent discovery identity. Active Claude `all` requires a matching foreground call before steering is admitted. A replay acknowledgment does not establish which assistant request used that input; retry on a new turn.
 - For user-spawned children with a catalog-bound provider ID, require an explicitly bound model or native runtime, including descendants/cold resumes. Reject unbound selections before startup; do not infer reverse routing. Use a separate provider ID for unbound custom subagent models. Preserve ordinary main/internal-worker provider behavior.
 - Keep upstream catalog/API model types unchanged. Hiding bundled entries does not disable explicit selection.
@@ -764,7 +757,9 @@ Optional top-level `subagent_model_context_windows` maps exact final model IDs t
 
 A positive role TOML `model_context_window` overrides map/scalar fallback at startup/model changes/reload. New children resolve their own role, not parent role limits. Preserve clamping/headroom/compaction and root/internal workers. The picker shows top-level map/scalar configuration, not effective role limits.
 
-`[subagent_service_tiers]` maps model/effort to tiers, e.g. `gpt-6-sol = { high = "fast" }`. Match final child model/effective effort after overrides/roles. Matches override root tier throughout child lifetime, including later root-tier changes. Unmatched/root behavior stays upstream. Reject unsupported matched tiers and Fast when disabled. Do not expose spawn arguments.
+`[subagent_service_tiers]` maps model/effort to tiers, e.g. `gpt-6-sol = { high = "fast" }`. Match final child model/effective effort after overrides/roles. Matches override root tier throughout child lifetime, including later root-tier changes. Unmatched/root behavior stays upstream. Reject unsupported matched tiers and Fast when disabled.
+
+Set `expose_spawn_agent_service_tier = true` under `[features.multi_agent_v2]` to expose the optional `spawn_agent.service_tier` argument when model selection is exposed. It is off by default. An explicit tier takes precedence for that child only and survives reloads. Use `default` to request the default tier. Omit it to use the configured model/effort mapping and normal inheritance. Reject tiers unavailable for the child model, provider, or enabled features.
 
 `/subagents` labels:
 

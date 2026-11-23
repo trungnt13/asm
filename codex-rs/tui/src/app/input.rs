@@ -121,7 +121,7 @@ impl App {
                     },
                     |document| {
                         document.owns_interaction_key(key_event)
-                            && (!document.allows_tab_shortcut(key_event)
+                            && (!document.allows_tab_shortcut(key_event, &self.keymap)
                                 || crate::transcript_view::JumpTarget::from_key(key_event)
                                     .is_none())
                     },
@@ -200,10 +200,14 @@ impl App {
         {
             return Some(key_event);
         }
-        match self
+        let matched = self
             .key_chord_matcher
-            .advance(key_event, &self.keymap.chords, contexts)
-        {
+            .advance(key_event, &self.keymap.chords, contexts);
+        let pending = self.key_chord_matcher.is_pending();
+        if pending != was_pending {
+            self.chat_widget.set_key_chord_pending(pending);
+        }
+        match matched {
             crate::keymap::KeyChordMatch::PassThrough => {
                 if was_pending {
                     self.chat_widget.request_redraw();
@@ -237,6 +241,7 @@ impl App {
         }
         let contexts = self.key_chord_contexts(tui);
         if self.key_chord_matcher.expire(contexts) {
+            self.chat_widget.set_key_chord_pending(/*pending*/ false);
             self.chat_widget.request_redraw();
         }
     }
@@ -244,6 +249,7 @@ impl App {
     pub(super) fn cancel_pending_key_chord(&mut self) {
         self.chat_widget.cancel_quick_dial_menu();
         if self.key_chord_matcher.cancel() {
+            self.chat_widget.set_key_chord_pending(/*pending*/ false);
             self.chat_widget.request_redraw();
         }
     }
@@ -341,7 +347,9 @@ impl App {
         if self.chat_widget.no_modal_or_popup_active()
             && let Some(doc) = self.focused_document()
         {
-            return if doc.is_search_editing() {
+            return if doc.path_actions.scroll.is_some() {
+                KeymapContextSet::new(KeymapContext::List)
+            } else if doc.is_search_editing() {
                 KeymapContextSet::new(KeymapContext::Editor)
             } else {
                 KeymapContextSet::transcript()

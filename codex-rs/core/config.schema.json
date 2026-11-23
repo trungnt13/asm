@@ -3675,6 +3675,10 @@
           "description": "Exposes `model` and `reasoning_effort` on the multi-agent v2 spawn tool and adds corresponding guidance to root and subagent usage hints.",
           "type": "boolean"
         },
+        "expose_spawn_agent_service_tier": {
+          "description": "Allow V2 `spawn_agent` to select a `service_tier` for one child. Defaults to false.",
+          "type": "boolean"
+        },
         "hide_spawn_agent_metadata": {
           "type": "boolean"
         },
@@ -3719,6 +3723,10 @@
         },
         "preserve_fork_prefix": {
           "description": "Preserve the parent's model-visible history on full forks and append child instructions. Defaults to true. Legacy compaction without a reusable context baseline still rebuilds.",
+          "type": "boolean"
+        },
+        "require_spawn_agent_model": {
+          "description": "Require an explicit model argument when the multi-agent V2 spawn tool exposes model overrides.",
           "type": "boolean"
         },
         "root_agent_usage_hint_text": {

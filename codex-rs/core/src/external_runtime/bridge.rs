@@ -671,7 +671,11 @@ async fn invoke_message_tool(
                     "execution": {
                         "model": step.settings.model_info.slug,
                         "reasoning_effort": step.settings.effective_reasoning_effort(),
-                        "spawn_guidance": "Omit model and reasoning_effort to inherit the current execution settings. When specifying model, use its canonical ASM slug, not a backend-only alias."
+                        "spawn_guidance": if step.turn.config.multi_agent_v2.requires_spawn_agent_model() {
+                            "For spawn_agent, pass the canonical ASM slug for the chosen model. Use your current model unless instructed otherwise."
+                        } else {
+                            "Omit model and reasoning_effort to inherit the current execution settings. When specifying model, use its canonical ASM slug, not a backend-only alias."
+                        }
                     },
                     "tools": tools.iter().map(|tool| &tool.spec).collect::<Vec<_>>()
                 });

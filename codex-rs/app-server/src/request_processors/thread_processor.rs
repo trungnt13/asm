@@ -17,7 +17,6 @@ use resume_permit::ResumePermit;
 mod thread_resume_account;
 
 use super::persisted_resume_settings::PersistedResumeSettings;
-use super::persisted_resume_settings::latest_owned_thread_settings;
 use super::persisted_resume_settings::latest_persisted_model_settings;
 use super::thread_enrichment::enrich_loaded_threads;
 use super::thread_fork_goal::inherit_thread_goal_snapshot;
@@ -1679,6 +1678,9 @@ impl ThreadRequestProcessor {
                 .then_some(ThreadHistoryMode::Paginated)
         });
         let mut thread_extension_init = ExtensionDataInit::new();
+        if experimental_raw_events {
+            thread_extension_init.insert(codex_core::UsageAttributionPolicy::Retain);
+        }
         if !selected_capability_roots.is_empty() {
             thread_extension_init.insert(selected_capability_roots);
         }
@@ -1693,6 +1695,9 @@ impl ThreadRequestProcessor {
         {
             initialization.inherited_tier = tier.clone();
         }
+        let side_startup_tier = side_settings_initialization
+            .as_ref()
+            .and(config.service_tier.clone());
         super::app_context_filter::apply(&mut config);
         let mut start_options = StartThreadOptions::new(config);
         let reserved_thread_id = if start_options.config.ephemeral {
@@ -1767,13 +1772,6 @@ impl ThreadRequestProcessor {
                 });
             }
         };
-        listener_task_context
-            .thread_state_manager
-            .thread_state(thread_id)
-            .await
-            .lock()
-            .await
-            .side_settings_initialization = side_settings_initialization;
         let session_telemetry = thread.session_telemetry();
         session_telemetry.record_startup_phase(
             "thread_start_create_thread",
@@ -1789,13 +1787,25 @@ impl ThreadRequestProcessor {
         .await?;
 
         let instruction_sources = thread.legacy_instruction_sources().await;
-        let config_snapshot = thread
-            .config_snapshot()
+        let (config_snapshot, selected_service_tier) = thread
+            .resume_config_snapshot()
             .instrument(tracing::info_span!(
                 "app_server.thread_start.config_snapshot",
                 otel.name = "app_server.thread_start.config_snapshot",
             ))
             .await;
+        listener_task_context
+            .thread_state_manager
+            .thread_state(thread_id)
+            .await
+            .lock()
+            .await
+            .side_settings_initialization =
+            super::desktop_side::SideSettingsInitialization::after_startup(
+                side_settings_initialization,
+                side_startup_tier.as_deref(),
+                selected_service_tier.as_deref(),
+            );
         let mut thread = build_thread_from_loaded_snapshot(&thread, &config_snapshot)?;
         thread.project_id = project_id.clone();
         thread.daybreak_enabled = daybreak_enabled;
@@ -2580,9 +2590,14 @@ impl ThreadRequestProcessor {
     ) -> Result<ThreadRevertResponse, JSONRPCErrorError> {
         let ThreadRevertRuntimeSnapshot {
             mut config,
-            settings,
+            mut settings,
             client_mcp_extensions,
         } = runtime_snapshot;
+        // Resolve the saved reviewer request against the replacement's Guardian policy at startup.
+        config.requested_approvals_reviewer = settings
+            .requested_approvals_reviewer
+            .or(settings.approvals_reviewer);
+        settings.approvals_reviewer = None;
         if let Some(collaboration_mode) = settings.collaboration_mode.as_ref() {
             config.model = Some(collaboration_mode.model().to_string());
         }
@@ -4380,11 +4395,7 @@ impl ThreadRequestProcessor {
         permit.finish_probe();
         // Copied or referenced history can contain another thread's settings. Only snapshots
         // explicitly owned by this thread can restore its cwd and workspace folders.
-        let history_settings = if let InitialHistory::Resumed(resumed) = &thread_history {
-            latest_owned_thread_settings(&resumed.history, resumed.conversation_id)
-        } else {
-            None
-        };
+        let history_settings = thread_history.resumed_thread_settings();
         let history_cwd = history_settings
             .map(|settings| settings.cwd.to_path_buf())
             .or_else(|| thread_history.session_cwd());
@@ -6060,6 +6071,9 @@ impl ThreadRequestProcessor {
             &mut thread_source,
             super::desktop_side::SideOrigin::Fork,
         );
+        let side_startup_tier = side_settings_initialization
+            .as_ref()
+            .and(options.config.service_tier.clone());
         let fork_options = StartThreadOptions {
             attached_thread: attach_to_source,
             fork_source_provider: Some(source_thread.model_provider.clone()),
@@ -6186,7 +6200,7 @@ impl ThreadRequestProcessor {
             "thread",
         );
 
-        let config_snapshot = forked_thread.config_snapshot().await;
+        let (config_snapshot, selected_service_tier) = forked_thread.resume_config_snapshot().await;
 
         // Persistent forks materialize their own rollout. Ephemeral forks keep their replay in memory.
         let (mut thread, mut token_usage_turn_id) = if session_configured.rollout_path.is_some() {
@@ -6276,12 +6290,16 @@ impl ThreadRequestProcessor {
         let active_permission_profile =
             thread_response_active_permission_profile(config_snapshot.active_permission_profile);
         let thread_originator = config_snapshot.originator.clone();
+        let turns = std::mem::take(&mut thread.turns);
         let response = ThreadForkResponse {
             system1_enabled: config_snapshot.system1_enabled,
             system1_revision: config_snapshot.system1_revision,
             system1_error: config_snapshot.system1_error,
             system1_failure_episode: config_snapshot.system1_failure_episode,
-            thread: thread.clone(),
+            thread: Thread {
+                turns,
+                ..thread.clone()
+            },
             disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
             model: config_snapshot.model.clone(),
             model_provider: session_configured.model_provider_id,
@@ -6305,7 +6323,12 @@ impl ThreadRequestProcessor {
             .await
             .lock()
             .await
-            .side_settings_initialization = side_settings_initialization;
+            .side_settings_initialization =
+            super::desktop_side::SideSettingsInitialization::after_startup(
+                side_settings_initialization,
+                side_startup_tier.as_deref(),
+                selected_service_tier.as_deref(),
+            );
         let connection_id = request_id.connection_id;
         self.outgoing
             .send_response_with_thread_originator(request_id, response, thread_originator)
@@ -7264,32 +7287,6 @@ fn summary_from_state_db_metadata(
         source,
         git_info,
     }
-}
-
-#[cfg(test)]
-fn summary_from_thread_metadata(metadata: &ThreadMetadata) -> ConversationSummary {
-    summary_from_state_db_metadata(
-        metadata.id,
-        metadata.rollout_path.clone(),
-        metadata.first_user_message.clone(),
-        metadata.preview.clone(),
-        metadata
-            .created_at
-            .to_rfc3339_opts(SecondsFormat::Secs, true),
-        metadata
-            .updated_at
-            .to_rfc3339_opts(SecondsFormat::Secs, true),
-        metadata.model_provider.clone(),
-        metadata.cwd.clone(),
-        metadata.cli_version.clone(),
-        metadata.source.clone(),
-        metadata.thread_source.clone(),
-        metadata.agent_nickname.clone(),
-        metadata.agent_role.clone(),
-        metadata.git_sha.clone(),
-        metadata.git_branch.clone(),
-        metadata.git_origin_url.clone().map(String::from),
-    )
 }
 
 fn preview_from_rollout_items(items: &[RolloutItem]) -> String {

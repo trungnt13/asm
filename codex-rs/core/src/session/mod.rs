@@ -162,6 +162,7 @@ use codex_protocol::protocol::PrivateSessionEvent;
 use codex_protocol::protocol::PrivateSessionEventPayload;
 use codex_protocol::protocol::RawResponseItemEvent;
 use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SpawnServiceTierOverride;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadSettingsAppliedEvent;
@@ -532,7 +533,14 @@ impl From<CompactedHistoryMetadata> for CompactedHistoryInstallation<'_> {
     }
 }
 
+pub(crate) enum ChildServiceTier {
+    Requested(String),
+    /// Restore the child's tier from history instead of using the caller's defaults.
+    Reload,
+}
+
 pub(crate) struct SessionSpawnArgs {
+    pub(crate) child_service_tier: Option<ChildServiceTier>,
     pub(crate) attached_thread: bool,
     pub(crate) startup: Option<Arc<startup::SessionStartup>>,
     pub(crate) config: Config,
@@ -830,6 +838,7 @@ impl Session {
             attached_thread,
             startup,
             config,
+            child_service_tier,
             request_country,
             prompt_cache_key,
             allow_provider_model_fallback,
@@ -964,6 +973,30 @@ impl Session {
             )
         };
 
+        let saved_settings = conversation_history.resumed_thread_settings();
+        let requested_child_tier =
+            matches!(child_service_tier, Some(ChildServiceTier::Requested(_)));
+        let mut spawn_service_tier_override =
+            saved_settings.and_then(|settings| settings.spawn_service_tier_override.clone());
+        let initializes_side_tier = child_service_tier.is_none()
+            && !matches!(&conversation_history, InitialHistory::Resumed(_))
+            && matches!(
+                thread_source.as_ref().map(ThreadSource::as_str),
+                Some(ThreadSource::TUI_SIDE_CHAT_SOURCE | ThreadSource::DESKTOP_SIDE_CHAT_SOURCE)
+            );
+        let mut service_tier = match child_service_tier {
+            Some(ChildServiceTier::Requested(tier)) => {
+                spawn_service_tier_override = Some(SpawnServiceTierOverride {
+                    inherited_service_tier: config.service_tier.clone(),
+                });
+                Some(tier)
+            }
+            Some(ChildServiceTier::Reload) if spawn_service_tier_override.is_some() => {
+                saved_settings.and_then(|settings| settings.service_tier.clone())
+            }
+            // A caller resuming a thread can explicitly change or clear its tier.
+            Some(ChildServiceTier::Reload) | None => config.service_tier.clone(),
+        };
         let mut config = Arc::new(config);
         let native_runtime = config
             .model
@@ -979,14 +1012,8 @@ impl Session {
             ));
         }
         let uses_native_runtime = native_runtime.is_some();
-        let initializes_side_tier = !matches!(&conversation_history, InitialHistory::Resumed(_))
-            && matches!(
-                thread_source.as_ref().map(ThreadSource::as_str),
-                Some(ThreadSource::TUI_SIDE_CHAT_SOURCE | ThreadSource::DESKTOP_SIDE_CHAT_SOURCE)
-            );
         if uses_native_runtime
-            && config
-                .service_tier
+            && service_tier
                 .as_deref()
                 .is_some_and(|tier| tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE)
         {
@@ -996,8 +1023,7 @@ impl Session {
                         .to_string(),
                 ));
             }
-            Arc::make_mut(&mut config).service_tier =
-                Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string());
+            service_tier = Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string());
         }
         // Compare concrete runtimes so Claude and Cursor sessions never resume each other.
         let temporary_claude_fork = config.ephemeral
@@ -1135,7 +1161,7 @@ impl Session {
             .await;
         if initializes_side_tier
             && config.model_provider_id != OPENAI_PROVIDER_ID
-            && config.service_tier.as_deref().is_some_and(|tier| {
+            && service_tier.as_deref().is_some_and(|tier| {
                 tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE
                     && !model_info
                         .service_tiers
@@ -1143,8 +1169,15 @@ impl Session {
                         .any(|supported| supported.id == tier)
             })
         {
-            Arc::make_mut(&mut config).service_tier =
-                Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string());
+            service_tier = Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string());
+        }
+        if requested_child_tier && let Some(service_tier) = service_tier.as_deref() {
+            crate::agent::child_config::validate_requested_service_tier(
+                &config,
+                &model_info,
+                service_tier,
+            )
+            .map_err(CodexErr::InvalidRequest)?;
         }
         if !uses_native_runtime
             && thread_extension_init.get::<crate::handoff::PortableHistory>().is_some()
@@ -1211,18 +1244,8 @@ impl Session {
         // TODO (aibrahim): Consolidate config.model and config.model_reasoning_effort into config.collaboration_mode
         // to avoid extracting these fields separately and constructing CollaborationMode here.
         let persisted_collaboration_mode = match &conversation_history {
-            InitialHistory::Resumed(resumed) => resumed
-                .history
-                .iter()
-                .rev()
-                .find_map(|item| match item {
-                    RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event))
-                        if event.thread_id == Some(resumed.conversation_id) =>
-                    {
-                        Some(&event.thread_settings.collaboration_mode)
-                    }
-                    _ => None,
-                })
+            InitialHistory::Resumed(resumed) => saved_settings
+                .map(|settings| &settings.collaboration_mode)
                 .or_else(|| {
                     resumed
                         .history
@@ -1254,7 +1277,7 @@ impl Session {
             )
         });
         let initial_service_tier_warning = unsupported_service_tier_warning(
-            config.service_tier.as_deref(),
+            service_tier.as_deref(),
             &config.features,
             &model_info,
         );
@@ -1294,7 +1317,8 @@ impl Session {
                 request_country,
                 collaboration_mode,
                 reasoning_summary: config.model_reasoning_summary,
-                service_tier: config.service_tier.clone(),
+                service_tier,
+                spawn_service_tier_override,
                 personality: config.personality,
                 approval_policy: config.permissions.approval_policy.clone(),
                 approvals_reviewer: config.approvals_reviewer,
@@ -4387,17 +4411,17 @@ impl Session {
         model_info: &ModelInfo,
         items: Vec<ResponseItemEnvelope>,
         image_preparations: Vec<ImagePreparationMetadata>,
-    ) {
+    ) -> u64 {
         // Ordinary history persistence retains its existing best-effort behavior.
-        let _ = self
-            .record_prepared_items(
-                turn_context,
-                model_info,
-                items,
-                image_preparations,
-                /*realtime*/ None,
-            )
-            .await;
+        self.record_prepared_items(
+            turn_context,
+            model_info,
+            items,
+            image_preparations,
+            /*realtime*/ None,
+        )
+        .await
+        .unwrap_or_default()
     }
 
     #[expect(
@@ -4411,7 +4435,7 @@ impl Session {
         mut items: Vec<ResponseItemEnvelope>,
         image_preparations: Vec<ImagePreparationMetadata>,
         realtime: Option<RealtimeRecord<'_>>,
-    ) -> std::io::Result<()> {
+    ) -> std::io::Result<u64> {
         // Save the originating history budget for replay.
         // Preserve any existing tool-specific override.
         let policy: codex_utils_output_truncation::TruncationPolicy =
@@ -4553,6 +4577,11 @@ impl Session {
                 .current_time_reminder
                 .note_recorded_items(&response_items);
         }
+        let recorded_through = items
+            .iter()
+            .filter_map(|item| item.metadata.as_ref()?.history_sequence)
+            .max()
+            .unwrap_or_default();
         for image in image_preparations {
             self.services
                 .analytics_events_client
@@ -4599,7 +4628,7 @@ impl Session {
         }
         self.send_raw_response_items(turn_context, &response_items)
             .await;
-        Ok(())
+        Ok(recorded_through)
     }
 
     pub(crate) async fn record_step_world_state_if_changed(
@@ -4733,16 +4762,15 @@ impl Session {
         .await
     }
 
-    fn inherits_root_service_tier(&self, session_source: &SessionSource) -> bool {
-        match &self.agent_runtime {
-            crate::agent::host::AgentRuntimeServices::Controller => matches!(
-                session_source,
+    fn uses_inherited_service_tier(&self, turn_context: &TurnContext) -> bool {
+        turn_context
+            .initial_settings
+            .spawn_service_tier_override()
+            .is_none()
+            && (matches!(
+                &turn_context.session_source,
                 SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
-            ),
-            crate::agent::host::AgentRuntimeServices::Host(_) => {
-                crate::agent::host::host_child_uses_shared_service_tier(self)
-            }
-        }
+            ) || crate::agent::host::host_child_uses_shared_service_tier(self))
     }
 
     #[expect(
@@ -4793,12 +4821,7 @@ impl Session {
             )
         };
         let mut settings_before_tier_inheritance = None;
-        if self.inherits_root_service_tier(&turn_context.session_source)
-            || matches!(
-                &turn_context.session_source,
-                SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
-            )
-        {
+        if self.uses_inherited_service_tier(&turn_context) {
             let root_service_tier = tokio::select! {
                 biased;
                 tier = crate::agent::host::service_tier(self, settings.selected().service_tier.clone()) => tier,

@@ -124,15 +124,27 @@ pub(crate) fn ignored_toml_value_fields<T: DeserializeOwned>(
     value: TomlValue,
 ) -> Result<Vec<Vec<String>>, serde_path_to_error::Error<toml::de::Error>> {
     let mut ignored_paths = Vec::new();
+    deserialize_toml_value::<T>(value, Some(&mut ignored_paths))?;
+    Ok(ignored_paths)
+}
+
+// Share the generated deserializer for reads, strict checks, and diagnostics
+// based on owned TOML values. Text diagnostics still need source spans.
+#[inline(never)]
+pub(crate) fn deserialize_toml_value<T: DeserializeOwned>(
+    value: TomlValue,
+    mut ignored_paths: Option<&mut Vec<Vec<String>>>,
+) -> Result<T, serde_path_to_error::Error<toml::de::Error>> {
     let mut record_path = |path: serde_ignored::Path<'_>| {
-        let segments = ignored_path_segments(&path);
-        if !segments.is_empty() {
-            ignored_paths.push(segments);
+        if let Some(paths) = &mut ignored_paths {
+            let segments = ignored_path_segments(&path);
+            if !segments.is_empty() {
+                paths.push(segments);
+            }
         }
     };
     let deserializer = serde_ignored::Deserializer::new(value, &mut record_path);
-    serde_path_to_error::deserialize::<_, T>(deserializer)?;
-    Ok(ignored_paths)
+    serde_path_to_error::deserialize(deserializer)
 }
 
 pub(crate) fn unknown_feature_toml_value_field(value: &TomlValue) -> Option<String> {
