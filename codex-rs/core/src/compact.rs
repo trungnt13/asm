@@ -460,7 +460,11 @@ async fn run_compact_task_inner_impl(
     let rendered = world_state.render_full_with_host_roster().await;
     let (window_number, window_ids) = sess.advance_auto_compact_window().await;
     let (updates, world_state_baseline) = sess
-        .assemble_initial_context(&replacement_step_context, rendered)
+        .assemble_initial_context(
+            &replacement_step_context,
+            rendered,
+            /*window_ids*/ None,
+        )
         .await;
     let (prefix, context) = split_prefix_updates(updates);
     let new_history =

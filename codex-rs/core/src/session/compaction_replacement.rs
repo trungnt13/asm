@@ -6,6 +6,7 @@ use super::turn_context::TurnContext;
 use crate::compact;
 use crate::compact::CompactedHistoryMetadata;
 use crate::context::world_state::WorldStateSnapshot;
+use crate::state::AutoCompactWindowIds;
 use crate::state::SessionState;
 use codex_history::ResponseItemEnvelope;
 use codex_login::AuthOwner;
@@ -17,6 +18,7 @@ pub(crate) struct PrefixCompactionInstallation<'a> {
     pub(crate) prefix: CompactionPrefix,
     pub(crate) prefix_context: Vec<ResponseItem>,
     pub(crate) initial_context: Vec<ResponseItemEnvelope>,
+    pub(crate) window_ids: Option<AutoCompactWindowIds>,
     pub(crate) reset_world_state_sections: Vec<&'static str>,
     pub(crate) model_info: &'a ModelInfo,
     pub(crate) compaction_response_id: String,
@@ -45,6 +47,9 @@ impl<'a> PrefixCompactionInstallation<'a> {
         if state.history.history_version() != self.prefix.generation
             || state.history.annotated_items().len() < self.prefix.len
             || auth_owner != self.prefix.auth_owner
+            || self.window_ids.as_ref().is_some_and(|ids| {
+                ids.previous_window_id.as_ref() != Some(&state.auto_compact_window_ids().window_id)
+            })
         {
             return None;
         }
@@ -97,7 +102,10 @@ impl<'a> PrefixCompactionInstallation<'a> {
         }
         // Prefix replacement already retains all edits in the live suffix.
         let input_goal_ids = Default::default();
-        let (window_number, window_ids) = state.advance_auto_compact_window();
+        let (window_number, window_ids) = match self.window_ids {
+            Some(ids) => state.advance_auto_compact_window_to(ids.window_id),
+            None => state.advance_auto_compact_window(),
+        };
         Some(CompactedHistoryReplacement {
             items,
             world_state_baseline,

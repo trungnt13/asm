@@ -5634,13 +5634,15 @@ impl Session {
         world_state: &WorldState,
     ) -> (Vec<WorldStateUpdate>, WorldStateSnapshot) {
         let rendered = world_state.render_full_with_host_roster().await;
-        self.assemble_initial_context(step_context, rendered).await
+        self.assemble_initial_context(step_context, rendered, /*window_ids*/ None)
+            .await
     }
 
     pub(crate) async fn assemble_initial_context(
         &self,
         step_context: &StepContext,
         (snapshot, updates): (WorldStateSnapshot, Vec<WorldStateUpdate>),
+        window_ids: Option<AutoCompactWindowIds>,
     ) -> (Vec<WorldStateUpdate>, WorldStateSnapshot) {
         let turn_context = step_context.turn.as_ref();
         let mut developer_sections = Vec::<RenderedFragment>::with_capacity(8);
@@ -5651,7 +5653,7 @@ impl Session {
             let state = self.state.lock().await;
             (
                 state.session_configuration.session_source.clone(),
-                state.auto_compact_window_ids().clone(),
+                window_ids.unwrap_or_else(|| state.auto_compact_window_ids().clone()),
             )
         };
         let separate_guardian_developer_message =
@@ -5997,6 +5999,16 @@ impl Session {
         state.advance_auto_compact_window()
     }
 
+    pub(crate) async fn plan_compaction_window_ids(&self) -> AutoCompactWindowIds {
+        let state = self.state.lock().await;
+        let current = state.auto_compact_window_ids();
+        AutoCompactWindowIds {
+            first_window_id: current.first_window_id.clone(),
+            previous_window_id: Some(current.window_id.clone()),
+            window_id: self.context_ids.next_window(),
+        }
+    }
+
     pub(crate) async fn request_new_context_window(&self) {
         let mut state = self.state.lock().await;
         state.request_new_context_window();
@@ -6025,8 +6037,9 @@ impl Session {
         // Resolve the roster before allocating a new context window.
         let rendered = world_state.render_full_with_host_roster().await;
         let (window_number, window_ids) = self.state.lock().await.start_new_context_window();
-        let (context_updates, world_state_snapshot) =
-            self.assemble_initial_context(step_context, rendered).await;
+        let (context_updates, world_state_snapshot) = self
+            .assemble_initial_context(step_context, rendered, /*window_ids*/ None)
+            .await;
         let context_items =
             crate::context_manager::updates::merge_world_state_updates(context_updates)
                 .into_iter()
