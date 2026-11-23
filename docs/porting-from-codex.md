@@ -54,7 +54,7 @@ Local profile rules:
 
 Select checks from changed inputs, fork interactions, conflicts, failures, and unresolved concerns—not sync size. Do not retest untouched upstream behavior by default. Record checks, reused evidence, and uncertainty. Narrow scope does not reduce required evidence. Never call unchecked behavior verified; a clean merge is not validation. Verify upstream CI before claiming it passed.
 
-- **Documentation:** review wording/links; run `git diff --check`. No rebuild is required. Every PR still needs the live check below.
+- **Documentation:** review wording and links; run `git diff --check`. No rebuild is required.
 - **Behavior:** accept changed fork behavior with the built binary in a small real user scenario. Mocked/simulated responses are not acceptance evidence. Do not add mock tests or run them by default.
 - **Rust:** when needed, run existing non-mock checks with `just test -p <crate> <test-filter>`, not `cargo test`. Use scoped formatting and targeted Clippy. Update affected assertions/snapshots together; exclude unrelated stale expectations.
 - **Workflows/scripts:** run `actionlint` on changed workflows and small checks of the actual script. Build natively only for affected packaging or approved experiments.
@@ -66,20 +66,9 @@ Select checks from changed inputs, fork interactions, conflicts, failures, and u
 
 After approved integration, reuse checks and the verified binary pair only with matching effective source, generated files, dependencies, toolchain, features, flags, and pair provenance. Preserve checkout-wrapper isolation; never copy fingerprints to fake freshness. For integration changes or version bumps, rebuild affected binaries and repeat affected checks.
 
-### Real-session checks
-
-Before real-provider validation, use [asm-live-check](../.agents/skills/asm-live-check/SKILL.md). Follow its isolation, evidence, and cleanup procedure.
-
-- For isolated live-test CLI launches, including interactive TUI handoffs, pass `--dangerously-bypass-approvals-and-sandbox`. This disables approvals and the ASM sandbox for that run. Use a private test home and a controlled workspace. Omit the flag when testing approvals or sandboxing, or when managed policy requires those controls. Do not change build or installed defaults.
-- Except for [local-only upstream rebases](#local-validation-for-upstream-rebases), every PR needs a successful real-provider live check before readiness. Select the smallest changed-behavior/fork-interaction scenario; state the expected result. Builds, offline checks, and mocks are not substitutes when a live check is required. Missing credentials, budget, or compatible setup block readiness. Do not replay unrelated upstream features or whole sessions.
-- Always choose the cheapest available model that supports the behavior being validated, using current prices and including required helper calls. Do not inherit the interactive model merely because it is configured. Use the lowest adequate reasoning effort and standard speed; apply overrides only in isolated validation state, never personal defaults. Record the model, selection evidence, and budget before calling. If the behavior requires a more expensive model, ask before making that exception.
-- Before calls, set request/turn counts and a time limit. Minimize input/requested output; set supported token limits. Stop at proof or first failure, then inspect evidence. Do not default to broad replays, model matrices, benchmarks, or repeated cold builds.
-- Use existing sign-in only as authorized. No separate spend approval is needed when the conservative estimate for the entire live check is strictly below US$1.00. Record the estimate before making calls, using current provider pricing and the planned request and token limits, including required runtime helper calls. If the cost cannot be estimated or the estimate is US$1.00 or more, get approval for the endpoint, model, request/token limits, and spend cap before making calls.
-- Do not trigger unrelated billable retries, warmups, Decisions calls, or extra subagents. Budget required runtime helpers. Record calls, elapsed time, and reported tokens. Report cost only when known; otherwise mark unknown. Missing prerequisites mean blocked, not verified.
-
 ### Desktop SSH tests
 
-For isolated Desktop SSH tests, use [asm-desktop-ssh-test](../.agents/skills/asm-desktop-ssh-test/SKILL.md): setup, reuse, candidate updates, and Desktop checks. Preserve the normal backend. Follow the build and real-session rules.
+For isolated Desktop SSH tests, use [asm-desktop-ssh-test](../.agents/skills/asm-desktop-ssh-test/SKILL.md). Preserve the normal backend. Follow the build and [live-check](../.agents/skills/asm-live-check/SKILL.md) rules.
 
 ### Commit, open a PR, report
 
@@ -137,7 +126,7 @@ Before syncs or targeted ports, use [asm-upstream-sync](../.agents/skills/asm-up
 
 ### Shared compatibility gate
 
-For syncs or saved-cache/wire-format changes, apply this gate even after conflict-free rebases. Follow narrow validation and real-session rules; this gate grants no new provider, paid-matrix, broader-check, or test-authoring authority.
+For syncs or saved-cache/wire-format changes, apply this gate even after conflict-free rebases. Follow narrow validation and [live-check](../.agents/skills/asm-live-check/SKILL.md) rules; this gate grants no new provider, paid-matrix, broader-check, or test-authoring authority.
 
 1. Map all affected writers and readers, including stock consumers. Trace caches, migrations, serialization, app-server responses, raw events, and live notifications. Review consumers, not only producers. For new mandatory handshakes, inspect existing clients, fixtures, and reconnects.
 2. Keep fork-only formats/migrations in ASM-owned versioned caches, never stock caches. Preserve native canonical rollouts, thread IDs, and shared metadata. For incompatible formats or migration-number/checksum collisions, change the ASM namespace. Never rewrite applied migration checksums.
