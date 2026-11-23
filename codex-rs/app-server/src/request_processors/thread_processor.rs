@@ -1695,6 +1695,9 @@ impl ThreadRequestProcessor {
         {
             initialization.inherited_tier = tier.clone();
         }
+        let side_startup_tier = side_settings_initialization
+            .as_ref()
+            .and(config.service_tier.clone());
         super::app_context_filter::apply(&mut config);
         let mut start_options = StartThreadOptions::new(config);
         let reserved_thread_id = if start_options.config.ephemeral {
@@ -1769,13 +1772,6 @@ impl ThreadRequestProcessor {
                 });
             }
         };
-        listener_task_context
-            .thread_state_manager
-            .thread_state(thread_id)
-            .await
-            .lock()
-            .await
-            .side_settings_initialization = side_settings_initialization;
         let session_telemetry = thread.session_telemetry();
         session_telemetry.record_startup_phase(
             "thread_start_create_thread",
@@ -1791,13 +1787,25 @@ impl ThreadRequestProcessor {
         .await?;
 
         let instruction_sources = thread.legacy_instruction_sources().await;
-        let config_snapshot = thread
-            .config_snapshot()
+        let (config_snapshot, selected_service_tier) = thread
+            .resume_config_snapshot()
             .instrument(tracing::info_span!(
                 "app_server.thread_start.config_snapshot",
                 otel.name = "app_server.thread_start.config_snapshot",
             ))
             .await;
+        listener_task_context
+            .thread_state_manager
+            .thread_state(thread_id)
+            .await
+            .lock()
+            .await
+            .side_settings_initialization =
+            super::desktop_side::SideSettingsInitialization::after_startup(
+                side_settings_initialization,
+                side_startup_tier.as_deref(),
+                selected_service_tier.as_deref(),
+            );
         let mut thread = build_thread_from_loaded_snapshot(&thread, &config_snapshot)?;
         thread.project_id = project_id.clone();
         thread.daybreak_enabled = daybreak_enabled;
@@ -6063,6 +6071,9 @@ impl ThreadRequestProcessor {
             &mut thread_source,
             super::desktop_side::SideOrigin::Fork,
         );
+        let side_startup_tier = side_settings_initialization
+            .as_ref()
+            .and(options.config.service_tier.clone());
         let fork_options = StartThreadOptions {
             attached_thread: attach_to_source,
             fork_source_provider: Some(source_thread.model_provider.clone()),
@@ -6189,7 +6200,7 @@ impl ThreadRequestProcessor {
             "thread",
         );
 
-        let config_snapshot = forked_thread.config_snapshot().await;
+        let (config_snapshot, selected_service_tier) = forked_thread.resume_config_snapshot().await;
 
         // Persistent forks materialize their own rollout. Ephemeral forks keep their replay in memory.
         let (mut thread, mut token_usage_turn_id) = if session_configured.rollout_path.is_some() {
@@ -6312,7 +6323,12 @@ impl ThreadRequestProcessor {
             .await
             .lock()
             .await
-            .side_settings_initialization = side_settings_initialization;
+            .side_settings_initialization =
+            super::desktop_side::SideSettingsInitialization::after_startup(
+                side_settings_initialization,
+                side_startup_tier.as_deref(),
+                selected_service_tier.as_deref(),
+            );
         let connection_id = request_id.connection_id;
         self.outgoing
             .send_response_with_thread_originator(request_id, response, thread_originator)

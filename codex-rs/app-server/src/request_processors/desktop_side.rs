@@ -1,4 +1,5 @@
 use codex_core::config::Config;
+use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::ThreadSource;
@@ -58,9 +59,6 @@ pub(super) fn apply_defaults(
     } else {
         None
     };
-    if !configured && pending_prompt.is_none() {
-        return None;
-    }
     let initialization = SideSettingsInitialization {
         inherited_effort: config.model_reasoning_effort.clone(),
         inherited_tier: config.service_tier.clone(),
@@ -107,6 +105,23 @@ pub(crate) struct SideSettingsInitialization {
 }
 
 impl SideSettingsInitialization {
+    pub(super) fn after_startup(
+        initialization: Option<Self>,
+        requested_tier: Option<&str>,
+        selected_tier: Option<&str>,
+    ) -> Option<Self> {
+        let mut initialization = initialization?;
+        if selected_tier == Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE)
+            && requested_tier.is_some_and(|tier| tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE)
+        {
+            // Desktop may still echo the inherited tier on its first turn.
+            initialization.normalize_tier = true;
+            initialization.pending_sync = true;
+        }
+        (initialization.pending_sync || initialization.pending_prompt.is_some())
+            .then_some(initialization)
+    }
+
     pub(super) fn normalize_first_turn(
         &self,
         params: &mut codex_app_server_protocol::TurnStartParams,
