@@ -55,7 +55,7 @@ umask 077
 
 Verify both a login shell and an SSH command. Desktop must find the candidate when it starts the remote backend.
 
-**Prepare authentication and config.** Use the [real-session rules](../../../../docs/porting-from-codex.md#real-session-checks). For approved file-based sign-in reuse, copy only `auth.json` into the private test home. Set its owner to `asm-test` and its mode to `600`. If file-based reuse is unavailable, sign in as the test account. Do not copy personal history, databases, keyrings, or the complete normal configuration.
+**Prepare authentication and config.** Use the [real-session rules](../../asm-live-check/SKILL.md). For approved file-based sign-in reuse, copy only `auth.json` into the private test home. Set its owner to `asm-test` and its mode to `600`. If file-based reuse is unavailable, sign in as the test account. Do not copy personal history, databases, keyrings, or the complete normal configuration.
 
 After approval for file-based reuse, run on the test host:
 
