@@ -141,6 +141,8 @@ For syncs or saved-cache/wire-format changes, apply this gate even after conflic
 
 #### Known upstream cold-history limitation
 
+The owner accepts this known stock Codex limitation for future syncs: ordinary text history can have an empty cold timeline, turns, or items before stock resume builds its history cache. Do not ask for approval again when isolated checks show that ASM reads the history cold, stock resume and warm reopen recover the exact saved history, and the original rollout bytes stay unchanged. Report the stock cold result as a known limitation, not a pass. Ask if the behavior changes or the checks cannot establish these conditions. This acceptance does not cover voice history, data loss, ASM regressions, or other validation failures.
+
 For the sync through `cf3ff1530d821ec2d26452da4971d8e3e7d18d25`, the owner accepted this stock Codex limitation for this revision only. Independent stock Codex alpha.11 returned an empty cold timeline. One resume and a warm reopen recovered both saved items without changing the original rollout. This exception does not cover voice history or waive other checks.
 
 For PR #245, the owner accepted the stock cold-history limitation through `140815f19c05a24a70ebc273016bd54ff71ced7c` only. ASM passed cold search, timeline, turn, and item reads. Independent stock Codex alpha.11 returned an empty cold timeline. One resume and a warm reopen recovered both saved items without changing the original rollout. This exception does not cover voice history or waive other checks.
