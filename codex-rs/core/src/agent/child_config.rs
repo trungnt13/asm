@@ -37,9 +37,12 @@ pub(crate) struct SpawnConfigOptions<'a> {
     pub(crate) role_name: Option<&'a str>,
     pub(crate) model: Option<&'a str>,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
+    pub(crate) service_tier: Option<String>,
 }
 
 pub(crate) struct PreparedSpawnConfig {
+    /// The child-owned tier. The config retains the ordinary tier for descendants.
+    pub(crate) service_tier: Option<String>,
     pub(crate) config: Config,
     pub(crate) role_name: Option<String>,
 }
@@ -74,7 +77,12 @@ pub(crate) async fn prepare_agent_spawn_config(
         AgentRuntimeServices::Controller => true,
         AgentRuntimeServices::Host(services) => services.service_tier.is_some(),
     };
-    if !shares_service_tier {
+    if !shares_service_tier
+        && turn
+            .initial_settings
+            .spawn_service_tier_override()
+            .is_none()
+    {
         // Inherit the parent's thread preference before applying child role overrides.
         config.service_tier = session.thread_settings_snapshot().await.service_tier;
     }
@@ -140,7 +148,30 @@ pub(crate) async fn prepare_agent_spawn_config(
     {
         return Err("Cross-provider subagents require fork_turns=none".to_string());
     }
-    apply_spawn_agent_service_tier(session, &mut config).await?;
+    let requested_tier = options
+        .service_tier
+        .filter(|_| turn.config.multi_agent_v2.expose_spawn_agent_service_tier);
+    let service_tier = if let Some(requested_tier) = requested_tier {
+        let requested_tier = ServiceTier::from_request_value(&requested_tier)
+            .map(|tier| tier.request_value().to_string())
+            .unwrap_or(requested_tier);
+        // A provider-bound model can switch catalogs. Validate against that catalog at startup.
+        if requested_tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE
+            && config.model_provider_id == turn.config.model_provider_id
+            && let Some(model) = config.model.as_deref()
+        {
+            let model_info = session
+                .services
+                .models_manager
+                .get_model_info(model, &config.to_models_manager_config())
+                .await;
+            validate_requested_service_tier(&config, &model_info, &requested_tier)?;
+        }
+        Some(requested_tier)
+    } else {
+        apply_spawn_agent_service_tier(session, &mut config).await?;
+        None
+    };
     apply_spawn_agent_runtime_overrides(&mut config, turn)?;
 
     // Remember an applied configured default so cold reload reapplies its restrictions.
@@ -155,7 +186,11 @@ pub(crate) async fn prepare_agent_spawn_config(
             .then_some(DEFAULT_ROLE_NAME)
         })
         .map(str::to_owned);
-    Ok(PreparedSpawnConfig { config, role_name })
+    Ok(PreparedSpawnConfig {
+        config,
+        role_name,
+        service_tier,
+    })
 }
 
 /// Builds the base config snapshot for a newly spawned sub-agent.
@@ -190,6 +225,9 @@ pub(crate) fn build_agent_resume_config(turn: &TurnContext) -> Result<Config, St
 fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, String> {
     let base_config = turn.config.clone();
     let mut config = (*base_config).clone();
+    if let Some(tier) = turn.initial_settings.spawn_service_tier_override() {
+        config.service_tier.clone_from(&tier.inherited_service_tier);
+    }
     config.role_model_context_window = None;
     config.has_role_base_instructions = false;
     config.role_developer_instructions = None;
@@ -338,6 +376,29 @@ async fn apply_requested_spawn_agent_model_overrides(
     }
 
     Ok(())
+}
+
+pub(crate) fn validate_requested_service_tier(
+    config: &Config,
+    model: &ModelInfo,
+    service_tier: &str,
+) -> Result<(), String> {
+    if service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
+        || (!crate::external_runtime::is_native_model(&model.slug)
+            && config.features.service_tier_enabled(service_tier)
+            && model.supports_service_tier(service_tier)
+            && crate::client_common::provider_allows_service_tier(
+                &config.model_provider,
+                model,
+                service_tier,
+            ))
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "Service tier `{service_tier}` is unavailable for model `{}`. Omit service_tier to inherit the usual tier.",
+        model.slug
+    ))
 }
 
 pub(crate) async fn apply_spawn_agent_service_tier(

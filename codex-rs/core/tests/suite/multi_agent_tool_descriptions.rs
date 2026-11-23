@@ -49,11 +49,15 @@ const EXPECTED_CATALOG_PARAMETERS: &str = r#"{
     "$defs": {"unused": {"type": "string"}}
 }"#;
 
+const CATALOG_SPAWN_MODEL: &str = r#"{"type":"object","properties":{"message":{"type":"string"},"model":{"type":"string"}},"required":["message"]}"#;
+const CATALOG_SPAWN_TIER: &str = r#"{"type":"object","properties":{"message":{"type":"string"},"model":{"type":"string"},"service_tier":{"type":"string"}},"required":["message","service_tier"]}"#;
+
 const EXPECTED_FORK_TURNS_DESCRIPTION: &str = "Use `none` to skip the parent transcript or `all` to fork it. The selected role may force `none`.";
 
 #[derive(Clone, Copy)]
 enum Exposure {
     Namespaced,
+    NamespacedWithSpawnTier,
     Plain,
     CodeMode,
     V1,
@@ -101,6 +105,8 @@ fn all_tool_messages(message: Value) -> Value {
     "list_agents": {"parameters": "{}"}
 }}), Exposure::Namespaced, None; "missing_or_invalid_parameters_fall_back")]
 #[test_case(json!({"multi_agent": {"send_message": {"parameters": CATALOG_PARAMETERS}}}), Exposure::Namespaced, Some(EXPECTED_CATALOG_PARAMETERS); "sparse_parameters")]
+#[test_case(json!({"multi_agent": {"spawn_agent": {"parameters": CATALOG_SPAWN_MODEL}}}), Exposure::NamespacedWithSpawnTier, Some(CATALOG_SPAWN_MODEL); "catalog_spawn_model_exposes_service_tier_when_enabled")]
+#[test_case(json!({"multi_agent": {"spawn_agent": {"parameters": CATALOG_SPAWN_TIER}}}), Exposure::Namespaced, Some(CATALOG_SPAWN_MODEL); "catalog_spawn_service_tier_is_hidden_by_default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
     tool_messages: Value,
@@ -154,6 +160,8 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                     (!matches!(exposure, Exposure::Plain)).then(|| "delegation".to_string());
                 config.multi_agent_v2.hide_spawn_agent_metadata = false;
                 config.multi_agent_v2.expose_spawn_agent_model_overrides = true;
+                config.multi_agent_v2.expose_spawn_agent_service_tier =
+                    matches!(exposure, Exposure::NamespacedWithSpawnTier);
                 config.multi_agent_v2.usage_hint_text = Some("Local delegation hint.".to_string());
                 config.agent_roles.insert(
                     "researcher".to_string(),
@@ -257,14 +265,21 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
             if let Some(parameters) = expected_parameters
                 && tool_messages["multi_agent"][name]["parameters"].is_string()
             {
+                let tier = expected_tool["parameters"]["properties"]["service_tier"].clone();
                 expected_tool["parameters"] = serde_json::from_str(parameters)?;
                 if name == "spawn_agent" {
+                    if matches!(exposure, Exposure::NamespacedWithSpawnTier) {
+                        assert!(tier.is_object());
+                        expected_tool["parameters"]["properties"]["service_tier"] = tier;
+                    }
                     expected_tool["parameters"]["properties"]["fork_turns"] = json!({
                         "type": "string",
                         "description": EXPECTED_FORK_TURNS_DESCRIPTION,
                     });
-                    expected_tool["parameters"]["required"] =
-                        json!(["catalog_limit", "fork_turns"]);
+                    expected_tool["parameters"]["required"]
+                        .as_array_mut()
+                        .expect("catalog required properties")
+                        .push(json!("fork_turns"));
                 }
                 if name == "wait_agent" {
                     expected_tool["parameters"]["properties"]["reason"] = json!({"type":"string", "description":codex_tools::WAIT_REASON_DESCRIPTION});

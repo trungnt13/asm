@@ -156,6 +156,8 @@ use codex_utils_path_uri::LegacyAppPathString;
 use codex_utils_path_uri::PathConvention;
 use codex_utils_path_uri::PathUri;
 use codex_utils_path_uri::Platform;
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use http::HeaderValue;
 use rmcp::model::ElicitationCapability;
 use rmcp::model::FormElicitationCapability;
@@ -1551,6 +1553,7 @@ pub struct MultiAgentV2Config {
     pub tool_namespace: Option<String>,
     pub hide_spawn_agent_metadata: bool,
     pub expose_spawn_agent_model_overrides: bool,
+    pub expose_spawn_agent_service_tier: bool,
     pub require_spawn_agent_model: bool,
     pub subagent_model_list: Option<Vec<String>>,
     pub wait_agent_enabled: bool,
@@ -1582,6 +1585,7 @@ impl MultiAgentV2Config {
             tool_namespace: Some(DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE.to_string()),
             hide_spawn_agent_metadata: true,
             expose_spawn_agent_model_overrides: true,
+            expose_spawn_agent_service_tier: false,
             require_spawn_agent_model: false,
             subagent_model_list: None,
             wait_agent_enabled: true,
@@ -3153,6 +3157,9 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
     let expose_spawn_agent_model_overrides = base
         .and_then(|config| config.expose_spawn_agent_model_overrides)
         .unwrap_or(default.expose_spawn_agent_model_overrides);
+    let expose_spawn_agent_service_tier = base
+        .and_then(|config| config.expose_spawn_agent_service_tier)
+        .unwrap_or(default.expose_spawn_agent_service_tier);
     let root_agent_usage_hint_text = base
         .and_then(|config| config.root_agent_usage_hint_text.as_ref())
         .cloned();
@@ -3206,6 +3213,7 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
         tool_namespace,
         hide_spawn_agent_metadata,
         expose_spawn_agent_model_overrides,
+        expose_spawn_agent_service_tier,
         require_spawn_agent_model: base
             .and_then(|config| config.require_spawn_agent_model)
             .unwrap_or_default(),
@@ -3664,16 +3672,16 @@ impl Config {
         .await
     }
 
-    pub(crate) async fn load_config_with_layer_stack(
+    pub(crate) fn load_config_with_layer_stack(
         fs: &dyn ExecutorFileSystem,
         mut cfg: ConfigToml,
         overrides: ConfigOverrides,
         codex_home: AbsolutePathBuf,
         config_layer_stack: ConfigLayerStack,
-    ) -> std::io::Result<Self> {
+    ) -> BoxFuture<'_, std::io::Result<Self>> {
+        // Keep the large future off small test thread stacks and share its poll code across callers.
+        async move {
         config_layer_stack.validate_project_mitm_profiles()?;
-        // Keep the large config-construction future off small test thread stacks.
-        Box::pin(async move {
         if cfg.experimental_thread_store_endpoint.is_some() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -5363,8 +5371,8 @@ impl Config {
         }
         config.apply_external_model_provider()?;
         Ok(config)
-        })
-        .await
+        }
+        .boxed()
     }
 
     /// If `path` is `Some`, attempts to read the file at the given path and

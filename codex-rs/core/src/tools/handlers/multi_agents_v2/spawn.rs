@@ -50,12 +50,7 @@ impl ToolExecutor<ToolInvocation> for Handler {
             let turn_id = invocation.step_context.turn.sub_id.clone();
             let call_id = invocation.call_id.to_string();
             let started_at_ms = now_unix_timestamp_ms();
-            let result = handle_spawn_agent(
-                invocation,
-                self.options.require_spawn_agent_model
-                    && self.options.expose_spawn_agent_model_overrides,
-            )
-            .await;
+            let result = handle_spawn_agent(invocation, &self.options).await;
             let completed_at_ms = now_unix_timestamp_ms();
             let (status, receiver_thread_ids, agents_states) = match &result {
                 Ok((_, thread_id, agent_status, _)) => (
@@ -97,7 +92,7 @@ impl ToolExecutor<ToolInvocation> for Handler {
 
 async fn handle_spawn_agent(
     invocation: ToolInvocation,
-    require_model: bool,
+    options: &SpawnAgentToolOptions,
 ) -> Result<
     (
         SpawnAgentResult,
@@ -117,15 +112,22 @@ async fn handle_spawn_agent(
     let turn = &step_context.turn;
     let arguments = function_arguments(payload)?;
     let args: SpawnAgentArgs = parse_arguments(&arguments)?;
+    let fork_mode = args.fork_mode()?;
+    let service_tier = args
+        .service_tier
+        .filter(|_| options.expose_service_tier && options.expose_spawn_agent_model_overrides);
     let mut spawn_arguments: serde_json::Value = parse_arguments(&arguments)?;
     if let Some(arguments) = spawn_arguments.as_object_mut() {
         arguments.remove("message");
+        if service_tier.is_none() {
+            arguments.remove("service_tier");
+        }
     }
     let spawn_arguments = serde_json::to_string_pretty(&spawn_arguments)
         .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
-    let fork_mode = args.fork_mode()?;
     let message = message_content(args.message)?;
-    if require_model
+    if options.require_spawn_agent_model
+        && options.expose_spawn_agent_model_overrides
         && args
             .model
             .as_deref()
@@ -153,6 +155,7 @@ async fn handle_spawn_agent(
             agent_type: args.agent_type.clone(),
             model: args.model,
             reasoning_effort: args.reasoning_effort,
+            service_tier,
         },
     )
     .await
@@ -216,6 +219,7 @@ struct SpawnAgentArgs {
     agent_type: Option<String>,
     model: Option<String>,
     reasoning_effort: Option<ReasoningEffort>,
+    service_tier: Option<String>,
     fork_turns: Option<String>,
     fork_context: Option<bool>,
 }

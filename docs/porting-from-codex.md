@@ -207,7 +207,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `cf3ff1530d821ec2d26452da4971d8e3e7d18d25`, 2026-11-22. Subject: Show a loading indicator while the resume picker starts (#63102).
+Last incorporated commit: `00696090d65a747848e0a40661e1da8badb1f146`, 2026-11-23. Subject: Preserve slash command selection across TUI connection changes (#63419).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 
@@ -755,7 +755,9 @@ Optional top-level `subagent_model_context_windows` maps exact final model IDs t
 
 A positive role TOML `model_context_window` overrides map/scalar fallback at startup/model changes/reload. New children resolve their own role, not parent role limits. Preserve clamping/headroom/compaction and root/internal workers. The picker shows top-level map/scalar configuration, not effective role limits.
 
-`[subagent_service_tiers]` maps model/effort to tiers, e.g. `gpt-6-sol = { high = "fast" }`. Match final child model/effective effort after overrides/roles. Matches override root tier throughout child lifetime, including later root-tier changes. Unmatched/root behavior stays upstream. Reject unsupported matched tiers and Fast when disabled. Do not expose spawn arguments.
+`[subagent_service_tiers]` maps model/effort to tiers, e.g. `gpt-6-sol = { high = "fast" }`. Match final child model/effective effort after overrides/roles. Matches override root tier throughout child lifetime, including later root-tier changes. Unmatched/root behavior stays upstream. Reject unsupported matched tiers and Fast when disabled.
+
+Set `expose_spawn_agent_service_tier = true` under `[features.multi_agent_v2]` to expose the optional `spawn_agent.service_tier` argument when model selection is exposed. It is off by default. An explicit tier takes precedence for that child only and survives reloads. Use `default` to request the default tier. Omit it to use the configured model/effort mapping and normal inheritance. Reject tiers unavailable for the child model, provider, or enabled features.
 
 `/subagents` labels:
 

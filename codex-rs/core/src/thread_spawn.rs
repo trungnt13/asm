@@ -42,6 +42,7 @@ pub struct ThreadCreateRequest {
     pub agent_type: Option<String>,
     pub model: Option<String>,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub service_tier: Option<String>,
 }
 
 pub(crate) struct ThreadSpawnRequest {
@@ -54,6 +55,7 @@ pub(crate) struct ThreadSpawnRequest {
     pub agent_type: Option<String>,
     pub model: Option<String>,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub service_tier: Option<String>,
 }
 
 impl ThreadSpawnRequest {
@@ -75,6 +77,7 @@ impl ThreadSpawnRequest {
                 agent_type: self.agent_type,
                 model: self.model,
                 reasoning_effort: self.reasoning_effort,
+                service_tier: self.service_tier,
             },
             self.message,
         ))
@@ -205,6 +208,7 @@ pub(crate) async fn prepare(
         agent_type,
         model,
         reasoning_effort,
+        service_tier,
     } = request;
     let role_name = agent_type
         .as_deref()
@@ -224,6 +228,7 @@ pub(crate) async fn prepare(
             role_name,
             model: model.as_deref(),
             reasoning_effort,
+            service_tier,
         },
     )
     .await
@@ -286,6 +291,7 @@ pub(crate) async fn prepare(
             source: spawn_source,
             options: SpawnAgentOptions {
                 spawn_arguments: None,
+                service_tier: prepared.service_tier,
                 request_country: step_context.settings.request_country().clone(),
                 fork_parent_spawn_call_id: fork_mode.as_ref().map(|_| call_id.to_string()),
                 fork_mode,

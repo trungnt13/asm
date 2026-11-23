@@ -640,10 +640,15 @@ async fn spawn_agent_service_tier_inheritance_uses_root_preference_and_child_mod
                 Arc::new(session),
                 Arc::new(turn),
                 "spawn_agent",
-                function_payload(json!({"task_name": "worker", "fork_turns": "none", "message": "inspect this repo"})),
+                function_payload(json!({
+                    "task_name": "worker",
+                    "fork_turns": "none",
+                    "message": "inspect this repo",
+                    "service_tier": "default",
+                })),
             ))
             .await
-            .expect("spawn_agent should inherit a supported parent service tier");
+            .expect("spawn_agent should inherit the tier and ignore overrides by default");
         let (content, _) = expect_text_output(output);
         let result: SpawnAgentResult =
             serde_json::from_str(&content).expect("spawn_agent result should be json");
