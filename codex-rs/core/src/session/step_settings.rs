@@ -205,6 +205,7 @@ impl ResolvedStepSettings {
 /// instructions are not mistaken for explicit overrides.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ModelInfoOverrides {
+    chat_completions: bool,
     pub(crate) context_window: Option<i64>,
     // Keep model-specific child limits separate from the inherited scalar fallback.
     pub(crate) subagent_context_windows: HashMap<String, i64>,
@@ -216,6 +217,7 @@ pub(crate) struct ModelInfoOverrides {
 impl From<ModelsManagerConfig> for ModelInfoOverrides {
     fn from(config: ModelsManagerConfig) -> Self {
         Self {
+            chat_completions: config.chat_completions,
             context_window: config.model_context_window,
             subagent_context_windows: HashMap::new(),
             auto_compact_token_limit: config.model_auto_compact_token_limit,
@@ -251,6 +253,7 @@ impl ModelInfoOverrides {
         personality: Option<Personality>,
     ) -> ModelsManagerConfig {
         ModelsManagerConfig {
+            chat_completions: self.chat_completions,
             model_context_window: self
                 .subagent_context_windows
                 .get(model)

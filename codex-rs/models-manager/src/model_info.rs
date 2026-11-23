@@ -2,6 +2,7 @@ use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::openai_models::ApplyPatchToolType;
 use codex_protocol::openai_models::ConfigShellToolType;
+use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelMessages;
 use codex_protocol::openai_models::ModelVisibility;
@@ -55,6 +56,13 @@ pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig)
                     context_window.min(max_context_window)
                 }),
         );
+    }
+    if config.chat_completions {
+        model.input_modalities = vec![InputModality::Text];
+        model.tool_mode = Some(ToolMode::CodeModeOnly);
+        model.use_responses_lite = false;
+        model.supports_search_tool = false;
+        model.supports_reasoning_effort_updates = false;
     }
     if let Some(auto_compact_token_limit) = config.model_auto_compact_token_limit {
         model.auto_compact_token_limit = Some(auto_compact_token_limit);

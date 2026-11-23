@@ -2,10 +2,10 @@ use crate::common::ResponseEvent;
 use crate::common::ResponseStream;
 use crate::error::ApiError;
 use crate::error::parse_terminal_provider_error;
+use crate::requests::chat::ChatTool;
 use crate::telemetry::SseTelemetry;
 use codex_client::StreamResponse;
 use codex_client::TransportError;
-use codex_protocol::ToolName;
 use codex_protocol::error::ResponseIncompleteError;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
@@ -27,7 +27,7 @@ use tokio::time::timeout;
 pub(crate) fn spawn_chat_stream(
     stream: StreamResponse,
     idle_timeout: Duration,
-    tool_names: HashMap<String, ToolName>,
+    tool_names: HashMap<String, ChatTool>,
     telemetry: Option<Arc<dyn SseTelemetry>>,
     request_started_at: Instant,
 ) -> ResponseStream {
@@ -63,7 +63,7 @@ pub(crate) fn spawn_chat_stream(
 async fn decode_chat_stream(
     stream: StreamResponse,
     idle_timeout: Duration,
-    tool_names: HashMap<String, ToolName>,
+    tool_names: HashMap<String, ChatTool>,
     telemetry: Option<Arc<dyn SseTelemetry>>,
     request_started_at: Instant,
     events: &mpsc::Sender<Result<ResponseEvent, ApiError>>,
@@ -159,6 +159,7 @@ async fn decode_chat_stream(
                 && events
                     .send(Ok(ResponseEvent::OutputItemAdded(assistant_message(
                         String::new(),
+                        /*status*/ None,
                     ))))
                     .await
                     .is_err()
@@ -174,7 +175,7 @@ async fn decode_chat_stream(
                 return Ok(());
             }
         }
-        for part in choice.delta.tool_calls {
+        for part in choice.delta.tool_calls.into_iter().flatten() {
             if part.kind.as_deref().is_some_and(|kind| kind != "function") {
                 return Err(ApiError::Stream("unsupported chat tool call type".into()));
             }
@@ -207,7 +208,14 @@ async fn decode_chat_stream(
             return Err(ApiError::ResponseIncomplete(Box::new(
                 ResponseIncompleteError {
                     reason: "max_output_tokens".to_owned(),
-                    partial_output: Vec::new(),
+                    partial_output: if content.is_empty() {
+                        Vec::new()
+                    } else {
+                        vec![serde_json::json!(assistant_message(
+                            content,
+                            Some("incomplete")
+                        ))]
+                    },
                     response_id,
                     token_usage: usage,
                 },
@@ -226,31 +234,52 @@ async fn decode_chat_stream(
     let mut ids = HashSet::new();
     let mut items = Vec::with_capacity(calls.len() + usize::from(!content.is_empty()));
     if !content.is_empty() {
-        items.push(assistant_message(content));
+        items.push(assistant_message(content, /*status*/ None));
     }
     for call in calls.into_values() {
         let tool = tool_names
             .get(&call.name)
             .ok_or_else(|| ApiError::Stream("chat response called an unadvertised tool".into()))?;
-        if call.id.is_empty()
-            || !ids.insert(call.id.clone())
-            || !matches!(
-                serde_json::from_str::<Value>(&call.arguments),
-                Ok(Value::Object(_))
-            )
-        {
+        if call.id.is_empty() || !ids.insert(call.id.clone()) {
             return Err(ApiError::Stream("invalid chat tool call".into()));
         }
-        items.push(ResponseItem::FunctionCall {
-            encrypted_content: None,
-            status: None,
-            id: None,
-            name: tool.name.clone(),
-            namespace: tool.namespace.clone(),
-            arguments: call.arguments,
-            encrypted_function_args: None,
-            call_id: call.id,
-            internal_chat_message_metadata_passthrough: None,
+        items.push(match tool {
+            ChatTool::Function(tool) => {
+                if !matches!(
+                    serde_json::from_str::<Value>(&call.arguments),
+                    Ok(Value::Object(_))
+                ) {
+                    return Err(ApiError::Stream("invalid chat tool arguments".into()));
+                }
+                ResponseItem::FunctionCall {
+                    encrypted_content: None,
+                    status: None,
+                    id: None,
+                    name: tool.name.clone(),
+                    namespace: tool.namespace.clone(),
+                    arguments: call.arguments,
+                    encrypted_function_args: None,
+                    call_id: call.id,
+                    internal_chat_message_metadata_passthrough: None,
+                }
+            }
+            ChatTool::Freeform(tool) => {
+                if !call.arguments.trim_start().starts_with('{') {
+                    return Err(ApiError::Stream("invalid chat freeform tool input".into()));
+                }
+                let arguments: FreeformArguments = serde_json::from_str(&call.arguments)
+                    .map_err(|_| ApiError::Stream("invalid chat freeform tool input".into()))?;
+                ResponseItem::CustomToolCall {
+                    encrypted_content: None,
+                    status: None,
+                    id: None,
+                    name: tool.name.clone(),
+                    namespace: tool.namespace.clone(),
+                    input: arguments.input,
+                    call_id: call.id,
+                    internal_chat_message_metadata_passthrough: None,
+                }
+            }
         });
     }
     for item in items {
@@ -280,10 +309,10 @@ async fn decode_chat_stream(
     Ok(())
 }
 
-fn assistant_message(text: String) -> ResponseItem {
+fn assistant_message(text: String, status: Option<&str>) -> ResponseItem {
     ResponseItem::Message {
         encrypted_content: None,
-        status: None,
+        status: status.map(str::to_owned),
         id: None,
         role: "assistant".to_owned(),
         content: Arc::new(vec![ContentItem::OutputText {
@@ -317,8 +346,7 @@ struct ChatChoice {
 struct ChatDelta {
     content: Option<String>,
     refusal: Option<String>,
-    #[serde(default)]
-    tool_calls: Vec<ChatToolCallDelta>,
+    tool_calls: Option<Vec<ChatToolCallDelta>>,
 }
 
 #[derive(Deserialize)]
@@ -334,6 +362,12 @@ struct ChatToolCallDelta {
 struct ChatFunctionDelta {
     name: Option<String>,
     arguments: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FreeformArguments {
+    input: String,
 }
 
 #[derive(Default)]

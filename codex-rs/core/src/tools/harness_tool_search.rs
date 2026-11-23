@@ -20,7 +20,13 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 pub(crate) fn enabled(turn: &TurnContext, model: &ModelInfo) -> bool {
-    (turn.config.model_provider_id == "fireworks" || model.slug.starts_with("claude-code/"))
+    (turn.config.model_provider_id == "fireworks"
+        || model.slug.starts_with("claude-code/")
+        || (turn.provider.info().wire_api == codex_model_provider_info::WireApi::ChatCompletions
+            && turn
+                .config
+                .features
+                .enabled(codex_features::Feature::CodeModeToolSearch)))
         && !model.supports_search_tool
 }
 
