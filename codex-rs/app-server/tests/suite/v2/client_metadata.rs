@@ -110,6 +110,10 @@ async fn turn_start_forwards_client_metadata_to_responses_request_v2() -> Result
     .await??;
 
     let request = response_mock.single_request();
+    assert_eq!(
+        request.header("x-codex-exclude").as_deref(),
+        Some("tools,usage.attribution")
+    );
     let metadata = request
         .header("x-codex-turn-metadata")
         .as_deref()
@@ -624,26 +628,23 @@ async fn turn_steer_updates_client_metadata_on_follow_up_responses_request_v2(
     Ok(())
 }
 
-#[test_case::test_case(false, "none"; "legacy")]
-#[test_case::test_case(true, "none"; "v2 fresh")]
-#[test_case::test_case(true, "all"; "v2 fork")]
+#[test_case::test_case("none", false; "v2 fresh")]
+#[test_case::test_case("all", false; "v2 fork")]
+#[test_case::test_case("none", true; "v2 fresh with raw events")]
 #[tokio::test]
 async fn subagents_inherit_spawn_metadata_without_live_parent_updates(
-    multi_agent_v2: bool,
     fork_turns: &str,
+    experimental_raw_events: bool,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let spawn_args = if multi_agent_v2 {
-        json!({"task_name": "worker", "message": "Inspect the example", "fork_turns": fork_turns})
-    } else {
-        json!({"message": "Inspect the example"})
-    };
-    let namespace = if multi_agent_v2 {
-        "collaboration"
-    } else {
-        "multi_agent_v1"
-    };
+    let spawn_args = json!({
+        "task_name": "worker",
+        "message": "Inspect the example",
+        "fork_turns": fork_turns,
+        "model": "gpt-5.6-sol",
+    });
+    let namespace = "collaboration";
     let parent_wait = responses::ev_completed("parent-wait");
     let child_wait = responses::ev_response_created("child-spawn");
     let server = responses::start_websocket_server(vec![
@@ -684,18 +685,12 @@ async fn subagents_inherit_spawn_metadata_without_live_parent_updates(
     let release_child = server.gate_response_event(&child_wait);
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri().replacen("ws://", "http://", 1))
-        .with_model(if multi_agent_v2 {
-            "gpt-5.6-sol"
-        } else {
-            "gpt-5.6-luna"
-        })
+        .with_model("gpt-5.6-sol")
         .with_provider_config("supports_websockets = true")
         .with_provider_config("supports_standalone_web_search = true")
         .enable_feature(Feature::StandaloneWebSearch)
         .with_root_config("web_search = \"live\"")
-        .with_extra_config(&format!(
-            "[agents]\nmax_depth = 3\n[features.multi_agent_v2]\nenabled = {multi_agent_v2}"
-        ))
+        .with_extra_config("[agents]\nmax_depth = 3\n[features.multi_agent_v2]\nenabled = true")
         .write(codex_home.path())?;
     let mut app_server = TestAppServer::builder()
         .with_codex_home(codex_home.path())
@@ -703,7 +698,10 @@ async fn subagents_inherit_spawn_metadata_without_live_parent_updates(
         .await?;
 
     let thread_req = app_server
-        .send_thread_start_request_with_auto_env(ThreadStartParams::default())
+        .send_thread_start_request_with_auto_env(ThreadStartParams {
+            experimental_raw_events,
+            ..Default::default()
+        })
         .await?;
     let ThreadStartResponse { thread, .. } =
         timeout(DEFAULT_READ_TIMEOUT, app_server.read_response(thread_req)).await??;
@@ -770,6 +768,17 @@ async fn subagents_inherit_spawn_metadata_without_live_parent_updates(
     )
     .await?;
 
+    let expected_exclusions = if experimental_raw_events {
+        "tools"
+    } else {
+        "tools,usage.attribution"
+    };
+    for handshake in server.handshakes() {
+        assert_eq!(
+            handshake.header("x-codex-exclude").as_deref(),
+            Some(expected_exclusions)
+        );
+    }
     for request in [&child_first, &grandchild] {
         let body = request.body_json();
         let tools = body["input"]

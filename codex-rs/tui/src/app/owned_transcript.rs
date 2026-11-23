@@ -424,9 +424,8 @@ impl App {
                         .get_mut(&sidebar_parent)
                         .and_then(|pane| pane.active_document())
                     {
-                        let [_, body] = side_pane::tab_and_body(*sidebar);
                         if let Some(cursor) = doc.paint(
-                            body,
+                            *sidebar,
                             frame,
                             DocumentRenderOptions {
                                 motion: sidebar_motion,
@@ -657,7 +656,7 @@ impl App {
                 super::link_hover::paint_hover_foreground(area, frame.buffer);
             }
             if let Some(center) = center {
-                self.paint_command_center(frame, center, available);
+                self.paint_command_center(frame, center, available, &frames);
             }
             self.paint_centered_dialog(frame);
         })?;

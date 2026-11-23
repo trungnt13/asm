@@ -163,9 +163,9 @@ impl ChatWidget {
         crate::startup_recovery::handed_off(|| self.bottom_pane.composer_recovery_snapshot());
     }
 
-    /// Includes protected prompts deferred by streaming or the approval idle timer.
+    /// Includes protected prompts deferred by streaming or the typing idle timer.
     pub(crate) fn has_pending_protected_request(&self) -> bool {
-        self.bottom_pane.has_pending_approval() || self.interrupts.has_pending_prompt()
+        self.bottom_pane.has_delayed_prompt() || self.interrupts.has_pending_prompt()
     }
 
     /// Transfer startup input only after protected views and required sandbox setup finish.
@@ -723,6 +723,7 @@ impl ChatWidget {
             quote_comments,
             text,
             shell_mode: _,
+            disconnected_command,
             local_images,
             remote_image_urls,
             text_elements,
@@ -745,6 +746,9 @@ impl ChatWidget {
         );
         self.bottom_pane.set_composer_quote_comments(quote_comments);
         self.bottom_pane.set_composer_pending_pastes(pending_pastes);
+        if let Some(command) = disconnected_command {
+            self.bottom_pane.restore_disconnected_command(command);
+        }
     }
 
     fn composer_state_from_user_message(
@@ -763,6 +767,7 @@ impl ChatWidget {
             quote_comments: Vec::new(),
             text,
             shell_mode: None,
+            disconnected_command: None,
             local_images,
             remote_image_urls,
             text_elements,
@@ -778,6 +783,7 @@ impl ChatWidget {
             quotes: draft.quotes,
             quote_comments: draft.quote_comments,
             text: draft.text,
+            disconnected_command: self.bottom_pane.disconnected_command_state(),
             // A disabled shell composer also treats a leading bang literally.
             shell_mode: Some(draft.shell_mode.unwrap_or(false)),
             text_elements: draft.text_elements,

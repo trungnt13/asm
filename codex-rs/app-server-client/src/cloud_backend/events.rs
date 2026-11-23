@@ -138,6 +138,9 @@ pub(super) fn item_summary(item: cloud::ItemSummary) -> Option<protocol::ThreadI
                             }),
                         }
                     }
+                    cloud::UserMessageInput::Mention { name, path } => {
+                        protocol::UserInput::Mention { name, path }
+                    }
                 })
                 .collect(),
         },

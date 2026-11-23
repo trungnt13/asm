@@ -889,7 +889,13 @@ async fn drain_to_completed(
     phase: CompactionPhase,
 ) -> CodexResult<CompactionResponse> {
     let turn_context = step_context.turn.as_ref();
-    let service_tier = if matches!(
+    let service_tier = if step_context
+        .settings
+        .spawn_service_tier_override()
+        .is_some()
+    {
+        step_context.settings.service_tier.clone()
+    } else if matches!(
         turn_context.session_source,
         SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
     ) {

@@ -396,14 +396,7 @@ async fn schedule_startup_prewarm_inner(
     let startup_cancellation_token = CancellationToken::new();
     let preconnect_model_info = Arc::clone(startup_turn_context.model_info());
     // Warmup uses the same child routing rule as request capture.
-    let preconnect_service_tier = if session
-        .inherits_root_service_tier(&startup_turn_context.session_source)
-        || matches!(
-            &startup_turn_context.session_source,
-            codex_protocol::protocol::SessionSource::SubAgent(
-                codex_protocol::protocol::SubAgentSource::ThreadSpawn { .. }
-            )
-        ) {
+    let preconnect_service_tier = if session.uses_inherited_service_tier(&startup_turn_context) {
         crate::agent::child_config::select_subagent_service_tier(
             &startup_turn_context.config,
             &preconnect_model_info,

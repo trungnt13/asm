@@ -92,12 +92,31 @@ impl ToolExecutor<ToolInvocation> for MultiAgentV2ToolOverrides {
                         .required
                         .as_deref()
                         .is_some_and(|required| required.iter().any(|name| name == "model"));
+                let service_tier = tool
+                    .parameters
+                    .properties
+                    .as_ref()
+                    .and_then(|properties| properties.get("service_tier"))
+                    .cloned();
                 tool.parameters.clone_from(parameters);
                 match tool.name.as_str() {
                     "spawn_agent" => {
                         require_spawn_agent_fork_turns(&mut tool.parameters);
                         if require_model {
                             require_spawn_agent_model(&mut tool.parameters);
+                        }
+                        let properties = tool.parameters.properties.get_or_insert_default();
+                        if let Some(tier) = service_tier
+                            && properties.contains_key("model")
+                        {
+                            properties.entry("service_tier".to_string()).or_insert(tier);
+                        } else {
+                            properties.remove("service_tier");
+                        }
+                        if let Some(required) = tool.parameters.required.take() {
+                            let mut required = required.into_vec();
+                            required.retain(|name| name != "service_tier");
+                            tool.parameters.required = Some(required.into_boxed_slice());
                         }
                     }
                     "wait_agent" => codex_tools::require_wait_reason(&mut tool.parameters),

@@ -22,6 +22,7 @@ use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SpawnServiceTierOverride;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::TurnContextItem;
 use std::collections::HashMap;
@@ -38,6 +39,8 @@ pub(crate) struct StepSettings {
     pub(crate) reasoning_summary: Option<ReasoningSummary>,
     /// Normalized requested tier; resolution filters it against the pinned model.
     pub(crate) service_tier: Option<String>,
+    /// Retains the ordinary tier when this child has its own tier.
+    pub(crate) spawn_service_tier_override: Option<SpawnServiceTierOverride>,
     pub(crate) personality: Option<Personality>,
     pub(crate) approval_policy: Constrained<AskForApproval>,
     pub(crate) approvals_reviewer: ApprovalsReviewer,
@@ -63,6 +66,10 @@ pub(crate) struct ResolvedStepSettings {
 }
 
 impl ResolvedStepSettings {
+    pub(crate) fn spawn_service_tier_override(&self) -> Option<&SpawnServiceTierOverride> {
+        self.selected.spawn_service_tier_override.as_ref()
+    }
+
     pub(crate) fn request_country(&self) -> &RequestCountry {
         &self.selected.request_country
     }

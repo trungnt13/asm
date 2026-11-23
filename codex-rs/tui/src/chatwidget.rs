@@ -1174,8 +1174,8 @@ impl ChatWidget {
     }
 
     fn sync_context_window_visibility(&mut self) {
-        self.bottom_pane
-            .set_context_window_hidden(self.read_only_history || self.token_usage_pending);
+        let hidden = self.read_only_history || self.token_usage_pending;
+        self.bottom_pane.set_context_window_hidden(hidden);
     }
 
     pub(crate) fn set_token_info(&mut self, info: Option<TokenUsageInfo>) {
@@ -1565,7 +1565,7 @@ impl ChatWidget {
             .iter()
             .map(|process| history_cell::UnifiedExecProcessDetails {
                 command_display: process.command_display.clone(),
-                recent_chunks: process.recent_chunks.clone(),
+                recent_chunks: process.recent_lines(),
             })
             .collect();
         self.add_to_history(history_cell::new_unified_exec_processes_output(processes));

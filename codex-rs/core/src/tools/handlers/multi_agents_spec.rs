@@ -25,6 +25,7 @@ pub struct SpawnAgentToolOptions {
     pub hide_agent_type_model_reasoning: bool,
     pub expose_spawn_agent_model_overrides: bool,
     pub require_spawn_agent_model: bool,
+    pub expose_service_tier: bool,
     pub multi_agent_version: MultiAgentVersion,
     pub include_model_catalog_in_spawn_agent_list: bool,
     pub model_catalog_in_context: bool,
@@ -42,6 +43,7 @@ impl Default for SpawnAgentToolOptions {
             hide_agent_type_model_reasoning: false,
             expose_spawn_agent_model_overrides: false,
             require_spawn_agent_model: false,
+            expose_service_tier: false,
             multi_agent_version: MultiAgentVersion::Disabled,
             include_model_catalog_in_spawn_agent_list: true,
             model_catalog_in_context: false,
@@ -106,6 +108,13 @@ pub fn create_spawn_agent_tool_v2(
     if !options.expose_spawn_agent_model_overrides {
         properties.remove("model");
         properties.remove("reasoning_effort");
+    } else if options.expose_service_tier {
+        properties.insert(
+            "service_tier".to_string(),
+            JsonSchema::string(Some(
+                "Service tier override for this agent. Use `default` or a tier supported by its model. Omit unless explicitly requested.".to_string(),
+            )),
+        );
     }
     properties.insert(
         "task_name".to_string(),
