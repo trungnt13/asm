@@ -1895,7 +1895,8 @@ async fn worktrees_overview_groups_by_project_or_directory() {
         .collect::<Vec<_>>()
         .join("\n");
     for (heading, stable) in directory_headings.iter().rev() {
-        directory_grouping = directory_grouping.replace(heading, stable);
+        // Long paths can truncate to the same heading for both worktrees.
+        directory_grouping = directory_grouping.replacen(heading, stable, 1);
     }
     let directory_grouping = directory_grouping.replace('\\', "/");
     insta::with_settings!({snapshot_path => "../snapshots"}, {
@@ -2043,7 +2044,7 @@ async fn shared_overview_shows_only_root_sessions() {
     threads.push(attached);
     let default_model = app
         .model_catalog
-        .models
+        .models()
         .first()
         .expect("test model catalog");
     threads[0].model = Some(default_model.model.clone());
@@ -3436,11 +3437,7 @@ async fn check_resume_round_trip(round_trip: ResumeRoundTrip) -> Result<()> {
                 ),
             )
             .await?;
-            assert!(
-                app.active_thread_rx
-                    .as_ref()
-                    .is_some_and(|rx| !rx.is_empty())
-            );
+            assert!(app.active_thread_rx().is_some_and(|rx| !rx.is_empty()));
         }
         let view = app.agents_overview_view(Vec::new(), /*selected_thread_id*/ None);
         app.chat_widget.show_bottom_pane_view(Box::new(view));
@@ -4073,7 +4070,7 @@ async fn overview_fork_keeps_idle_source_input_queued() -> Result<()> {
         if cached_primary {
             Box::pin(app.select_agents_overview_thread(&mut tui, &mut server, source)).await?;
             assert_eq!(app.current_displayed_thread_id(), Some(source));
-            app.store_active_thread_receiver().await;
+            app.save_active_thread_state().await;
         }
         app.chat_widget
             .set_queue_autosend_suppressed(/*suppressed*/ true);

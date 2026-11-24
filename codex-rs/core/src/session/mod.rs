@@ -90,6 +90,7 @@ use codex_features::Feature;
 use codex_features::Features;
 use codex_features::unstable_features_warning_event;
 use codex_history::HistoryInitialization;
+use codex_history::RolloutEventMetadata;
 use codex_history::RolloutItem;
 use codex_hooks::Hooks;
 use codex_hooks::HooksConfig;
@@ -240,6 +241,7 @@ use crate::config::StartedNetworkProxy;
 use crate::config::resolve_web_search_mode_for_turn;
 use crate::context_manager::ContextManager;
 use crate::context_manager::HistoryReplacement;
+use crate::context_manager::rejected_audio::RejectedAudioFileIds;
 use crate::thread_rollout_truncation::initial_history_has_prior_user_turns;
 use codex_config::CONFIG_TOML_FILE;
 use codex_config::ConfigLayerSource;
@@ -633,9 +635,10 @@ pub(crate) fn history_native_model(
     history.get_rollout_items().iter().find_map(|item| {
         let model = match item {
             RolloutItem::TurnContext(context) => &context.model,
-            RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) => {
-                &event.thread_settings.model
-            }
+            RolloutItem::EventMsg {
+                event: EventMsg::ThreadSettingsApplied(event),
+                ..
+            } => &event.thread_settings.model,
             _ => return None,
         };
         codex_protocol::openai_models::NativeRuntime::for_model(model)
@@ -807,7 +810,11 @@ impl Session {
         let saved_bound_model = history.iter().any(|item| {
             let model = if let RolloutItem::TurnContext(context) = item {
                 Some(context.model.as_str())
-            } else if let RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) = item {
+            } else if let RolloutItem::EventMsg {
+                event: EventMsg::ThreadSettingsApplied(event),
+                ..
+            } = item
+            {
                 Some(event.thread_settings.model.as_str())
             } else {
                 None
@@ -2112,10 +2119,10 @@ impl Session {
                 let turn_context = self.new_default_turn().await;
                 let rollout_items = resumed_history.history;
                 if matches!(
-                    rollout_items.iter().rev().find_map(|item| match item {
-                        RolloutItem::EventMsg(event) => agent_status_from_event(event),
-                        _ => None,
-                    }),
+                    rollout_items
+                        .iter()
+                        .rev()
+                        .find_map(|item| { item.event_msg().and_then(agent_status_from_event) }),
                     Some(AgentStatus::Interrupted)
                 ) {
                     self.agent_status.send_replace(AgentStatus::Interrupted);
@@ -2156,11 +2163,10 @@ impl Session {
                 let thread_id = self.thread_id();
                 let current_settings = self.thread_settings_snapshot().await;
                 let persisted_settings = rollout_items.iter().rev().find_map(|item| match item {
-                    RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event))
-                        if event.thread_id == Some(thread_id) =>
-                    {
-                        Some(&event.thread_settings)
-                    }
+                    RolloutItem::EventMsg {
+                        event: EventMsg::ThreadSettingsApplied(event),
+                        ..
+                    } if event.thread_id == Some(thread_id) => Some(&event.thread_settings),
                     _ => None,
                 });
                 // Persist changed effective settings even when no turn follows the resume.
@@ -2446,7 +2452,10 @@ impl Session {
 
     fn last_token_info_from_rollout(rollout_items: &[RolloutItem]) -> Option<TokenUsageInfo> {
         rollout_items.iter().rev().find_map(|item| match item {
-            RolloutItem::EventMsg(EventMsg::TokenCount(ev)) => ev.info.clone(),
+            RolloutItem::EventMsg {
+                event: EventMsg::TokenCount(ev),
+                ..
+            } => ev.info.clone(),
             _ => None,
         })
     }
@@ -2669,6 +2678,12 @@ impl Session {
             .resolve_model_info(self.services.models_manager.as_ref(), &overrides)
             .await
             .model
+    }
+
+    pub(crate) async fn configured_snapshot(&self) -> ThreadConfigSnapshot {
+        let state = self.state.lock().await;
+        let configuration = &state.session_configuration;
+        configuration.thread_config_snapshot(configuration.environments.clone())
     }
 
     pub(crate) async fn thread_config_snapshot(&self) -> ThreadConfigSnapshot {
@@ -3072,7 +3087,7 @@ impl Session {
     }
 
     /// Persist the event to rollout and send it to clients.
-    pub(crate) async fn send_event(&self, turn_context: &TurnContext, mut msg: EventMsg) {
+    pub(crate) async fn send_event(&self, turn_context: &TurnContext, msg: EventMsg) {
         crate::agent::turn_metrics::record_terminal_event(turn_context, &msg);
         if let Some((item_id, started_at_ms)) = msg.command_approval_start() {
             // The client can see the command before execution. Keep its first start
@@ -3082,30 +3097,33 @@ impl Session {
                 .record_item_started(item_id.to_owned(), started_at_ms)
                 .await;
         }
-        if let EventMsg::TurnComplete(completed) = &msg
+        let metadata = if let EventMsg::TurnComplete(completed) = &msg
             && completed.error.is_some()
+            && let Some(rejected) = turn_context.extension_data.remove::<RejectedAudioFileIds>()
         {
+            let file_ids = Arc::unwrap_or_clone(rejected).0;
             self.state
                 .lock()
                 .await
                 .history
-                .record_rejected_file_audio(completed);
-        }
-        if let EventMsg::Error(error) = &mut msg
+                .extend_rejected_audio_file_ids(file_ids.iter().cloned());
+            Some(RolloutEventMetadata {
+                rejected_audio_file_ids: file_ids,
+            })
+        } else {
+            None
+        };
+        if let EventMsg::Error(error) = &msg
             && error
                 .codex_error_info
                 .as_ref()
                 .is_some_and(CodexErrorInfo::affects_turn_status)
         {
-            let mut terminal_error = turn_context.terminal_error.lock().await;
-            if let Some(previous) = terminal_error.as_ref() {
-                for file_id in &previous.rejected_audio_file_ids {
-                    if !error.rejected_audio_file_ids.contains(file_id) {
-                        error.rejected_audio_file_ids.push(file_id.clone());
-                    }
-                }
-            }
-            terminal_error.replace(error.clone());
+            turn_context
+                .terminal_error
+                .lock()
+                .await
+                .replace(error.clone());
         }
         let legacy_source = msg.clone();
         self.services
@@ -3136,7 +3154,7 @@ impl Session {
                 .analytics_events_client
                 .track_guardian_session_event(self.thread_id, &event);
         }
-        self.send_event_raw(event).await;
+        Box::pin(self.send_event_raw_with_persistence(event, /*persist*/ true, metadata)).await;
         self.maybe_publish_terminal_agent_result(turn_context, &legacy_source)
             .await;
         self.maybe_mirror_event_text_to_realtime(&legacy_source)
@@ -3311,7 +3329,12 @@ impl Session {
 
     pub(crate) async fn send_event_raw(&self, event: Event) {
         // Keep event persistence out of callers' stack frames.
-        Box::pin(self.send_event_raw_with_persistence(event, /*persist*/ true)).await;
+        Box::pin(
+            self.send_event_raw_with_persistence(
+                event, /*persist*/ true, /*metadata*/ None,
+            ),
+        )
+        .await;
     }
 
     /// Delivers an event without creating a local rollout for a thread that has not materialized.
@@ -3324,10 +3347,16 @@ impl Session {
                 true
             }
         };
-        self.send_event_raw_with_persistence(event, persist).await;
+        self.send_event_raw_with_persistence(event, persist, /*metadata*/ None)
+            .await;
     }
 
-    async fn send_event_raw_with_persistence(&self, event: Event, persist: bool) {
+    async fn send_event_raw_with_persistence(
+        &self,
+        event: Event,
+        persist: bool,
+        metadata: Option<RolloutEventMetadata>,
+    ) {
         let flush_guardian_completion = persist
             && matches!(event.msg, EventMsg::TurnComplete(_))
             && self.is_private_guardian_reviewer().await;
@@ -3359,7 +3388,10 @@ impl Session {
         }
         // Persist the event into rollout storage; the store applies its persistence policy.
         if persist {
-            let rollout_items = vec![RolloutItem::EventMsg(event.msg.clone())];
+            let rollout_items = vec![RolloutItem::EventMsg {
+                event: event.msg.clone(),
+                metadata,
+            }];
             self.persist_rollout_items(&rollout_items).await;
         }
         self.services
@@ -4626,7 +4658,7 @@ impl Session {
         {
             mark_thread_memory_mode_polluted_if_external_context(self, turn_context, item).await;
         }
-        self.send_raw_response_items(turn_context, &response_items)
+        self.send_raw_response_items(&turn_context.sub_id, &response_items)
             .await;
         Ok(recorded_through)
     }
@@ -5548,26 +5580,18 @@ impl Session {
     }
 
     #[tracing::instrument(level = "trace", skip_all, fields(item_count = items.len()))]
-    async fn send_raw_response_items(
-        &self,
-        turn_context: &TurnContext,
-        items: &[Arc<ResponseItem>],
-    ) {
+    async fn send_raw_response_items(&self, sub_id: &str, items: &[Arc<ResponseItem>]) {
         for item in items {
             self.services
                 .rollout_thread_trace
-                .record_history_item_accepted(
-                    &turn_context.sub_id,
-                    item,
-                    /*source_tool_call_id*/ None,
-                );
-            self.send_event(
-                turn_context,
-                EventMsg::RawResponseItem(RawResponseItemEvent {
+                .record_history_item_accepted(sub_id, item, /*source_tool_call_id*/ None);
+            self.send_event_raw(Event {
+                id: sub_id.to_owned(),
+                msg: EventMsg::RawResponseItem(RawResponseItemEvent {
                     item: item.as_ref().clone(),
                     spawn_arguments: None,
                 }),
-            )
+            })
             .await;
         }
     }
@@ -6685,6 +6709,17 @@ impl Session {
         self.ensure_rollout_materialized(PersistContext::Standard)
             .await;
         Some(rollout_path)
+    }
+
+    pub(crate) async fn pending_session_start_source(
+        &self,
+    ) -> Option<codex_hooks::SessionStartSource> {
+        self.state
+            .lock()
+            .await
+            .pending_session_start_sources
+            .front()
+            .copied()
     }
 
     pub(crate) async fn take_pending_session_start_source(

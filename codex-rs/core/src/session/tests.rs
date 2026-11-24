@@ -1847,6 +1847,50 @@ async fn reload_user_config_layer_updates_base_and_selected_profile_layers() {
     );
 }
 
+#[test_case("startup", true; "sync and async hooks match")]
+#[test_case("resume", false; "only async hook matches")]
+#[tokio::test]
+async fn cancelled_turn_defers_only_blocking_session_start_hooks(
+    sync_matcher: &str,
+    deferred: bool,
+) -> anyhow::Result<()> {
+    let session = make_session_with_config(|config| {
+        config.bypass_hook_trust = true;
+        config.features.enable(Feature::CodexHooks).unwrap();
+        config.config_layer_stack = config
+            .config_layer_stack
+            .with_user_config(
+                &config.codex_home.join(CONFIG_TOML_FILE),
+                toml::from_str(&format!(
+                    r#"[[hooks.SessionStart]]
+matcher = "startup"
+hooks = [{{ type = "command", command = "echo async", async = true }}]
+
+[[hooks.SessionStart]]
+matcher = "{sync_matcher}"
+hooks = [{{ type = "command", command = "echo startup" }}]
+"#
+                ))
+                .unwrap(),
+            )
+            .unwrap();
+    })
+    .await?;
+    let turn = session.new_default_turn().await;
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    cancellation.cancel();
+
+    assert_eq!(
+        crate::hook_runtime::run_pending_session_start_hooks(&session, &turn, &cancellation).await,
+        deferred
+    );
+    assert_eq!(
+        session.pending_session_start_source().await.is_some(),
+        deferred
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn reload_user_config_layer_refreshes_hooks() -> anyhow::Result<()> {
     let session = make_session_with_config(|config| {
@@ -4020,7 +4064,7 @@ async fn start_new_context_window_persists_checkpoint_state(clear_tools: bool) {
         | RolloutItem::SecurityRiskScore(_)
         | RolloutItem::TokenUsageRecord(_)
         | RolloutItem::RealtimeItem(_)
-        | RolloutItem::EventMsg(_) => None,
+        | RolloutItem::EventMsg { .. } => None,
     });
     let mut expected_history = live_history.annotated_items().to_vec();
     // Compaction's parallel metadata vector represents absent entries as default metadata.
@@ -4126,7 +4170,7 @@ async fn record_initial_history_assigns_and_persists_id_for_forked_response_item
         | RolloutItem::SecurityRiskScore(_)
         | RolloutItem::TokenUsageRecord(_)
         | RolloutItem::RealtimeItem(_)
-        | RolloutItem::EventMsg(_) => None,
+        | RolloutItem::EventMsg { .. } => None,
     });
     let persisted_item = persisted_item.expect("forked response item should be persisted");
     assert_eq!(
@@ -5902,9 +5946,10 @@ async fn settings_checkpoint_waits_for_accepted_settings_persistence() {
     let snapshots = items
         .into_iter()
         .filter_map(|item| match item {
-            RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) => {
-                Some((event.thread_id, event.thread_settings))
-            }
+            RolloutItem::EventMsg {
+                event: EventMsg::ThreadSettingsApplied(event),
+                ..
+            } => Some((event.thread_id, event.thread_settings)),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -6126,7 +6171,10 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
         RolloutItem::Compacted(compacted),
         RolloutItem::WorldState(saved_world_state),
         RolloutItem::TurnContext(saved_turn_context),
-        RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(saved_settings)),
+        RolloutItem::EventMsg {
+            event: EventMsg::ThreadSettingsApplied(saved_settings),
+            ..
+        },
     ] = compaction_items.as_slice()
     else {
         panic!("unexpected compaction records: {compaction_items:#?}");

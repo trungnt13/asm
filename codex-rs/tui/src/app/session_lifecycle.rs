@@ -451,19 +451,18 @@ impl App {
             }
         );
         let replace_active = self.active_thread_id == Some(thread_id)
-            && self.active_thread_rx.is_some()
             && matches!(&prepared, PreparedAttachment::Live(_));
         if replace_active {
-            // The active receiver belongs to the channel that installation will replace.
-            self.drain_outgoing_thread_events(app_server).await;
-            self.store_active_thread_receiver().await;
+            // A new live attachment supersedes the old stream's close notification.
+            self.drain_outgoing_thread_events(app_server, Some(thread_id))
+                .await;
+            self.save_active_thread_state().await;
         }
         let live = self
             .install_thread_attachment(app_server, thread_id, prepared, ChannelMode::ReplaceLive)
             .await;
         if replace_active {
             self.set_thread_active(thread_id, /*active*/ true).await;
-            self.active_thread_rx = self.ensure_thread_channel(thread_id).receiver.take();
         }
         self.ensure_thread_channel(thread_id).archived = archived;
         Ok(live)
@@ -762,11 +761,6 @@ impl App {
         if let Some(pane) = self.sidebars.get_mut(&self.sidebar_parent()) {
             pane.agents.pending_link = None;
         }
-        if self.active_thread_id == Some(thread_id) {
-            // Detach the cached receiver before a successful attachment replaces its channel.
-            self.store_active_thread_receiver().await;
-        }
-
         let known_side = self.side_threads.contains_key(&thread_id)
             && self.thread_event_channels.contains_key(&thread_id);
         // The live parent already receives lifecycle notifications while its child has focus.
@@ -860,21 +854,18 @@ impl App {
         // Notifications already routed to the active channel must reach the old
         // widget before its transcript state is transferred. Events routed after
         // deactivation are retained separately for that thread.
-        if let Some(mut receiver) = self.active_thread_rx.take() {
-            // Keep follow-ups with the departing widget, not the next active thread.
-            self.chat_widget.set_thread_switch_pending(/*pending*/ true);
-            while let Ok(event) = receiver.try_recv() {
-                self.handle_live_thread_event(app_server, event).await;
-            }
-            self.chat_widget
-                .set_thread_switch_pending(/*pending*/ false);
-            self.active_thread_rx = Some(receiver);
+        // A live same-thread replacement already drained its old receiver. On failed
+        // reattachment leave a queued close to the normal shutdown/failover handler.
+        if previous_thread_id != Some(thread_id) {
+            self.drain_outgoing_thread_events(app_server, /*reattached*/ None)
+                .await;
         }
-        self.store_active_thread_receiver().await;
+        self.save_active_thread_state().await;
         self.active_thread_id = None;
-        let Some((receiver, mut snapshot)) = self.activate_thread_for_replay(thread_id).await
-        else {
-            self.add_agents_overview_error(format!("Agent thread {thread_id} is already active."));
+        let Some(mut snapshot) = self.activate_thread_for_replay(thread_id).await else {
+            self.add_agents_overview_error(format!(
+                "Agent thread {thread_id} is no longer available."
+            ));
             if let Some(previous_thread_id) = previous_thread_id {
                 self.activate_thread_channel(previous_thread_id).await;
             }
@@ -891,7 +882,6 @@ impl App {
             .await;
         if snapshot.inferred_session && !session_verified {
             if let Some(channel) = self.thread_event_channels.get_mut(&thread_id) {
-                channel.receiver = Some(receiver);
                 channel.store.lock().await.active = false;
             }
             if let Some(previous_thread_id) = previous_thread_id {
@@ -947,7 +937,6 @@ impl App {
             .or(self.agents_overview.input_states.remove(&thread_id));
 
         self.active_thread_id = Some(thread_id);
-        self.active_thread_rx = Some(receiver);
 
         self.recap.note_focus_gained();
         self.recap = recap::RecapState::default();
@@ -1227,7 +1216,6 @@ impl App {
         self.agents_overview.activity.clear();
         self.agent_navigation.clear();
         self.active_thread_id = None;
-        self.active_thread_rx = None;
         self.primary_thread_id = None;
         self.last_subagent_backfill_attempt = None;
         self.primary_session_configured = None;
@@ -1363,7 +1351,7 @@ impl App {
                     && !codex_protocol::openai_models::is_native_runtime_model(model)
                     && !self
                         .model_catalog
-                        .models
+                        .models()
                         .iter()
                         .any(|preset| preset.model == model)
                 {
@@ -1798,16 +1786,27 @@ impl App {
         .await
     }
 
-    async fn drain_outgoing_thread_events(&mut self, app_server: &mut AppServerSession) {
-        if let Some(mut receiver) = self.active_thread_rx.take() {
-            self.chat_widget.set_thread_switch_pending(/*pending*/ true);
-            while let Ok(event) = receiver.try_recv() {
-                self.handle_live_thread_event(app_server, event).await;
+    async fn drain_outgoing_thread_events(
+        &mut self,
+        app_server: &mut AppServerSession,
+        reattached: Option<ThreadId>,
+    ) {
+        // Keep queued follow-ups with the departing widget.
+        self.chat_widget.set_thread_switch_pending(/*pending*/ true);
+        while let Some(receiver) = self.active_thread_rx_mut()
+            && let Ok(event) = receiver.try_recv()
+        {
+            if let Some(id) = reattached
+                && self.pending_shutdown_exit_thread_id != Some(id)
+                && let ThreadBufferedEvent::Notification(notification) = &event
+                && matches!(notification.as_ref(), ServerNotification::ThreadClosed(closed) if closed.thread_id == id.to_string())
+            {
+                continue;
             }
-            self.chat_widget
-                .set_thread_switch_pending(/*pending*/ false);
-            self.active_thread_rx = Some(receiver);
+            self.handle_live_thread_event(app_server, event).await;
         }
+        self.chat_widget
+            .set_thread_switch_pending(/*pending*/ false);
     }
 
     fn apply_session_account(
@@ -1842,7 +1841,8 @@ impl App {
             presentation,
             ThreadAttachPresentation::SessionLineageAfterClear
         ) {
-            self.drain_outgoing_thread_events(app_server).await;
+            self.drain_outgoing_thread_events(app_server, /*reattached*/ None)
+                .await;
         }
         if let Some(thread_id) = source_thread
             && (self.agents_overview.blank_sessions.contains_key(&thread_id)
@@ -1851,7 +1851,7 @@ impl App {
         {
             self.agents_overview.input_states.insert(thread_id, input);
         }
-        self.store_active_thread_receiver().await;
+        self.save_active_thread_state().await;
         self.refresh_transcript_document_links();
         self.reset_transcript_state_after_clear();
         tui.clear_pending_history_lines();
@@ -2188,7 +2188,8 @@ impl App {
         app_server: &mut AppServerSession,
         handoff: std::sync::Arc<()>,
     ) -> Result<std::sync::Arc<()>> {
-        self.drain_outgoing_thread_events(app_server).await;
+        self.drain_outgoing_thread_events(app_server, /*reattached*/ None)
+            .await;
         // A docked open keeps the outgoing frame until the synchronized destination draw.
         if !self.docked_task_opening(tui)
             && let Err(error) = tui.clear_for_thread_switch()

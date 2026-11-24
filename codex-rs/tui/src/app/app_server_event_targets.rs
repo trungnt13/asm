@@ -339,6 +339,7 @@ mod tests {
                 thread_id: Some(thread_id.to_string()),
                 name: "sentry".to_string(),
                 status: McpServerStartupState::Failed,
+                duration_ms: None,
                 error: Some("sentry is not logged in".to_string()),
                 failure_reason: None,
             });
@@ -356,6 +357,7 @@ mod tests {
                 thread_id: None,
                 name: "sentry".to_string(),
                 status: McpServerStartupState::Failed,
+                duration_ms: None,
                 error: Some("sentry is not logged in".to_string()),
                 failure_reason: None,
             });

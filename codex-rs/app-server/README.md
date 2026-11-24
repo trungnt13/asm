@@ -548,8 +548,9 @@ Plugin summaries returned by `plugin/list`, `plugin/installed`, `plugin/read`,
 and `plugin/share/list` report effective `enabled` state. When
 `plugins._default.enabled` is configured, an explicit
 `plugins."<plugin-name>@<marketplace-name>".enabled` overrides that default;
-a plugin disabled at its source remains disabled. Omitting the default preserves
-existing source and account enablement. Other plugin settings, including remembered
+a plugin disabled at its source remains disabled. When `_default` is absent,
+an explicit `enabled: false` still disables the plugin without changing its
+installation or account settings. Other plugin settings, including remembered
 tool approvals, inherit the activation default unless `enabled` is explicitly set.
 `plugin/search` retains its discovery behavior: results report `enabled: false`
 while preserving their installation state.
@@ -586,6 +587,14 @@ switching models. Setting `friendly` or `pragmatic` can replace a previous
 `none` setting for that purpose. Changing the setting does not rewrite the
 thread's existing instructions or change explicitly supplied base instructions.
 The old `features.personality` flag is ignored.
+
+# MCP server startup
+
+`mcpServer/startupStatus/updated` reports each server's startup state. On
+`ready` or `failed`, `durationMs` gives the elapsed milliseconds for that
+server's startup attempt, even when notifications arrive together. It is null
+when there is no new measurement, including for reused connections, `starting`
+and `cancelled`. Older servers omit the field.
 
 # MCP server capabilities
 

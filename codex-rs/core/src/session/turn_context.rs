@@ -1275,7 +1275,6 @@ impl Session {
                         misalignment: None,
                         message: message.clone(),
                         codex_error_info: Some(CodexErrorInfo::BadRequest),
-                        rejected_audio_file_ids: Vec::new(),
                     }),
                 })
                 .await;
