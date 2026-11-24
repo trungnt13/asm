@@ -24,6 +24,7 @@ use super::thread_input::can_accept_direct_input;
 use super::thread_input::ensure_direct_input_allowed;
 use super::thread_lifecycle::thread_closing_for_resume;
 use super::*;
+use crate::config_manager::validate_saved_model_provider;
 use crate::connection_rpc_gate::ConnectionRpcGate;
 use crate::error_code::method_not_found;
 use crate::thread_sample::SampleTask;
@@ -135,6 +136,7 @@ struct ThreadListFilters {
 struct ResumeConfigState {
     history_cwd: Option<PathBuf>,
     workspace_roots: Option<Vec<AbsolutePathBuf>>,
+    saved_model: Option<String>,
     persisted_metadata: Option<ThreadMetadata>,
     persisted_settings: Option<PersistedResumeSettings>,
 }
@@ -730,7 +732,7 @@ impl ThreadRequestProcessor {
             .await
             .map_err(|_| invalid_request("thread/sample requires a loaded source"))?;
         self.config_manager
-            .check_thread_model_provider_for_input(parent.config().await.as_ref())
+            .check_thread_model_provider_for_input(&parent)
             .await
             .map_err(|error| config_load_error(&error))?;
         generate_sample(
@@ -2723,7 +2725,7 @@ impl ThreadRequestProcessor {
             ));
         }
         self.config_manager
-            .check_thread_model_provider_for_input(thread.config().await.as_ref())
+            .check_thread_model_provider_for_input(&thread)
             .await
             .map_err(|error| config_load_error(&error))?;
         self.submit_core_op(request_id, thread.as_ref(), Op::Compact)
@@ -4530,6 +4532,18 @@ impl ThreadRequestProcessor {
         let config_state = ResumeConfigState {
             history_cwd: history_cwd.clone(),
             workspace_roots: typesafe_overrides.workspace_roots.clone(),
+            saved_model: history_settings
+                .map(|settings| settings.model.clone())
+                .or_else(|| {
+                    resume_source_thread
+                        .as_ref()
+                        .and_then(|thread| thread.model.clone())
+                })
+                .or_else(|| {
+                    persisted_metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.model.clone())
+                }),
             persisted_metadata,
             persisted_settings,
         };
@@ -4563,6 +4577,7 @@ impl ThreadRequestProcessor {
                                 }
                                 _ => None,
                             }),
+                        config_state.saved_model.as_deref(),
                         request_overrides,
                         typesafe_overrides,
                         history_cwd,
@@ -5055,7 +5070,7 @@ impl ThreadRequestProcessor {
             }
             permit.finish_probe();
             self.config_manager
-                .check_thread_model_provider_for_input(existing_thread.config().await.as_ref())
+                .check_thread_model_provider_for_input(&existing_thread)
                 .await
                 .map_err(|err| config_load_error(&err))?;
             let redact_resume_payloads =
@@ -5974,6 +5989,13 @@ impl ThreadRequestProcessor {
                 &mut typesafe_overrides,
             );
         }
+        let requested_model = typesafe_overrides.model.clone().or_else(|| {
+            request_overrides
+                .as_ref()
+                .and_then(|overrides| overrides.get("model"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        });
         let (inherited_options, inherited_settings) = inherited_fork.unzip();
         let mut options = if let Some(options) = inherited_options {
             *options
@@ -5989,6 +6011,15 @@ impl ThreadRequestProcessor {
                 ..StartThreadOptions::new(config)
             }
         };
+        let routes = &options.config.external_models;
+        if let Some(saved_model) = source_thread.model.as_deref()
+            && requested_model.as_deref().is_none_or(|model| {
+                model == saved_model || routes.canonical_model(model) == Some(saved_model)
+            })
+        {
+            validate_saved_model_provider(routes, saved_model, &source_thread.model_provider)
+                .map_err(|error| config_load_error(&error))?;
+        }
         super::app_context_filter::apply(&mut options.config);
         let goals_enabled = options.config.features.enabled(Feature::Goals);
 

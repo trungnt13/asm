@@ -6,6 +6,7 @@ use crate::config::ConstraintError;
 use crate::config::ConstraintResult;
 use codex_config::ConfigRequirements;
 use codex_features::Features;
+use codex_models_manager::ExternalModels;
 use codex_models_manager::ModelsManagerConfig;
 use codex_models_manager::manager::ModelsManager;
 use codex_otel::SessionTelemetry;
@@ -295,6 +296,7 @@ pub(crate) struct StepSettingsUpdate {
 /// Each caller supplies the permissions of the target environment selection.
 pub(crate) struct StepSettingsConstraints<'a> {
     pub(crate) requirements: &'a ConfigRequirements,
+    pub(crate) external_models: &'a ExternalModels,
     pub(crate) guardian_approval_enabled: bool,
     pub(crate) trusted_guardian_reviewer: bool,
     pub(crate) has_full_disk_write_access: bool,
@@ -332,7 +334,9 @@ impl StepSettings {
                 /*developer_instructions*/ None,
             )
         });
-        if let Some(model) = codex_models_manager::canonical_model(next.collaboration_mode.model())
+        if let Some(model) = constraints
+            .external_models
+            .canonical_model(next.collaboration_mode.model())
         {
             next.collaboration_mode.settings.model = model.to_owned();
         }
@@ -376,8 +380,12 @@ impl StepSettings {
                 .can_set(&ApprovalsReviewer::AutoReview)?;
             next.approvals_reviewer = ApprovalsReviewer::AutoReview;
         }
-        if codex_models_manager::provider_for_model(self.collaboration_mode.model())
-            != codex_models_manager::provider_for_model(next.collaboration_mode.model())
+        if constraints
+            .external_models
+            .provider_for_model(self.collaboration_mode.model())
+            != constraints
+                .external_models
+                .provider_for_model(next.collaboration_mode.model())
         {
             return Err(ConstraintError::InvalidValue {
                 field_name: "Model provider (start a fresh thread to change)",

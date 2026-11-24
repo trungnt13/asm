@@ -1073,6 +1073,28 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         })
         .transpose()?;
 
+    // Use invocation choices, not defaults or model-bound projections, on resume.
+    let has_resume_override = |key: &str| {
+        in_process_start_args
+            .cli_overrides
+            .iter()
+            .any(|(name, _)| name == key)
+            || config.config_layer_stack.layers_high_to_low().any(|layer| {
+                matches!(
+                    layer.name,
+                    ConfigLayerSource::User {
+                        profile: Some(_),
+                        ..
+                    }
+                ) && layer.config.get(key).is_some()
+            })
+    };
+    let resume_model = (overrides.model.is_some() || has_resume_override("model"))
+        .then(|| config.model.clone())
+        .flatten();
+    let resume_provider = (overrides.model_provider.is_some()
+        || has_resume_override("model_provider"))
+    .then(|| config.model_provider_id.clone());
     let mut request_ids = RequestIdSequencer::new();
     let client = AppServerClient::InProcess(
         InProcessAppServerClient::start(in_process_start_args)
@@ -1097,7 +1119,11 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                 &client,
                 ClientRequest::ThreadResume {
                     request_id: request_ids.next(),
-                    params: thread_resume_params_from_config(&config, thread_id, &overrides)?,
+                    params: ThreadResumeParams {
+                        model: resume_model,
+                        model_provider: resume_provider,
+                        ..thread_resume_params_from_config(&config, thread_id, &overrides)?
+                    },
                 },
                 "thread/resume",
             )
@@ -1738,8 +1764,6 @@ fn thread_resume_params_from_config(
     } = inherited_thread_permissions(config, overrides)?;
     Ok(ThreadResumeParams {
         thread_id,
-        model: config.model.clone(),
-        model_provider: Some(config.model_provider_id.clone()),
         cwd: (overrides.cwd.is_some() || runtime_workspace_roots.is_some())
             .then(|| config.cwd.to_string_lossy().into_owned()),
         runtime_workspace_roots,

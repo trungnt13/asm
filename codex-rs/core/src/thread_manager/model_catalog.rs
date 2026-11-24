@@ -9,6 +9,7 @@ use codex_login::AuthManager;
 use codex_model_provider::ModelCatalogFactory;
 use codex_model_provider::ProviderAuthContext;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_models_manager::ExternalModels;
 use codex_models_manager::manager::ModelCatalogSettings;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_protocol::openai_models::ModelsResponse;
@@ -52,6 +53,7 @@ pub fn build_startup_models(
         factory,
         config.features.enabled(Feature::ApiKeyModelDiscovery),
         config.load_external_models_json,
+        Arc::clone(&config.external_models),
         ProviderAuthContext {
             credentials: Arc::clone(&credentials),
             runtime_auth: runtime.map(|runtime| (runtime, config.runtime_auth_mode)),
@@ -73,6 +75,7 @@ pub(super) struct ThreadModelCatalog {
     api_key_model_discovery_default: bool,
     runtime_mode: Option<RuntimeAuthMode>,
     load_external_models_json: bool,
+    external_models: Arc<ExternalModels>,
 }
 
 pub fn build_models_manager(
@@ -92,6 +95,7 @@ pub fn build_models_manager(
         config.features.enabled(Feature::ApiKeyModelDiscovery),
     );
     manager.set_load_external_models_json(config.load_external_models_json);
+    manager.set_external_models(Arc::clone(&config.external_models));
     manager
 }
 
@@ -102,6 +106,7 @@ impl ThreadModelCatalog {
         factory: Arc<dyn ModelCatalogFactory>,
         api_key_model_discovery_default: bool,
         load_external_models_json: bool,
+        external_models: Arc<ExternalModels>,
         auth: ProviderAuthContext,
     ) -> Self {
         let runtime_mode = auth.runtime_auth.as_ref().map(|(_, mode)| *mode);
@@ -111,6 +116,7 @@ impl ThreadModelCatalog {
             api_key_model_discovery_default,
         );
         manager.set_load_external_models_json(load_external_models_json);
+        manager.set_external_models(Arc::clone(&external_models));
         Self {
             manager,
             provider,
@@ -119,6 +125,7 @@ impl ThreadModelCatalog {
             api_key_model_discovery_default,
             runtime_mode,
             load_external_models_json,
+            external_models,
         }
     }
 
@@ -153,6 +160,7 @@ impl ThreadModelCatalog {
             && self.catalog.as_ref() == models
             && self.api_key_model_discovery_default == api_key_model_discovery_default
             && self.load_external_models_json == config.load_external_models_json
+            && self.external_models == config.external_models
         {
             return Arc::clone(&self.manager);
         }
@@ -162,6 +170,7 @@ impl ThreadModelCatalog {
             api_key_model_discovery_default,
         );
         manager.set_load_external_models_json(config.load_external_models_json);
+        manager.set_external_models(Arc::clone(&config.external_models));
         manager
     }
 

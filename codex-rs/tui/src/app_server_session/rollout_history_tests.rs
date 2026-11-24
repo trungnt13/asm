@@ -1,4 +1,5 @@
 use super::super::ForkGoalContinuation;
+use super::super::ForkModelProvider;
 use super::super::ForkPermissionMode;
 use super::super::ResumeModelSettings;
 use super::super::ThreadParamsMode;
@@ -152,6 +153,7 @@ async fn resume_with_saved_server_profile() -> Result<()> {
             &local_settings,
             client_config.clone(),
             /*workspace_roots*/ None,
+            ForkModelProvider::Retain,
             thread_id,
             /*last_turn_id*/ None,
             /*before_turn_id*/ None,

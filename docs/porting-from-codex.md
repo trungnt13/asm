@@ -264,8 +264,9 @@ Delete all thread-private runtime files (linkage, Cursor configuration, diagnost
 
 ### Catalog-bound model providers
 
-- With `load_external_models_json = true`, merge bundled entries into custom `model_catalog_json` in memory. Keep all metadata overrides for exact custom IDs. With `false`, keep only the custom catalog. Routing remains bundled and exact-match-only.
-- Bundled `external_models.json` entries can select an existing named `model_provider`. Accept canonical slugs and optional provider/runtime-qualified aliases. Normalize before validation and requests. Persist canonical model/provider identity so alias changes cannot reroute resumes. Keep existing full IDs and managed provider requirements. Do not infer routes from slashes or remote catalog metadata. Keep endpoints/credentials in user provider config.
+- With `load_external_models_json = true`, merge bundled entries into custom `model_catalog_json` in memory. Exact IDs in the custom JSON retain their metadata overrides over the bundle. With `false`, omit unmodified bundled entries from discovery, not routing.
+- The bundled catalog and user `[external_models."<canonical model ID>"]` tables can select an existing named `model_provider`. A user table adds an entry or overrides the supplied fields of the exact bundled ID; omitted fields inherit. Explicit TOML entries take precedence over the custom JSON and remain discoverable when bundled discovery is off. Preserve provider-owned catalog admission restrictions. Allow definitions in user config and user profiles only, not project config or session overrides.
+- Accept canonical IDs and optional exact aliases. Reject aliases that collide with another ID or alias; keep native runtime selection separate. Normalize aliases before validation and requests. Persist the canonical model and provider. If an override rebinds a saved model to a different provider, do not send the existing history there. Preserve managed provider requirements. Do not infer routing from slashes or remote catalog metadata. Keep endpoints and credentials in user provider configuration.
 - DeepSeek V4.1 Flash 1017 selects `fireworks`, alias `fireworks/deepseek-v4.1-flash`, without a profile or custom role. Default to 300,000 context tokens; allow explicit overrides through 1,000,000. Use Code Mode only. Encode `exec` as a function only on the Fireworks Responses wire; keep canonical calls and saved history as Code Mode. Default to Standard. Route `ultrafast` through the Ultra-fast router without changing the saved model.
 - GLM 5.3 selects `fireworks`, alias `fireworks/glm-5.3`. Use Code Mode only on Responses, with Standard as the only catalog tier. Apply ordinary resume admission, with no exception for chats saved under another provider.
 - Gemini 4 Neon selects the configured `gemini` provider. Under `[model_providers.gemini]`, use `wire_api = "gemini_interactions"`, `base_url = "https://generativelanguage.googleapis.com/v1beta"`, and `env_http_headers = { "x-goog-api-key" = "GEMINI_API_KEY" }`. Default to direct tools. Honor `code_mode` and `code_mode_only` for ASM-owned execution. Keep the wire text-only. Always send `store: false`: it disables stored Interactions, not provider abuse-monitoring logs. Replay opaque thought steps only on Gemini. Do not send OpenAI credentials or Responses Lite fields.
@@ -278,6 +279,18 @@ Delete all thread-private runtime files (linkage, Cursor configuration, diagnost
 - Keep upstream catalog/API model types. Hidden bundled entries remain explicitly selectable.
 - Select portable history from retained, attributable user and assistant messages after compaction and rollback. Keep supported inline images, order, and role attribution. Reject unsupported authored attachments. Exclude private runtime state, encrypted content, provider reasoning, tool calls and raw results, and source instructions. Never execute inherited tools. Use destination instructions and permissions.
 - `[handoff].max_history_bytes` defaults to 64000 serialized bytes for portable context. Try the latest user message, latest assistant message, then earliest retained user message. Try the rest newest first. Skip whole messages that do not fit. Send the selection chronologically. If none fit, continue without imported history. Omitted messages stay at the source. Do not apply the budget to native forks or the destination's new request. No provider/operation lists or per-transfer approval prompts.
+
+For example, with a provider named `lab` already configured:
+
+```toml
+[external_models."lab-model-v2"]
+model_provider = "lab"
+alias = "lab/fast"
+display_name = "Lab Fast"
+context_window = 32768
+```
+
+Select it with `codex -m lab/fast`. To override a bundled entry, use its canonical ID as the table key, not its alias. Restart the server and TUI after changing model entries on a remote backend.
 
 Any provider can select independent OpenAI authentication for standalone search. For example, set `standalone_web_search_provider = "openai"` in `[model_providers.fireworks]`. Resolve the override from the selected model's current provider, including catalog bindings and model switches. A match enables the existing standalone path without a global flag. Disabled search, provider capabilities, and MCP/backend exclusions still apply. Reuse the upstream extension, native defaults, and existing tool-output/history path. Do not silently fall back between services. Send the usual recent context to the selected OpenAI backend. A matching non-OpenAI provider exposes the ordinary `web_run` executor: namespaced Fireworks calls did not produce dispatchable function calls in the live check. Native OpenAI keeps `web.run`.
 
@@ -612,9 +625,9 @@ Top-level `include_model_catalog_in_spawn_agent_list` defaults to `true`.
 - False omits generated model/effort/tier lists and references from V2 spawn descriptions and `<model_catalog>`. Preserve custom descriptions, arguments, loading, validation, and history. Invalidate retained lists normally when they no longer apply.
 - Keep inclusion independent of `model_catalog_in_context` placement and `expose_spawn_agent_model_overrides` arguments.
 
-`load_external_models_json` controls compact exact-alias discovery independently of full-catalog visibility or placement. True (default) includes it in V2 spawn descriptions; false omits it.
+`load_external_models_json` controls compact discovery of bundled aliases independently of full-catalog visibility and placement. User-configured aliases remain eligible when bundled discovery is off.
 
-- List only picker-visible, backend-compatible entries with bundled aliases: native runtimes or configured API providers allowed by managed requirements. Discovery proves no runtime, credentials, or service availability.
+- List only picker-visible, backend-compatible entries with exact aliases: native runtimes or configured API providers allowed by managed requirements. Discovery proves no runtime, credentials, or service availability.
 - Hide the list if V2 model override arguments are disabled.
 - Do not automatically change personal configuration. Label truncated model previews as partial in unknown-model errors.
 

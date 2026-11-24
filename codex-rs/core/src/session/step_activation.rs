@@ -509,18 +509,18 @@ impl Session {
         update: &StepSettingsUpdate,
         environments: &[TurnEnvironmentSelection],
     ) -> Result<ResolvedStepSettings, String> {
-        let (requirements, overrides, trusted_guardian_reviewer) = {
+        let (config, overrides, trusted_guardian_reviewer) = {
             let state = self.state.lock().await;
             let configuration = &state.session_configuration;
-            let stack = &configuration.original_config_do_not_use.config_layer_stack;
             (
-                stack.requirements().clone(),
+                Arc::clone(&configuration.original_config_do_not_use),
                 configuration.model_info_overrides.clone(),
                 configuration.trusted_guardian_reviewer,
             )
         };
         let constraints = StepSettingsConstraints {
-            requirements: &requirements,
+            requirements: config.config_layer_stack.requirements(),
+            external_models: &config.external_models,
             guardian_approval_enabled: self.features.enabled(Feature::GuardianApproval),
             trusted_guardian_reviewer,
             has_full_disk_write_access: any_environment_has_full_disk_write(
@@ -572,6 +572,7 @@ impl Session {
             .requirements();
         settings.revalidate(&StepSettingsConstraints {
             requirements,
+            external_models: &configuration.original_config_do_not_use.external_models,
             guardian_approval_enabled: self.features.enabled(Feature::GuardianApproval),
             trusted_guardian_reviewer: configuration.trusted_guardian_reviewer,
             has_full_disk_write_access: any_environment_has_full_disk_write(

@@ -261,11 +261,16 @@ impl SideChatStorage {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ForkModelProvider {
+    Retain,
+    Resolve { invocation_provider: Option<String> },
+}
+
 enum ForkConfigSource<'a> {
     Local,
     Session {
         workspace_roots: Option<&'a [PathUri]>,
+        model_provider: ForkModelProvider,
     },
 }
 
@@ -1394,6 +1399,7 @@ impl AppServerSession {
         local_settings: &LocalSettings,
         config: Config,
         workspace_roots: Option<&[PathUri]>,
+        model_provider: ForkModelProvider,
         thread_id: ThreadId,
         last_turn_id: Option<String>,
         before_turn_id: Option<String>,
@@ -1410,7 +1416,10 @@ impl AppServerSession {
             ForkPresentation::Regular,
             selected_profile,
             ForkPermissionMode::InheritSaved,
-            ForkConfigSource::Session { workspace_roots },
+            ForkConfigSource::Session {
+                workspace_roots,
+                model_provider,
+            },
         )
         .await
     }
@@ -1438,6 +1447,7 @@ impl AppServerSession {
             permission_mode,
             ForkConfigSource::Session {
                 workspace_roots: None,
+                model_provider: ForkModelProvider::Retain,
             },
         )
         .await
@@ -1583,7 +1593,10 @@ impl AppServerSession {
             ForkPresentation::SideConversation(storage),
             selected_profile,
             ForkPermissionMode::InheritSaved,
-            ForkConfigSource::Session { workspace_roots },
+            ForkConfigSource::Session {
+                workspace_roots,
+                model_provider: ForkModelProvider::Retain,
+            },
         )
         .await
     }
@@ -1648,14 +1661,38 @@ impl AppServerSession {
             params.thread_source =
                 Some(ThreadSource::Feature(ATTACHED_SIDE_CHAT_SOURCE.to_string()));
         }
-        params.model_provider = match config_source {
+        params.model_provider = match &config_source {
             ForkConfigSource::Local => self
                 .model_provider_override
                 .clone()
                 .or(params.model_provider),
-            ForkConfigSource::Session { .. } => Some(config.model_provider_id.clone()),
+            ForkConfigSource::Session {
+                model_provider:
+                    ForkModelProvider::Resolve {
+                        invocation_provider,
+                    },
+                ..
+            } => {
+                let model_is_bound = config.model.as_deref().is_some_and(|model| {
+                    let routes = &config.external_models;
+                    let model = routes.canonical_model(model).unwrap_or(model);
+                    routes.provider_for_model(model).is_some()
+                });
+                if model_is_bound {
+                    None
+                } else {
+                    invocation_provider.clone()
+                }
+            }
+            ForkConfigSource::Session {
+                model_provider: ForkModelProvider::Retain,
+                ..
+            } => Some(config.model_provider_id.clone()),
         };
-        if let ForkConfigSource::Session { workspace_roots } = config_source {
+        if let ForkConfigSource::Session {
+            workspace_roots, ..
+        } = config_source
+        {
             // Omitting roots on fork lets the server recompute them from its current defaults.
             params.runtime_workspace_roots = Some(match workspace_roots {
                 Some(roots) => roots

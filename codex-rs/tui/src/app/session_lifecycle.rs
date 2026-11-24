@@ -1610,7 +1610,9 @@ impl App {
             if let Some(service_tier) = service_tier {
                 config.service_tier = Some(service_tier);
             }
-            config.apply_external_model_provider()?;
+            if app_server.thread_params_mode() == crate::ThreadParamsMode::Embedded {
+                config.apply_external_model_provider()?;
+            }
         }
         let started = crate::boxed_future!(app_server.start_thread_with_session_start_source(
             &self.local_settings,

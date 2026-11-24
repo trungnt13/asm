@@ -3,6 +3,7 @@
 use super::session_lifecycle::ThreadAttachPresentation;
 use super::*;
 use crate::app_server_session::ForkGoalContinuation;
+use crate::app_server_session::ForkModelProvider;
 use crate::app_server_session::HISTORY_ITEM_PAGE_LIMIT;
 use crate::app_server_session::INITIAL_HISTORY_TURN_LIMIT;
 use crate::app_server_session::turn_permissions_overrides;
@@ -203,6 +204,7 @@ impl App {
                 &self.local_settings,
                 retry_config,
                 Some(self.chat_widget.session_workspace_roots()),
+                ForkModelProvider::Retain,
                 thread_id,
                 /*last_turn_id*/ None,
                 /*before_turn_id*/ Some(turn_id),

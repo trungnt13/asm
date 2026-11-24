@@ -421,6 +421,16 @@ impl LocalAgentControl {
         }
         config.service_tier = independent_service_tier.unwrap_or_else(|| self.root_service_tier());
         if let Some(model) = stored_model {
+            if config.external_models.canonical_model(&model).is_some()
+                || config
+                    .external_models
+                    .provider_for_model(&model)
+                    .is_some_and(|provider| provider != stored_model_provider)
+            {
+                return Err(CodexErr::InvalidRequest(format!(
+                    "Cannot resume child {thread_id}: saved model `{model}` no longer matches provider `{stored_model_provider}`"
+                )));
+            }
             config.model = Some(model);
         }
         if config.model_provider_id != stored_model_provider {

@@ -129,7 +129,9 @@ impl App {
             }
         };
         let mut overrides = self.harness_overrides.clone();
-        if let Some(model) = selected_model {
+        if let Some(model) = selected_model
+            && app_server.thread_params_mode() == crate::ThreadParamsMode::Embedded
+        {
             overrides.model = Some(model.to_owned());
         }
         let refresh = self.rebuild_config_for_cwd_with_overrides(
@@ -206,6 +208,10 @@ impl App {
                 &self.cli_kv_overrides,
                 &self.harness_overrides,
             );
+        }
+        if app_server.thread_params_mode() == crate::ThreadParamsMode::Remote {
+            config.external_models = app_server
+                .external_model_routes(defaults.as_ref().map(|response| &response.config))?;
         }
         apply_managed_new_thread_defaults(
             &mut config,

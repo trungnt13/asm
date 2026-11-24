@@ -9,6 +9,7 @@ use codex_config::ThreadConfigLoader;
 use codex_config::apply_default_gcp_auth;
 use codex_config::loader::load_config_layers_state;
 use codex_config::loader::load_managed_requirements_state;
+use codex_core::CodexThread;
 use codex_core::GuardianPolicyLoader;
 use codex_core::config::Config;
 use codex_core::config::ConfigBuilder;
@@ -24,6 +25,7 @@ use codex_model_provider_info::GCP_PROVIDER_ID;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_model_provider_info::built_in_model_providers;
 use codex_model_provider_info::merge_configured_model_providers;
+use codex_protocol::openai_models::is_native_runtime_model;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_json_to_toml::json_to_toml;
 use futures::future::BoxFuture;
@@ -45,7 +47,7 @@ pub(crate) mod application_network;
 #[path = "model_provider_admission.rs"]
 mod model_provider_admission;
 
-use model_provider_admission::model_selects_provider;
+pub(crate) use model_provider_admission::validate_saved_model_provider;
 
 /// Shared app-server entry point for loading effective Codex configuration.
 #[derive(Clone)]
@@ -483,27 +485,30 @@ impl ConfigManager {
     /// Keeps model-selected routes independent of the configured default provider.
     pub(crate) async fn check_thread_model_provider_for_input(
         &self,
-        current: &Config,
+        thread: &CodexThread,
     ) -> std::io::Result<()> {
-        self.check_thread_model_provider(current).await?;
-        if !model_selects_provider(current.model.as_deref(), &current.model_provider_id) {
+        let current = thread.config().await;
+        self.check_thread_model_provider(&current).await?;
+        let settings = thread.thread_settings_snapshot().await;
+        let model = &settings.model;
+        if !is_native_runtime_model(model)
+            && current.external_models.provider_for_model(model).is_none()
+        {
             return Ok(());
         }
+        let provider = &settings.model_provider_id;
         let configured = self
             .load_latest_config(Some(current.cwd.to_path_buf()))
             .await?;
-        if !configured
-            .model_providers
-            .contains_key(&current.model_provider_id)
-        {
+        if !configured.model_providers.contains_key(provider) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 ModelProviderError::ModelProviderNotConfigured {
-                    model_provider: current.model_provider_id.clone(),
+                    model_provider: provider.clone(),
                 },
             ));
         }
-        Ok(())
+        validate_saved_model_provider(&configured.external_models, model, provider)
     }
 
     /// Installs local policy before cloud access; failed policy loads block traffic while
@@ -594,6 +599,7 @@ impl ConfigManager {
     pub(crate) async fn load_for_resume(
         &self,
         saved_provider: Option<&str>,
+        saved_model: Option<&str>,
         request_overrides: Option<HashMap<String, serde_json::Value>>,
         mut typesafe_overrides: ConfigOverrides,
         cwd: Option<PathBuf>,
@@ -660,16 +666,19 @@ impl ConfigManager {
         )
         .await
         .and_then(|config| {
-            if let Some(saved) = saved_provider
-                && saved != config.model_provider_id
-            {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!(
-                        "Cannot change this thread's model provider from `{saved}` to `{}` on resume.",
-                        config.model_provider_id
-                    ),
-                ));
+            if let Some(saved) = saved_provider {
+                if let Some(model) = saved_model {
+                    validate_saved_model_provider(&config.external_models, model, saved)?;
+                }
+                if saved != config.model_provider_id {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!(
+                            "Cannot change this thread's model provider from `{saved}` to `{}` on resume.",
+                            config.model_provider_id
+                        ),
+                    ));
+                }
             }
             config.validate_windows_mxc_requirement()?;
             Ok(config)

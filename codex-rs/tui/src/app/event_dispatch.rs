@@ -13,6 +13,7 @@ use crate::app_event::CapturedSideStream;
 use crate::app_event::RecapTrigger;
 use crate::app_event::ThreadTitleDestination;
 use crate::app_server_session::ForkGoalContinuation;
+use crate::app_server_session::ForkModelProvider;
 use crate::app_server_session::ThreadSettingsOwner;
 use crate::app_server_session::UnsupportedLegacyPermissionProfile;
 use crate::app_server_session::turn_permissions_overrides;
@@ -856,11 +857,21 @@ impl App {
                     fork_config.model = Some(self.chat_widget.current_model().to_string());
                     fork_config.model_reasoning_effort =
                         self.chat_widget.current_reasoning_effort();
+                    let mut fork_model_provider = ForkModelProvider::Retain;
                     if let Some((model, effort, service_tier)) = model_selection {
                         match crate::boxed_future!(self.load_new_session_config(app_server, Some(&model))).await {
                             Ok((config, _)) => {
+                                if app_server.thread_params_mode() == crate::ThreadParamsMode::Remote {
+                                    fork_model_provider = ForkModelProvider::Resolve {
+                                        invocation_provider: app_server.model_switch_invocation_provider(
+                                            &config,
+                                            &self.cli_kv_overrides,
+                                        ),
+                                    };
+                                }
                                 fork_config.model_provider_id = config.model_provider_id;
                                 fork_config.model_providers = config.model_providers;
+                                fork_config.external_models = config.external_models;
                                 fork_config.service_tier = service_tier.or(config.service_tier);
                             }
                             Err(err) => {
@@ -873,7 +884,9 @@ impl App {
                         fork_config.model = Some(model);
                         fork_config.model_reasoning_effort = effort;
                         fork_config.ephemeral &= !self.side_threads.contains_key(&thread_id);
-                        if let Err(err) = fork_config.apply_external_model_provider() {
+                        if app_server.thread_params_mode() == crate::ThreadParamsMode::Embedded
+                            && let Err(err) = fork_config.apply_external_model_provider()
+                        {
                             self.chat_widget.fork_in_progress = false;
                             self.chat_widget.add_error_message(err.to_string());
                             self.chat_widget.maybe_send_next_queued_input();
@@ -891,6 +904,7 @@ impl App {
                         fork_config,
                         (switching_model || app_server.uses_remote_workspace())
                             .then(|| self.chat_widget.session_workspace_roots()),
+                        fork_model_provider,
                         thread_id,
                         /*last_turn_id*/ None,
                         /*before_turn_id*/ None,

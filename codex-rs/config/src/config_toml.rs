@@ -591,6 +591,12 @@ pub struct ConfigToml {
     /// Load bundled external models into the default catalog. Defaults to true.
     pub load_external_models_json: Option<bool>,
 
+    /// Add or override external models by canonical model ID. Accepted only in
+    /// user configuration. Entries use the bundled catalog's metadata fields,
+    /// plus an optional alias and a named model provider.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub external_models: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
+
     /// Deprecated: `friendly` and `pragmatic` no longer select a style.
     pub personality: Option<Personality>,
 

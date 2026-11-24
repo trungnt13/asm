@@ -1,7 +1,7 @@
 use codex_api::ApiError;
 use codex_api::ResponseEvent;
 use codex_code_mode::PUBLIC_TOOL_NAME;
-use codex_model_provider_info::WireApi;
+use codex_models_manager::ExternalModels;
 use codex_protocol::DEFAULT_FUNCTION_NAMESPACE;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
@@ -24,18 +24,19 @@ const DEEPSEEK_FLASH: &str = "accounts/fireworks/models/deepseek-v4p1-flash-1017
 const DEEPSEEK_FLASH_ULTRAFAST: &str =
     "accounts/fireworks/routers/deepseek-v4p1-flash-1017-ultrafast";
 
-pub(super) fn route(model: &str, service_tier: Option<String>) -> (String, Option<String>) {
-    if model == DEEPSEEK_FLASH && service_tier.as_deref() == Some("ultrafast") {
+pub(super) fn route(
+    external_models: &ExternalModels,
+    model: &str,
+    service_tier: Option<String>,
+) -> (String, Option<String>) {
+    if model == DEEPSEEK_FLASH
+        && service_tier.as_deref() == Some("ultrafast")
+        && external_models.provider_for_model(model) == Some("fireworks")
+    {
         (DEEPSEEK_FLASH_ULTRAFAST.to_string(), None)
     } else {
         (model.to_string(), service_tier)
     }
-}
-
-pub(super) fn uses_function_exec(model: &ModelInfo, wire_api: WireApi) -> bool {
-    wire_api == WireApi::Responses
-        && !model.use_responses_lite
-        && codex_models_manager::provider_for_model(&model.slug) == Some("fireworks")
 }
 
 pub(super) fn uses_ultrafast_router(model: &ModelInfo, wire_model: &str) -> bool {

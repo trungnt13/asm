@@ -54,9 +54,22 @@ impl AstraModelPickerAction {
 }
 
 impl ChatWidget {
+    pub(super) fn picker_external_models(&self) -> &codex_models_manager::ExternalModels {
+        match self.thread_params_mode {
+            crate::ThreadParamsMode::Embedded => &self.config.external_models,
+            crate::ThreadParamsMode::Remote | crate::ThreadParamsMode::Cloud => {
+                &self.model_catalog.external_models
+            }
+        }
+    }
+
     pub(super) fn model_selection_needs_new_session(&self, model: &str) -> bool {
-        (codex_models_manager::provider_for_model(self.current_model())
-            != codex_models_manager::provider_for_model(model))
+        let external_models = self.picker_external_models();
+        let provider = self.model_catalog.provider();
+        (external_models
+            .provider_for_model(self.current_model())
+            .or(provider)
+            != external_models.provider_for_model(model).or(provider))
             || (codex_protocol::openai_models::is_native_runtime_model(self.current_model())
                 || codex_protocol::openai_models::is_native_runtime_model(model))
                 && self.current_model() != model

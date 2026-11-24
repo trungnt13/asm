@@ -149,8 +149,7 @@ impl ChatWidget {
         let mut items: Vec<SelectionItem> = auto_presets
             .into_iter()
             .map(|preset| {
-                let description =
-                    (!preset.description.is_empty()).then_some(preset.description.clone());
+                let description = self.model_picker_description(&preset);
                 let model = preset.model.clone();
                 let requires_advanced_selection =
                     Self::is_advanced_reasoning_effort(&preset.default_reasoning_effort)
@@ -283,11 +282,7 @@ impl ChatWidget {
         let mut items: Vec<SelectionItem> = Vec::new();
         let model_ids = presets.iter().map(|preset| preset.model.clone()).collect();
         for preset in presets.into_iter() {
-            let description = codex_models_manager::model_alias(&preset.model)
-                .map(|alias| format!("{alias} — {}", preset.description))
-                .or_else(|| {
-                    (!preset.description.is_empty()).then_some(preset.description.to_string())
-                });
+            let description = self.model_picker_description(&preset);
             let is_current = preset.model.as_str() == self.current_model();
             let direct_effort = match preset.supported_reasoning_efforts.as_slice() {
                 [] => Some(preset.default_reasoning_effort.clone()),
@@ -328,6 +323,13 @@ impl ChatWidget {
                 ..SelectionViewParams::picker()
             },
         );
+    }
+
+    fn model_picker_description(&self, preset: &ModelPreset) -> Option<String> {
+        self.picker_external_models()
+            .model_alias(&preset.model)
+            .map(|alias| format!("{alias} — {}", preset.description))
+            .or_else(|| (!preset.description.is_empty()).then(|| preset.description.clone()))
     }
 
     fn model_selection_actions(

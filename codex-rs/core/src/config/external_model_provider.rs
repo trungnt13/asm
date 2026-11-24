@@ -4,12 +4,22 @@ use codex_model_provider_info::WireApi;
 use std::io;
 
 impl Config {
+    /// An implicit model selection must stay on the provider already selected for the thread.
+    pub fn allows_implicit_model(&self, model: &str) -> bool {
+        let canonical = self.external_models.canonical_model(model).unwrap_or(model);
+        !crate::external_runtime::is_native_model(canonical)
+            && self
+                .external_models
+                .provider_for_model(canonical)
+                .is_none_or(|provider| provider == self.model_provider_id)
+    }
+
     pub(crate) fn validate_external_subagent_model(&self) -> io::Result<()> {
         let provider = self.model_provider_id.as_str();
-        if codex_models_manager::provider_has_model_bindings(provider)
+        if self.external_models.provider_has_model_bindings(provider)
             && !self.model.as_deref().is_some_and(|model| {
                 crate::external_runtime::is_native_model(model)
-                    || codex_models_manager::provider_for_model(model) == Some(provider)
+                    || self.external_models.provider_for_model(model) == Some(provider)
             })
         {
             let model = self.model.as_deref().unwrap_or("<default>");
@@ -24,14 +34,14 @@ impl Config {
         if let Some(model) = self
             .model
             .as_deref()
-            .and_then(codex_models_manager::canonical_model)
+            .and_then(|model| self.external_models.canonical_model(model))
         {
             self.model = Some(model.to_owned());
         }
         let Some(provider_id) = self
             .model
             .as_deref()
-            .and_then(codex_models_manager::provider_for_model)
+            .and_then(|model| self.external_models.provider_for_model(model))
         else {
             return Ok(());
         };

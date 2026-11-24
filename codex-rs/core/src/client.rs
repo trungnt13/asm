@@ -88,6 +88,7 @@ use codex_login::default_client::ClientRedirectPolicy;
 use codex_login::default_client::add_originator_header;
 use codex_login::default_client::create_client_pool_for_routes;
 use codex_login::default_client::default_headers;
+use codex_models_manager::ExternalModels;
 use codex_otel::SessionTelemetry;
 use codex_otel::WEBSOCKET_CONTINUATION_COUNT_METRIC;
 use codex_otel::current_span_w3c_trace_context;
@@ -437,6 +438,7 @@ pub struct ModelClient {
     quote_guardian_replies: bool,
     usage_attribution_policy: UsageAttributionPolicy,
     state: Arc<ModelClientState>,
+    external_models: Arc<ExternalModels>,
     agent_identity_policy: AgentIdentityAuthPolicy,
     prompt_cache_key_policy: PromptCacheKey,
     session_id_override: Option<String>,
@@ -857,6 +859,7 @@ impl ModelClient {
                 cached_api_transport: StdMutex::new(None),
                 last_inference_tools: StdMutex::new(None),
             }),
+            external_models: Arc::default(),
             agent_identity_policy,
             prompt_cache_key_policy: PromptCacheKey::default(),
             session_id_override: None,
@@ -900,6 +903,12 @@ impl ModelClient {
             && model_info.supports_reasoning_effort_updates
     }
 
+    fn uses_fireworks_function_exec(&self, model: &ModelInfo) -> bool {
+        self.state.provider.info().wire_api == WireApi::Responses
+            && !model.use_responses_lite
+            && self.external_models.provider_for_model(&model.slug) == Some("fireworks")
+    }
+
     pub(crate) fn with_restored_history(mut self, restored_history: bool) -> Self {
         self.restored_history = restored_history;
         self
@@ -916,6 +925,7 @@ impl ModelClient {
         required_cyber_access_programs: Option<
             Arc<cyber_access_program::RequiredCyberAccessPrograms>,
         >,
+        external_models: Arc<ExternalModels>,
     ) -> Self {
         self.prompt_cache_key_policy = prompt_cache_key;
         self.session_id_override = session_id_override;
@@ -928,6 +938,7 @@ impl ModelClient {
         self.api_key_cyber_access_programs = api_key_cyber_access_programs;
         self.continue_when_model_at_capacity = continue_when_model_at_capacity;
         self.required_cyber_access_programs = required_cyber_access_programs;
+        self.external_models = external_models;
         self
     }
 
@@ -1467,12 +1478,11 @@ impl ModelClient {
             }
             None
         } else {
-            let tools =
-                if fireworks::uses_function_exec(model_info, self.state.provider.info().wire_api) {
-                    fireworks::project_tools(&prompt.tools)?
-                } else {
-                    create_tools_raw_json_for_responses_api(&prompt.tools)?
-                };
+            let tools = if self.uses_fireworks_function_exec(model_info) {
+                fireworks::project_tools(&prompt.tools)?
+            } else {
+                create_tools_raw_json_for_responses_api(&prompt.tools)?
+            };
             Some(tools.into())
         };
         if !prompt.base_instructions.text.is_empty() {
@@ -1552,7 +1562,8 @@ impl ModelClient {
             .filter(|tier| {
                 provider_allows_service_tier(self.state.provider.info(), model_info, tier)
             });
-        let (model, service_tier) = fireworks::route(&model_info.slug, service_tier);
+        let (model, service_tier) =
+            fireworks::route(&self.external_models, &model_info.slug, service_tier);
         // Project only the request copy. Reviewer history keeps native IDs for deduplication.
         if self.quotes_guardian_replies() {
             for item in &mut input {
@@ -2337,7 +2348,7 @@ impl ResponsesHttpExecutor<'_> {
         let mut pending_retry = PendingUnauthorizedRetry::default();
         let wire_api = self.client.state.provider.info().wire_api;
         let responses_api = wire_api == WireApi::Responses;
-        let fireworks_exec = fireworks::uses_function_exec(model_info, wire_api);
+        let fireworks_exec = self.client.uses_fireworks_function_exec(model_info);
         let path = match wire_api {
             WireApi::Responses => codex_api::RESPONSES_PATH,
             WireApi::ChatCompletions => codex_api::CHAT_COMPLETIONS_PATH,
@@ -2613,7 +2624,7 @@ impl ModelClientSession {
     ) -> Result<WebsocketStreamOutcome> {
         let after_prewarm = !warmup && self.websocket_session.last_response_from_untraced_warmup;
         let provider = Arc::clone(&self.client.state.provider);
-        let fireworks_exec = fireworks::uses_function_exec(model_info, provider.info().wire_api);
+        let fireworks_exec = self.client.uses_fireworks_function_exec(model_info);
         let auth_manager = provider.auth_manager();
         let thread_id = self.client.state.thread_id.to_string();
         let kind = if warmup {

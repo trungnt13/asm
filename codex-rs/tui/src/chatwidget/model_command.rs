@@ -134,7 +134,10 @@ fn resolve_model_command(chat: &ChatWidget, args: &str) -> Result<ModelCommand, 
         .model
         .clone()
         .unwrap_or_else(|| chat.selected_model().to_owned());
-    let model_name = codex_models_manager::canonical_model(&model_name).unwrap_or(&model_name);
+    let model_name = chat
+        .picker_external_models()
+        .canonical_model(&model_name)
+        .unwrap_or(&model_name);
     let Some(model) =
         chat.model_catalog.models().iter().find(|model| {
             model.model == model_name && (args.model.is_none() || model.show_in_picker)

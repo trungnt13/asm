@@ -1,6 +1,7 @@
 //! Cache models by provider within one backend and account. Collaboration modes are shared.
 
 use crate::backend_id::BackendId;
+use codex_models_manager::ExternalModels;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::openai_models::ModelPreset;
 use std::collections::HashMap;
@@ -31,6 +32,7 @@ pub(crate) struct ModelCatalog {
     provider: Option<String>,
     default_provider: Option<String>,
     models_by_provider: HashMap<Option<String>, Arc<[ModelPreset]>>,
+    pub(crate) external_models: Arc<ExternalModels>,
     pub(crate) collaboration_modes: Vec<CollaborationModeMask>,
 }
 
@@ -42,6 +44,7 @@ impl ModelCatalog {
             provider,
             backend: None,
             provider_write: ProviderWrite::default(),
+            external_models: Arc::default(),
             collaboration_modes: Vec::new(),
         }
     }
@@ -107,6 +110,11 @@ impl ModelCatalog {
 
     pub(crate) fn with_collaboration_modes(mut self, modes: Vec<CollaborationModeMask>) -> Self {
         self.collaboration_modes = modes;
+        self
+    }
+
+    pub(crate) fn with_external_models(mut self, external_models: Arc<ExternalModels>) -> Self {
+        self.external_models = external_models;
         self
     }
 

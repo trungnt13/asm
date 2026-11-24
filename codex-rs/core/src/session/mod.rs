@@ -633,18 +633,74 @@ pub(crate) fn history_native_runtime(
 pub(crate) fn history_native_model(
     history: &InitialHistory,
 ) -> Option<(&str, codex_protocol::openai_models::NativeRuntime)> {
-    history.get_rollout_items().iter().find_map(|item| {
-        let model = match item {
-            RolloutItem::TurnContext(context) => &context.model,
+    recorded_history_models(history).find_map(|model| {
+        codex_protocol::openai_models::NativeRuntime::for_model(model)
+            .map(|(runtime, _)| (model, runtime))
+    })
+}
+
+pub(crate) fn recorded_history_models(
+    history: &InitialHistory,
+) -> impl DoubleEndedIterator<Item = &str> {
+    history
+        .get_rollout_items()
+        .iter()
+        .filter_map(|item| match item {
+            RolloutItem::TurnContext(context) => Some(context.model.as_str()),
             RolloutItem::EventMsg {
                 event: EventMsg::ThreadSettingsApplied(event),
                 ..
-            } => &event.thread_settings.model,
-            _ => return None,
-        };
-        codex_protocol::openai_models::NativeRuntime::for_model(model)
-            .map(|(runtime, _)| (model.as_str(), runtime))
-    })
+            } => Some(event.thread_settings.model.as_str()),
+            _ => None,
+        })
+}
+
+pub(crate) fn prepare_external_model_route(
+    config: &mut Config,
+    history: &InitialHistory,
+    session_source: &SessionSource,
+) -> CodexResult<()> {
+    config.apply_external_model_provider()?;
+    let external_models = &config.external_models;
+    let mut saved_models = recorded_history_models(history).rev();
+    let latest_model = saved_models.next();
+    // A saved canonical model may now be an alias or carry a different binding.
+    // Check it separately even when an explicit request overrides the model.
+    if latest_model.is_some_and(|model| external_models.canonical_model(model).is_some()) {
+        return Err(CodexErr::InvalidRequest(
+            "A saved model ID is now an alias; start a fresh thread".to_string(),
+        ));
+    }
+    if let Some(saved_provider) = history
+        .get_session_meta()
+        .and_then(|meta| meta.model_provider.as_deref())
+    {
+        let saved_binding =
+            latest_model.and_then(|model| external_models.provider_for_model(model));
+        let requested_binding = config
+            .model
+            .as_deref()
+            .and_then(|model| external_models.provider_for_model(model));
+        let changes_provider = saved_provider != config.model_provider_id;
+        let uses_binding = requested_binding.is_some()
+            || saved_binding.is_some()
+            || (changes_provider
+                && saved_models.any(|model| external_models.provider_for_model(model).is_some()));
+        if saved_binding.is_some_and(|provider| provider != saved_provider)
+            || changes_provider && uses_binding
+        {
+            return Err(CodexErr::InvalidRequest(
+                "Cross-provider history is not supported; start a fresh thread".to_string(),
+            ));
+        }
+    }
+    if matches!(
+        session_source,
+        SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+    ) {
+        config.validate_external_subagent_model()?;
+    }
+    Ok(())
 }
 
 pub(crate) fn assign_missing_item_id(
@@ -712,7 +768,7 @@ impl Session {
                 .list_models(refresh_strategy, config.http_client_factory())
                 .await;
         }
-        let model = if uses_native_runtime {
+        let mut model = if uses_native_runtime {
             config.model.clone().ok_or_else(|| {
                 CodexErr::InvalidRequest("Native runtimes require an explicit model".to_owned())
             })?
@@ -726,6 +782,20 @@ impl Session {
                 )
                 .await
         };
+        if !uses_native_runtime && !config.allows_implicit_model(&model) {
+            let models = models_manager
+                .list_models(RefreshStrategy::InMemory, config.http_client_factory())
+                .await;
+            let mut eligible = models
+                .iter()
+                .filter(|preset| config.allows_implicit_model(&preset.model));
+            model = eligible
+                .clone()
+                .find(|preset| preset.show_in_picker)
+                .or_else(|| eligible.next())
+                .map(|preset| preset.model.clone())
+                .unwrap_or_default();
+        }
         if model.trim().is_empty() {
             return Err(CodexErr::InvalidRequest(
                 "No models are available. Set `model` explicitly or check your model catalog configuration.".to_string(),
@@ -782,14 +852,13 @@ impl Session {
     }
 
     async fn initialize(mut args: SessionSpawnArgs) -> CodexResult<(Arc<Self>, SessionIo)> {
-        let bound_model = args
-            .config
-            .model
-            .as_deref()
-            .and_then(codex_models_manager::provider_for_model)
-            .is_some();
-        if bound_model {
-            args.config.apply_external_model_provider()?;
+        let initial_provider = args.config.model_provider_id.clone();
+        prepare_external_model_route(
+            &mut args.config,
+            &args.conversation_history,
+            &args.session_source,
+        )?;
+        if initial_provider != args.config.model_provider_id {
             args.models_manager = crate::thread_manager::build_models_manager(
                 &args.config,
                 args.auth_manager.clone(),
@@ -800,43 +869,6 @@ impl Session {
                     &args.installation_id,
                 ),
             );
-        }
-        if matches!(
-            args.session_source,
-            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
-        ) {
-            args.config.validate_external_subagent_model()?;
-        }
-        let history = args.conversation_history.get_rollout_items();
-        let saved_bound_model = history.iter().any(|item| {
-            let model = if let RolloutItem::TurnContext(context) = item {
-                Some(context.model.as_str())
-            } else if let RolloutItem::EventMsg {
-                event: EventMsg::ThreadSettingsApplied(event),
-                ..
-            } = item
-            {
-                Some(event.thread_settings.model.as_str())
-            } else {
-                None
-            };
-            model
-                .and_then(codex_models_manager::provider_for_model)
-                .is_some()
-        });
-        if bound_model || saved_bound_model {
-            let saved_provider = history.iter().find_map(|item| {
-                if let RolloutItem::SessionMeta(meta) = item {
-                    meta.meta.model_provider.as_deref()
-                } else {
-                    None
-                }
-            });
-            if saved_provider.is_some_and(|provider| provider != args.config.model_provider_id) {
-                return Err(CodexErr::InvalidRequest(
-                    "Cross-provider history is not supported; start a fresh thread".to_string(),
-                ));
-            }
         }
         args.config
             .config_layer_stack
@@ -2534,7 +2566,13 @@ impl Session {
                     }
                 };
 
-            if let Some(catalog) = self.services.models_manager.refreshed_model_catalog() {
+            // The refreshed snapshot is raw provider metadata; local overrides win.
+            if !updated
+                .original_config_do_not_use
+                .external_models
+                .is_configured(updated.step_settings.collaboration_mode.model())
+                && let Some(catalog) = self.services.models_manager.refreshed_model_catalog()
+            {
                 model_catalog_settings::normalize(&mut updated.step_settings, &catalog);
             }
 

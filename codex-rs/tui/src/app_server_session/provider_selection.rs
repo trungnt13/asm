@@ -57,6 +57,48 @@ impl AppServerSession {
             .or_else(|| explicit_provider(config))
     }
 
+    pub(crate) fn model_switch_invocation_provider(
+        &self,
+        config: &Config,
+        cli_overrides: &[(String, toml::Value)],
+    ) -> Option<String> {
+        let provider = self
+            .model_provider_override
+            .as_deref()
+            .or_else(|| {
+                cli_overrides
+                    .iter()
+                    .rev()
+                    .find(|(key, _)| key == "model_provider")
+                    .and_then(|(_, value)| value.as_str())
+            })
+            .or_else(|| {
+                // Model bindings can add a projected SessionFlags layer, not an invocation choice.
+                config
+                    .config_layer_stack
+                    .layers_high_to_low()
+                    .filter(|layer| layer.name != ConfigLayerSource::SessionFlags)
+                    .find(|layer| layer.config.get("model_provider").is_some())
+                    .filter(|layer| {
+                        matches!(
+                            layer.name,
+                            ConfigLayerSource::User {
+                                profile: Some(_),
+                                ..
+                            }
+                        )
+                    })
+                    .and_then(|layer| layer.config.get("model_provider")?.as_str())
+            })?;
+        Some(
+            config
+                .config_layer_stack
+                .required_model_provider()
+                .unwrap_or(provider)
+                .to_owned(),
+        )
+    }
+
     pub(crate) async fn history_model_provider(
         &self,
         config: &Config,
