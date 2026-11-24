@@ -377,6 +377,11 @@
       "priority": 110,
       "service_tiers": [
         {
+          "id": "priority",
+          "name": "Priority",
+          "description": "Reduces overload rejections at higher token prices. Requires Fireworks Chat Completions."
+        },
+        {
           "id": "ultrafast",
           "name": "Ultra-fast",
           "description": "Uses the Fireworks Ultra-fast preview router at higher token prices."

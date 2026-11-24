@@ -1538,17 +1538,26 @@ impl ModelClient {
             .filter(|tier| {
                 provider_allows_service_tier(self.state.provider.info(), model_info, tier)
             });
-        // Fireworks selects Ultra-fast by model ID instead of a wire service tier.
-        let (model, service_tier) = if service_tier.as_deref() == Some("ultrafast")
-            && model_info.slug == "accounts/fireworks/models/deepseek-v4p1-flash-1017"
+        let is_fireworks_deepseek =
+            model_info.slug == "accounts/fireworks/models/deepseek-v4p1-flash-1017";
+        if is_fireworks_deepseek
+            && service_tier.as_deref() == Some("priority")
+            && self.state.provider.info().wire_api == WireApi::Responses
         {
-            (
-                "accounts/fireworks/routers/deepseek-v4p1-flash-1017-ultrafast".to_string(),
-                None,
-            )
-        } else {
-            (model_info.slug.clone(), service_tier)
-        };
+            return Err(CodexErr::InvalidRequest(
+                "Fireworks Priority requires wire_api = \"chat_completions\". Select Standard or Ultra-fast to use Responses.".into(),
+            ));
+        }
+        // Fireworks selects Ultra-fast by model ID instead of a wire service tier.
+        let (model, service_tier) =
+            if is_fireworks_deepseek && service_tier.as_deref() == Some("ultrafast") {
+                (
+                    "accounts/fireworks/routers/deepseek-v4p1-flash-1017-ultrafast".to_string(),
+                    None,
+                )
+            } else {
+                (model_info.slug.clone(), service_tier)
+            };
         // Project only the request copy. Reviewer history keeps native IDs for deduplication.
         if self.quotes_guardian_replies() {
             for item in &mut input {
