@@ -693,10 +693,12 @@ async fn collab_history_resolves_replayed_and_live_names_in_background() -> Resu
 
     • Waiting for Kepler [explorer]
     ");
-    assert_eq!(
-        text(app.side_companions[&parked_id].cells[0].transcript_hyperlink_lines(/*width*/ 80)),
-        "• Spawned Kepler [explorer]"
-    );
+    let parked_lines = app.side_companions[&parked_id]
+        .cells
+        .iter()
+        .flat_map(|cell| cell.transcript_hyperlink_lines(/*width*/ 80))
+        .collect();
+    assert_eq!(text(parked_lines).trim(), "• Spawned Kepler [explorer]");
     assert_eq!(
         text(tui.pending_history_lines_for_test()),
         format!("• Spawned {receiver_thread_id}\n\n• Waiting for Kepler [explorer]")
