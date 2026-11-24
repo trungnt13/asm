@@ -1533,20 +1533,15 @@ impl ModelClient {
             &prompt.output_schema,
             prompt.output_schema_strict,
         );
-        let provider = self.state.provider.info();
         let service_tier = model_info
             .service_tier_for_request(service_tier)
-            .filter(|tier| provider_allows_service_tier(provider, model_info, tier));
+            .filter(|tier| {
+                provider_allows_service_tier(self.state.provider.info(), model_info, tier)
+            });
         // Fireworks selects Ultra-fast by model ID instead of a wire service tier.
         let (model, service_tier) = if service_tier.as_deref() == Some("ultrafast")
             && model_info.slug == "accounts/fireworks/models/deepseek-v4p1-flash-1017"
-            && provider
-                .base_url
-                .as_deref()
-                .and_then(|base_url| url::Url::parse(base_url).ok())
-                .is_some_and(|url| {
-                    url.scheme() == "https" && url.host_str() == Some("api.fireworks.ai")
-                }) {
+        {
             (
                 "accounts/fireworks/routers/deepseek-v4p1-flash-1017-ultrafast".to_string(),
                 None,

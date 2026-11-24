@@ -407,7 +407,7 @@
       "slug": "accounts/fireworks/models/glm-5p3",
       "alias": "fireworks/glm-5.3",
       "display_name": "GLM 5.3 · Fireworks",
-      "description": "Uses the configured Fireworks provider with direct ASM tools.",
+      "description": "Uses the configured Fireworks provider with ASM tools.",
       "supported_reasoning_levels": [],
       "shell_type": "default",
       "visibility": "list",
