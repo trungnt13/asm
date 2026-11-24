@@ -6,9 +6,11 @@ use crate::endpoint::session::EndpointSession;
 use crate::error::ApiError;
 use crate::provider::Provider;
 use crate::requests::Compression;
+use crate::requests::chat::build_chat_request;
 use crate::requests::headers::build_session_headers;
 use crate::requests::headers::insert_header;
 use crate::requests::headers::subagent_header;
+use crate::sse::chat::spawn_chat_stream;
 use crate::sse::spawn_response_stream;
 use crate::telemetry::SseTelemetry;
 use codex_client::EncodedJsonBody;
@@ -60,6 +62,42 @@ impl<T: HttpTransport> ResponsesClient<T> {
             session: self.session.with_request_telemetry(request),
             sse_telemetry: sse,
         }
+    }
+
+    #[instrument(skip_all)]
+    pub async fn stream_chat_request(
+        &self,
+        request: &ResponsesApiRequest,
+        extra_headers: HeaderMap,
+        on_encoded: impl FnOnce(&bytes::Bytes),
+    ) -> Result<ResponseStream, ApiError> {
+        let (request, tool_names) = build_chat_request(request)?;
+        let body = EncodedJsonBody::encode(&request)
+            .map_err(|err| ApiError::Stream(format!("failed to encode chat request: {err}")))?;
+        on_encoded(body.shared_bytes());
+        let (stream, request_started_at) = self
+            .session
+            .stream_encoded_json_with(
+                Method::POST,
+                crate::CHAT_COMPLETIONS_PATH,
+                extra_headers,
+                Some(body),
+                |req| {
+                    req.headers.insert(
+                        http::header::ACCEPT,
+                        HeaderValue::from_static("text/event-stream"),
+                    );
+                },
+            )
+            .await?;
+
+        Ok(spawn_chat_stream(
+            stream,
+            self.session.provider().stream_idle_timeout,
+            tool_names,
+            self.sse_telemetry.clone(),
+            request_started_at,
+        ))
     }
 
     pub async fn stream_request(

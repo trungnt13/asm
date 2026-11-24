@@ -120,6 +120,13 @@ pub async fn build_prompt_request_from_thread(
     let input = crate::codex_thread::resolve_client_inputs(input).await?;
     let sess = &thread.session;
     let (mut prompt, step_context) = prepare_debug_prompt(sess, input).await?;
+    if step_context.turn.provider.info().wire_api
+        == codex_model_provider_info::WireApi::ChatCompletions
+    {
+        return Err(CodexErr::UnsupportedOperation(
+            "prompt-request does not audit Chat Completions requests".into(),
+        ));
+    }
     prompt.base_instructions = sess.get_prompt_base_instructions().await;
     prompt.output_schema = output_schema;
     let metadata = sess

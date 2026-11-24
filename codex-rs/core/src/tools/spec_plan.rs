@@ -1386,7 +1386,10 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
         registry.add(TestSyncHandler);
     }
 
-    if features.enabled(Feature::ViewImage) {
+    if features.enabled(Feature::ViewImage)
+        && turn_context.provider.info().wire_api
+            != codex_model_provider_info::WireApi::ChatCompletions
+    {
         let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
         registry.add(ViewImageHandler::new(ViewImageToolOptions {
             can_request_original_image_detail: can_request_original_image_detail(

@@ -68,6 +68,10 @@ pub(crate) struct StepContext {
 impl StepContext {
     /// Feature that selects the tool layout of new windows on this route.
     pub(crate) fn incremental_tools_feature(&self) -> Option<Feature> {
+        if self.turn.provider.info().wire_api == codex_model_provider_info::WireApi::ChatCompletions
+        {
+            return None;
+        }
         if self.settings.model_info.use_responses_lite {
             Some(Feature::IncrementalTools)
         } else {

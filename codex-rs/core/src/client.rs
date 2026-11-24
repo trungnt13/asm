@@ -1441,7 +1441,9 @@ impl ModelClient {
         let is_openai = self.state.provider.info().is_openai();
         let request_ids = self.state.context_ids.request_ids(self.state.thread_id);
         let mut prefix = Vec::new();
-        let tools = if model_info.use_responses_lite {
+        let tools = if model_info.use_responses_lite
+            && self.state.provider.info().wire_api == WireApi::Responses
+        {
             if !prompt.tools.is_empty() {
                 let tools = create_tools_json_for_responses_lite(prompt.tools.iter())?;
                 prefix.push(Arc::new(ResponseItem::AdditionalTools {
@@ -1594,7 +1596,8 @@ impl ModelClient {
     ///
     /// WebSocket use is controlled by provider capability and session-scoped fallback state.
     pub fn responses_websocket_enabled(&self) -> bool {
-        if !self.state.provider.info().supports_websockets
+        if self.state.provider.info().wire_api != WireApi::Responses
+            || !self.state.provider.info().supports_websockets
             || self.state.disable_websockets.load(Ordering::Relaxed)
         {
             return false;
@@ -2290,6 +2293,13 @@ impl ResponsesHttpExecutor<'_> {
             .map(AuthManager::unauthorized_recovery);
         let mut provider_auth_recovery_attempted = false;
         let mut pending_retry = PendingUnauthorizedRetry::default();
+        let chat_completions =
+            self.client.state.provider.info().wire_api == WireApi::ChatCompletions;
+        let path = if chat_completions {
+            codex_api::CHAT_COMPLETIONS_PATH
+        } else {
+            codex_api::RESPONSES_PATH
+        };
         loop {
             let client_setup = self
                 .client
@@ -2300,25 +2310,26 @@ impl ResponsesHttpExecutor<'_> {
             }) {
                 return Err(CodexErr::TurnAborted);
             }
-            let include_internal = self
-                .client
-                .state
-                .provider
-                .include_internal_metadata(&client_setup.api_provider);
-            let responses_headers = self
-                .client
-                .responses_headers(client_setup.auth.as_ref(), &model_info.slug);
+            let include_internal = !chat_completions
+                && self
+                    .client
+                    .state
+                    .provider
+                    .include_internal_metadata(&client_setup.api_provider);
+            let responses_headers = if chat_completions {
+                ApiHeaderMap::new()
+            } else {
+                self.client
+                    .responses_headers(client_setup.auth.as_ref(), &model_info.slug)
+            };
             let result_body_destination = sampling_result_destination(
                 &client_setup,
                 include_internal && self.client.captures_result_bodies(),
                 &responses_headers,
             );
-            tracing::Span::current().record("api.path", "/responses");
-            let transport = build_api_transport(
-                &client_setup,
-                "/responses",
-                &self.client.state.cached_api_transport,
-            );
+            tracing::Span::current().record("api.path", path);
+            let transport =
+                build_api_transport(&client_setup, path, &self.client.state.cached_api_transport);
             let request_auth_context = AuthRequestTelemetryContext::new(
                 client_setup.auth.as_ref().map(CodexAuth::auth_mode),
                 client_setup.api_auth.as_ref(),
@@ -2329,18 +2340,21 @@ impl ResponsesHttpExecutor<'_> {
             let (request_telemetry, sse_telemetry) = ModelClientSession::build_streaming_telemetry(
                 session_telemetry,
                 request_auth_context,
-                RequestRouteTelemetry::for_endpoint("/responses"),
+                RequestRouteTelemetry::for_endpoint(path),
                 self.client.state.auth_env_telemetry.clone(),
             );
             let compression = self.responses_request_compression(client_setup.auth.as_ref());
-            let mut options = self
-                .build_responses_options(
+            let mut options = if chat_completions {
+                ApiResponsesOptions::default()
+            } else {
+                self.build_responses_options(
                     turn_state,
                     responses_metadata,
                     compression,
                     model_info.use_responses_lite,
                 )
-                .await;
+                .await
+            };
 
             let mut request = self.client.build_responses_request(
                 prompt,
@@ -2363,12 +2377,14 @@ impl ResponsesHttpExecutor<'_> {
             if is_guardian_reviewer(&responses_headers) {
                 request.service_tier = None;
             }
-            if let Some(header_value) = self.client.build_routing_hint_header(
-                client_setup.auth.as_ref(),
-                &responses_headers,
-                &request.model,
-                request.service_tier.as_deref(),
-            ) {
+            if !chat_completions
+                && let Some(header_value) = self.client.build_routing_hint_header(
+                    client_setup.auth.as_ref(),
+                    &responses_headers,
+                    &request.model,
+                    request.service_tier.as_deref(),
+                )
+            {
                 options
                     .extra_headers
                     .insert(X_CODEX_ROUTING_HINT_HEADER, header_value);
@@ -2430,17 +2446,24 @@ impl ResponsesHttpExecutor<'_> {
                 result_body_destination.as_ref(),
                 &request.input,
             );
-            let stream_result = client
-                .stream_request_with_observer(request, options, |wire| {
-                    inference_trace_attempt.record_started(
-                        wire.clone(),
-                        self.client
-                            .prepared_prompt_for_trace(&inference_trace_attempt, prompt),
-                        history_ids,
-                        || Ok(None),
-                    );
-                })
-                .await;
+            let on_encoded = |wire: &_| {
+                inference_trace_attempt.record_started(
+                    Clone::clone(wire),
+                    self.client
+                        .prepared_prompt_for_trace(&inference_trace_attempt, prompt),
+                    history_ids,
+                    || Ok(None),
+                );
+            };
+            let stream_result = if chat_completions {
+                client
+                    .stream_chat_request(&request, options.extra_headers, on_encoded)
+                    .await
+            } else {
+                client
+                    .stream_request_with_observer(request, options, on_encoded)
+                    .await
+            };
 
             match stream_result {
                 Ok(stream) => {
@@ -3057,46 +3080,41 @@ impl ModelClientSession {
         responses_metadata: &CodexResponsesMetadata,
         inference_trace: &InferenceTraceContext,
     ) -> Result<OpenedModelResponse> {
-        let wire_api = self.client.state.provider.info().wire_api;
-        match wire_api {
-            WireApi::Responses => {
-                if self.client.responses_websocket_enabled() {
-                    let request_trace = current_span_w3c_trace_context();
-                    match self
-                        .stream_responses_websocket(
-                            prompt,
-                            model_info,
-                            session_telemetry,
-                            sampling.clone(),
-                            responses_metadata,
-                            /*warmup*/ false,
-                            request_trace,
-                            inference_trace,
-                        )
-                        .await?
-                    {
-                        WebsocketStreamOutcome::Stream(stream) => return Ok(*stream),
-                        WebsocketStreamOutcome::FallbackToHttp => {
-                            self.try_switch_fallback_transport(session_telemetry, model_info);
-                        }
-                    }
+        if self.client.responses_websocket_enabled() {
+            let request_trace = current_span_w3c_trace_context();
+            match self
+                .stream_responses_websocket(
+                    prompt,
+                    model_info,
+                    session_telemetry,
+                    sampling.clone(),
+                    responses_metadata,
+                    /*warmup*/ false,
+                    request_trace,
+                    inference_trace,
+                )
+                .await?
+            {
+                WebsocketStreamOutcome::Stream(stream) => return Ok(*stream),
+                WebsocketStreamOutcome::FallbackToHttp => {
+                    self.try_switch_fallback_transport(session_telemetry, model_info);
                 }
-
-                ResponsesHttpExecutor::new(&self.client)
-                    .stream_responses_http(
-                        &self.turn_state,
-                        /*expected_auth_owner*/ None,
-                        self.client.event_sender.as_ref(),
-                        prompt,
-                        model_info,
-                        session_telemetry,
-                        sampling,
-                        responses_metadata,
-                        inference_trace,
-                    )
-                    .await
             }
         }
+
+        ResponsesHttpExecutor::new(&self.client)
+            .stream_responses_http(
+                &self.turn_state,
+                /*expected_auth_owner*/ None,
+                self.client.event_sender.as_ref(),
+                prompt,
+                model_info,
+                session_telemetry,
+                sampling,
+                responses_metadata,
+                inference_trace,
+            )
+            .await
     }
 
     /// Permanently disables WebSockets for this Codex session and resets WebSocket state.

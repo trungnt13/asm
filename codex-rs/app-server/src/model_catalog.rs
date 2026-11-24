@@ -9,9 +9,11 @@ use codex_core::ThreadManager;
 use codex_core::config::Config;
 use codex_features::Feature;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
+use codex_model_provider_info::WireApi;
 use codex_models_manager::ModelOrigin;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
+use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelPreset;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use tokio::sync::Mutex;
@@ -168,6 +170,11 @@ impl ModelCatalog {
             .map(|entry| Arc::unwrap_or_clone(entry.model))
             .collect();
         let mut presets = models_manager.build_available_models(models);
+        if config.model_provider.wire_api == WireApi::ChatCompletions {
+            for preset in &mut presets {
+                preset.input_modalities = vec![InputModality::Text];
+            }
+        }
         if let Some(positions) = positions {
             // The manager has filtered the models and marked the default using priority.
             presets
