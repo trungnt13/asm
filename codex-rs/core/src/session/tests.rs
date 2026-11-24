@@ -307,11 +307,7 @@ impl StepContext {
                 .features
                 .enabled(Feature::InstantInterrupt)
                 .then(tokio_util::sync::CancellationToken::new),
-            token_budget: token_budget::resolve_token_budget(
-                turn.configured_token_budget.as_ref(),
-                turn.use_model_token_budget_defaults,
-                settings.model_info.as_ref(),
-            ),
+            token_budget: turn.token_budget_for_model(&settings.model_info),
             settings: Arc::new(settings),
             settings_before_tier_inheritance: None,
             session_telemetry: turn.session_telemetry.clone(),
@@ -5893,8 +5889,10 @@ async fn settings_checkpoint_waits_for_accepted_settings_persistence() {
             CompactedHistoryMetadata {
                 input_goal_ids: Default::default(),
                 message: "summary".to_string(),
-                window_number,
-                window_ids,
+                window: crate::compact::CompactionWindow::Advanced {
+                    number: window_number,
+                    ids: window_ids,
+                },
                 compaction_response_id: None,
                 compaction_model_hash: None,
                 reviewer_compaction_hash: None,
@@ -6146,8 +6144,10 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
                 CompactedHistoryMetadata {
                     input_goal_ids,
                     message: String::new(),
-                    window_number,
-                    window_ids,
+                    window: crate::compact::CompactionWindow::Advanced {
+                        number: window_number,
+                        ids: window_ids,
+                    },
                     compaction_response_id: None,
                     compaction_model_hash: None,
                     reviewer_compaction_hash: None,
@@ -6982,6 +6982,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         session_configuration.cwd().clone(),
         "turn_id".to_string(),
         skills_snapshot,
+        &session.services.thread_extension_data,
     );
     session.mark_mcp_runtime_dirty(McpRefreshReason::ExplicitInvalidation);
     crate::guardian::test_host::install(&session, &turn_context.config);
@@ -9354,6 +9355,7 @@ where
         session_configuration.cwd().clone(),
         "turn_id".to_string(),
         skills_snapshot,
+        &session.services.thread_extension_data,
     ));
     session.mark_mcp_runtime_dirty(McpRefreshReason::ExplicitInvalidation);
     crate::guardian::test_host::install(&session, &turn_context.config);
@@ -11449,6 +11451,7 @@ async fn build_initial_context_uses_retained_step_after_model_change() {
         &step_a,
         &world_a,
         Vec::new(),
+        /*window_ids*/ None,
     )
     .await;
 
@@ -11489,6 +11492,7 @@ async fn build_initial_context_uses_retained_step_after_model_change() {
         &step_a,
         &world_a,
         Vec::new(),
+        /*window_ids*/ None,
     )
     .await;
 

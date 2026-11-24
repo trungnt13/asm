@@ -212,7 +212,7 @@ async fn prepared_prefix_rejection_respects_caller_intent(
                 before.world_state_checkpoint()
             );
         }
-        CompactionFallback::Foreground => {
+        CompactionFallback::Foreground | CompactionFallback::ForegroundOnly => {
             assert!(installed);
             assert_eq!(requests.requests().len(), 1);
             let summaries = after

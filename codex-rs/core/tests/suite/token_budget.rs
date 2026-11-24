@@ -68,6 +68,20 @@ use test_case::test_case;
 const CONFIGURED_CONTEXT_WINDOW: i64 = 128_000;
 const AUTO_COMPACT_FALLBACK_PROMPT: &str = "Save the important state before rollover.";
 
+fn compacted_response() -> String {
+    sse(vec![
+        ev_response_created("compaction"),
+        json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "compaction",
+                "encrypted_content": "TOKEN_BUDGET_COMPACTION_SUMMARY",
+            }
+        }),
+        ev_completed("compaction"),
+    ])
+}
+
 fn model_token_budget_config() -> ModelTokenBudgetConfig {
     ModelTokenBudgetConfig {
         enabled: false,
@@ -476,7 +490,6 @@ async fn token_budget_uses_model_message_defaults() -> Result<()> {
     let mut model_defaults = model_token_budget_config();
     model_defaults.enabled = true;
     model_defaults.use_history_notes_extension = true;
-    let expected_guidance = model_defaults.guidance_message.clone();
     let test = test_codex()
         .with_model_info_override("gpt-5.2", move |model_info| {
             model_info.supports_experimental_context = true;
@@ -503,11 +516,12 @@ async fn token_budget_uses_model_message_defaults() -> Result<()> {
             .starts_with(&format!("{CONTEXT_WINDOW_OPEN_TAG}\nAgent name: /root\n"))
     );
     let developer_texts = request.message_input_texts("developer");
-    assert!(developer_texts.iter().any(|text| {
-        text == &format!(
-            "{CONTEXT_WINDOW_GUIDANCE_OPEN_TAG}\n{expected_guidance}\n{CONTEXT_WINDOW_GUIDANCE_CLOSE_TAG}"
-        )
-    }));
+    assert!(
+        !developer_texts
+            .iter()
+            .any(|text| text.starts_with(CONTEXT_WINDOW_GUIDANCE_OPEN_TAG)),
+        "model defaults must not inject notes instructions without native notes"
+    );
 
     Ok(())
 }
@@ -587,6 +601,7 @@ async fn token_budget_defaults_follow_the_active_model(activation: Feature) -> R
                 .token_budget = Some(defaults);
         })
         .with_model_info_override("gpt-5.4", |model_info| {
+            model_info.supports_experimental_context = true;
             let mut defaults = model_token_budget_config();
             defaults.guidance_message = "Use second-model context-window guidance.".to_string();
             model_info
@@ -607,32 +622,49 @@ async fn token_budget_defaults_follow_the_active_model(activation: Feature) -> R
         .build_with_auto_env(&server)
         .await?;
 
-    test.submit_turn("inspect first-model guidance").await?;
+    let notes_active = activation == Feature::ContextManagement;
+    let thread = if notes_active {
+        let mut options = test.start_thread_options().await;
+        options
+            .thread_extension_init
+            .insert(codex_core::HistoryNotesAvailable);
+        test.thread_manager.start_thread(options).await?.thread
+    } else {
+        Arc::clone(&test.codex)
+    };
+    thread
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "inspect first-model guidance".to_string(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    wait_for_event(&thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
     core_test_support::submit_thread_settings(
-        &test.codex,
+        &thread,
         ThreadSettingsOverrides {
             model: Some("gpt-5.4".to_string()),
             ..Default::default()
         },
     )
     .await?;
-    test.codex
+    thread
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
             text: "inspect second-model guidance".to_string(),
             text_elements: Vec::new(),
         }]))
         .await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
+    wait_for_event(&thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let requests = responses.requests();
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[1].body_json()["model"], "gpt-5.4");
-    assert!(requests[0].body_contains_text("Use first-model context-window guidance."));
-    assert!(
+    assert_eq!(
+        requests[0].body_contains_text("Use first-model context-window guidance."),
+        notes_active,
+    );
+    assert_eq!(
         requests[1].body_contains_text("Use first-model context-window guidance."),
+        notes_active,
         "switching models must preserve the existing conversation history"
     );
     let developer_texts = requests[1].message_input_texts("developer");
@@ -642,6 +674,7 @@ async fn token_budget_defaults_follow_the_active_model(activation: Feature) -> R
             .any(|text| text.contains("<model_switch>")),
         "switching models should preserve the existing model-switch message"
     );
+
     let expected_guidance = format!(
         "{CONTEXT_WINDOW_GUIDANCE_OPEN_TAG}\nThis context-window guidance replaces all previously provided context-window guidance.\n\nUse second-model context-window guidance.\n{CONTEXT_WINDOW_GUIDANCE_CLOSE_TAG}"
     );
@@ -650,8 +683,8 @@ async fn token_budget_defaults_follow_the_active_model(activation: Feature) -> R
             .iter()
             .filter(|text| **text == expected_guidance)
             .count(),
-        1,
-        "the active model's guidance should be emitted once by world state"
+        usize::from(notes_active),
+        "only the active notes workflow should inject the active model's notes guidance"
     );
 
     Ok(())
@@ -940,7 +973,7 @@ async fn token_budget_reminder_emits_after_crossing_compaction_threshold() -> Re
     assert_eq!(requests.len(), 2);
     let initial_context = token_budget_contexts(&requests[0]);
     assert_eq!(initial_context.len(), 1);
-    let reminder = "Your context window is nearly exhausted (only 1000 tokens remaining) and will be automatically reset for you soon. Once reset, message items in current context window will be cleared in the new window, but notes and history items will be persistent across windows.";
+    let reminder = "Your context window is nearly exhausted (only 1000 tokens remaining) and will be compacted soon. Preserve any details needed to continue the task.";
     assert_eq!(
         requests[1]
             .message_input_texts("developer")
@@ -998,7 +1031,7 @@ async fn token_budget_reminder_uses_body_after_prefix_window() -> Result<()> {
 
     let requests = responses.requests();
     assert_eq!(requests.len(), 3);
-    let reminder = "Your context window is nearly exhausted (only 400 tokens remaining) and will be automatically reset for you soon. Once reset, message items in current context window will be cleared in the new window, but notes and history items will be persistent across windows.";
+    let reminder = "Your context window is nearly exhausted (only 400 tokens remaining) and will be compacted soon. Preserve any details needed to continue the task.";
     assert!(
         requests[1]
             .message_input_texts("developer")
@@ -1221,6 +1254,7 @@ async fn token_budget_context_uses_new_window_after_compaction(
                 ev_assistant_message("msg-1", "assistant before compact"),
                 ev_completed("resp-1"),
             ]),
+            compacted_response(),
             sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
         ],
     )
@@ -1262,7 +1296,7 @@ async fn token_budget_context_uses_new_window_after_compaction(
     test.submit_turn("after compact").await?;
 
     let requests = responses.requests();
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 3);
 
     let initial_token_budget = token_budget_contexts(&requests[0]);
     assert_eq!(initial_token_budget.len(), 1);
@@ -1277,7 +1311,7 @@ async fn token_budget_context_uses_new_window_after_compaction(
         initial_turn_metadata["context_window_id"].as_str(),
         Some(initial_window_id.as_str())
     );
-    let post_compaction_token_budget = token_budget_contexts(&requests[1]);
+    let post_compaction_token_budget = token_budget_contexts(&requests[2]);
     assert_eq!(post_compaction_token_budget.len(), 1);
     let (
         post_compaction_first_window_id,
@@ -1285,7 +1319,7 @@ async fn token_budget_context_uses_new_window_after_compaction(
         post_compaction_window_id,
     ) = token_budget_window_ids(&post_compaction_token_budget[0], "/root");
     let post_compaction_turn_metadata: Value = serde_json::from_str(
-        &requests[1]
+        &requests[2]
             .header("x-codex-turn-metadata")
             .expect("post-compaction context window metadata"),
     )?;
@@ -1301,21 +1335,19 @@ async fn token_budget_context_uses_new_window_after_compaction(
         Some(initial_window_id.as_str())
     );
     assert_ne!(post_compaction_window_id, initial_window_id);
+    assert!(requests[1].body_contains_text("before compact"));
+    assert!(requests[2].body_contains_text("TOKEN_BUDGET_COMPACTION_SUMMARY"));
     assert!(
-        !requests[1].body_contains_text("before compact"),
-        "token budget compaction should drop prior user messages"
-    );
-    assert!(
-        !requests[1].body_contains_text("assistant before compact"),
+        !requests[2].body_contains_text("assistant before compact"),
         "token budget compaction should drop prior assistant messages"
     );
     assert_eq!(
-        requests[1].body_contains_text("CLIENT_DEVELOPER_INSTRUCTIONS"),
+        requests[2].body_contains_text("CLIENT_DEVELOPER_INSTRUCTIONS"),
         retain_client_developer_messages,
         "token budget compaction should retain client-authored developer messages when enabled"
     );
     assert!(
-        requests[1].body_contains_text("after compact"),
+        requests[2].body_contains_text("after compact"),
         "follow-up should still include the new turn input"
     );
 
@@ -1327,6 +1359,7 @@ async fn token_budget_compaction_runs_compact_hooks() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mount_sse_once(&server, compacted_response()).await;
     let test = test_codex()
         .with_pre_build_hook(write_token_budget_compact_hooks)
         .with_config(|config| {
@@ -1374,7 +1407,7 @@ async fn token_budget_compaction_runs_compact_hooks() -> Result<()> {
 #[test_case(false; "token_budget_only")]
 #[test_case(true; "with_client_developer_retention")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn token_budget_mid_turn_auto_compaction_resets_before_active_follow_up(
+async fn token_budget_mid_turn_auto_compaction_summarizes_before_active_follow_up(
     retain_client_developer_messages: bool,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -1389,6 +1422,7 @@ async fn token_budget_mid_turn_auto_compaction_resets_before_active_follow_up(
                 ev_function_call(call_id, "get_context_remaining", "{}"),
                 ev_completed_with_tokens("resp-1", /*total_tokens*/ 9_500),
             ]),
+            compacted_response(),
             sse(vec![
                 ev_response_created("resp-2"),
                 ev_assistant_message("msg-2", "done"),
@@ -1398,7 +1432,6 @@ async fn token_budget_mid_turn_auto_compaction_resets_before_active_follow_up(
     )
     .await;
     let mut model_provider = built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
-    model_provider.name = "OpenAI (test)".into();
     model_provider.base_url = Some(format!("{}/v1", server.uri()));
     model_provider.supports_websockets = false;
     let test = test_codex()
@@ -1446,8 +1479,8 @@ async fn token_budget_mid_turn_auto_compaction_resets_before_active_follow_up(
     let requests = responses.requests();
     assert_eq!(
         requests.len(),
-        2,
-        "token-budget auto-compaction should reset locally before the continuation"
+        3,
+        "token-budget auto-compaction should summarize before the continuation"
     );
     assert!(
         !requests
@@ -1462,19 +1495,13 @@ async fn token_budget_mid_turn_auto_compaction_resets_before_active_follow_up(
             .any(|request| request.body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT)),
         "an explicit token-budget config must not enable model-owned fallback"
     );
-    assert!(
-        !requests[1].input().iter().any(|item| {
-            item.get("type").and_then(Value::as_str) == Some("function_call_output")
-                && item.get("call_id").and_then(Value::as_str) == Some(call_id)
-        }),
-        "fresh token-budget windows should drop active tool output with the prior history"
-    );
+    assert!(requests[2].body_contains_text("TOKEN_BUDGET_COMPACTION_SUMMARY"));
 
     let initial_token_budget = token_budget_contexts(&requests[0]);
     assert_eq!(initial_token_budget.len(), 1);
     let (initial_first_window_id, _, initial_window_id) =
         token_budget_window_ids(&initial_token_budget[0], "/root");
-    let follow_up_token_budget = token_budget_contexts(&requests[1]);
+    let follow_up_token_budget = token_budget_contexts(&requests[2]);
     assert_eq!(follow_up_token_budget.len(), 1);
     let (follow_up_first_window_id, follow_up_previous_window_id, follow_up_window_id) =
         token_budget_window_ids(&follow_up_token_budget[0], "/root");
@@ -1483,18 +1510,15 @@ async fn token_budget_mid_turn_auto_compaction_resets_before_active_follow_up(
         follow_up_previous_window_id.as_deref(),
         Some(initial_window_id.as_str())
     );
-    assert!(
-        !requests[1].body_contains_text("trigger mid-turn auto compaction"),
-        "fresh token-budget windows should drop prior user messages"
-    );
+    assert!(requests[1].body_contains_text("trigger mid-turn auto compaction"));
     assert_eq!(
-        requests[1].body_contains_text("MID_TURN_CLIENT_INSTRUCTIONS"),
+        requests[2].body_contains_text("MID_TURN_CLIENT_INSTRUCTIONS"),
         retain_client_developer_messages,
         "mid-turn token-budget compaction should retain client-authored developer messages when enabled"
     );
     assert_ne!(
         follow_up_window_id, initial_window_id,
-        "mid-turn token-budget auto-compaction should reset the context window"
+        "mid-turn token-budget auto-compaction should advance the context window"
     );
 
     Ok(())
@@ -1528,6 +1552,7 @@ async fn token_budget_auto_compact_fallback_uses_buffer_until_new_context() -> R
                 ev_function_call(new_context_call_id, "new_context", "{}"),
                 ev_completed_with_tokens("new-context-resp", /*total_tokens*/ 10_500),
             ]),
+            compacted_response(),
             sse(vec![
                 ev_response_created("resp-2"),
                 ev_assistant_message("msg-2", "done"),
@@ -1538,7 +1563,6 @@ async fn token_budget_auto_compact_fallback_uses_buffer_until_new_context() -> R
     .await;
     let test = test_codex()
         .with_config(|config| {
-            config.model_provider.name = "OpenAI (test)".into();
             config.model_context_window = Some(50_000);
             config.model_auto_compact_token_limit = Some(9_000);
             config.token_budget = Some(TokenBudgetConfig {
@@ -1557,7 +1581,7 @@ async fn token_budget_auto_compact_fallback_uses_buffer_until_new_context() -> R
     test.submit_turn("trigger auto compact fallback").await?;
 
     let requests = responses.requests();
-    assert_eq!(requests.len(), 4);
+    assert_eq!(requests.len(), 5);
     let fallback_request = &requests[1];
     assert!(
         fallback_request
@@ -1584,7 +1608,7 @@ async fn token_budget_auto_compact_fallback_uses_buffer_until_new_context() -> R
     assert!(requests[2].body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT));
     assert!(requests[2].body_contains_text(fallback_call_id));
     let (_, _, initial_window_id) = token_budget_window_ids(&initial_context[0], "/root");
-    let follow_up_context = token_budget_contexts(&requests[3]);
+    let follow_up_context = token_budget_contexts(&requests[4]);
     let (_, previous_window_id, follow_up_window_id) =
         token_budget_window_ids(&follow_up_context[0], "/root");
     assert_eq!(
@@ -1592,9 +1616,10 @@ async fn token_budget_auto_compact_fallback_uses_buffer_until_new_context() -> R
         Some(initial_window_id.as_str())
     );
     assert_ne!(follow_up_window_id, initial_window_id);
-    assert!(!requests[3].body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT));
+    assert!(!requests[4].body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT));
+    assert!(requests[4].body_contains_text("TOKEN_BUDGET_COMPACTION_SUMMARY"));
     assert_eq!(
-        requests[3].function_call_output_text(fallback_call_id),
+        requests[4].function_call_output_text(fallback_call_id),
         None
     );
     assert_eq!(
@@ -1623,6 +1648,7 @@ async fn token_budget_auto_compact_fallback_rolls_over_after_buffer() -> Result<
                 ev_function_call("buffer-call", "get_context_remaining", "{}"),
                 ev_completed_with_tokens("fallback-resp", /*total_tokens*/ 13_500),
             ]),
+            compacted_response(),
             sse(vec![
                 ev_response_created("resp-2"),
                 ev_assistant_message("msg-2", "done"),
@@ -1633,7 +1659,6 @@ async fn token_budget_auto_compact_fallback_rolls_over_after_buffer() -> Result<
     .await;
     let test = test_codex()
         .with_config(|config| {
-            config.model_provider.name = "OpenAI (test)".into();
             config.model_context_window = Some(50_000);
             config.model_auto_compact_token_limit = Some(9_000);
             config.token_budget = Some(TokenBudgetConfig {
@@ -1652,7 +1677,7 @@ async fn token_budget_auto_compact_fallback_rolls_over_after_buffer() -> Result<
     test.submit_turn("exhaust the fallback buffer").await?;
 
     let requests = responses.requests();
-    assert_eq!(requests.len(), 3);
+    assert_eq!(requests.len(), 4);
     let fallback_request = &requests[1];
     assert!(
         fallback_request
@@ -1660,9 +1685,9 @@ async fn token_budget_auto_compact_fallback_rolls_over_after_buffer() -> Result<
             .iter()
             .any(|text| text == AUTO_COMPACT_FALLBACK_PROMPT)
     );
-    assert!(!requests[2].body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT));
-    assert!(!requests[2].body_contains_text("exhaust the fallback buffer"));
-    assert_eq!(requests[2].function_call_output_text("buffer-call"), None);
+    assert!(requests[2].body_contains_text("exhaust the fallback buffer"));
+    assert!(!requests[3].body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT));
+    assert!(requests[3].body_contains_text("TOKEN_BUDGET_COMPACTION_SUMMARY"));
 
     Ok(())
 }
@@ -1711,9 +1736,23 @@ async fn new_context_tool_skips_auto_compact_fallback() -> Result<()> {
         cloud_skill_enabled: config.cloud_skill_enabled,
         shadow_selection_enabled: config.features.enabled(Feature::SkillSearch),
     });
+    let backend_url = format!("{}/backend-api/codex", server.uri());
     let test = test_codex()
+        .with_model_info_override("gpt-5.2", |model| {
+            model.supports_experimental_context = true;
+        })
+        .with_auth(CodexAuth::from_external_chatgpt_tokens(
+            "header.e30.signature",
+            "account-123",
+            Some("plus"),
+        )?)
         .with_extensions(Arc::new(extensions.build()))
-        .with_config(|config| {
+        .with_config(move |config| {
+            config.model_provider.base_url = Some(backend_url);
+            config
+                .features
+                .enable(Feature::ContextManagement)
+                .expect("test config should allow Context Management");
             config.update_plan_enabled = true;
             config.model_context_window = Some(10_000);
             config.token_budget = Some(TokenBudgetConfig {
@@ -1729,7 +1768,18 @@ async fn new_context_tool_skips_auto_compact_fallback() -> Result<()> {
         .build(&server)
         .await?;
 
-    test.submit_turn("request new context window").await?;
+    let mut options = test.start_thread_options().await;
+    options
+        .thread_extension_init
+        .insert(codex_core::HistoryNotesAvailable);
+    let thread = test.thread_manager.start_thread(options).await?.thread;
+    thread
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "request new context window".to_string(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    wait_for_event(&thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let requests = responses.requests();
     assert_eq!(requests.len(), 3);

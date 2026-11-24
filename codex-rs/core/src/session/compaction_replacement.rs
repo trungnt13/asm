@@ -5,7 +5,9 @@ use super::CompactionPrefix;
 use super::turn_context::TurnContext;
 use crate::compact;
 use crate::compact::CompactedHistoryMetadata;
+use crate::compact::CompactionWindow;
 use crate::context::world_state::WorldStateSnapshot;
+use crate::state::AutoCompactWindowIds;
 use crate::state::SessionState;
 use codex_history::ResponseItemEnvelope;
 use codex_login::AuthOwner;
@@ -17,6 +19,7 @@ pub(crate) struct PrefixCompactionInstallation<'a> {
     pub(crate) prefix: CompactionPrefix,
     pub(crate) prefix_context: Vec<ResponseItem>,
     pub(crate) initial_context: Vec<ResponseItemEnvelope>,
+    pub(crate) window_ids: Option<AutoCompactWindowIds>,
     pub(crate) reset_world_state_sections: Vec<&'static str>,
     pub(crate) model_info: &'a ModelInfo,
     pub(crate) compaction_response_id: String,
@@ -45,6 +48,9 @@ impl<'a> PrefixCompactionInstallation<'a> {
         if state.history.history_version() != self.prefix.generation
             || state.history.annotated_items().len() < self.prefix.len
             || auth_owner != self.prefix.auth_owner
+            || self.window_ids.as_ref().is_some_and(|ids| {
+                ids.previous_window_id.as_ref() != Some(&state.auto_compact_window_ids().window_id)
+            })
         {
             return None;
         }
@@ -73,8 +79,20 @@ impl<'a> PrefixCompactionInstallation<'a> {
                 .into_iter()
                 .map(ResponseItemEnvelope::new),
         );
-        items.extend_from_slice(suffix);
-        // The unchanged suffix already contains updates through this baseline.
+        // A warning appended while compaction was running describes the old window.
+        items.extend(suffix.iter().filter(|envelope| {
+            let ResponseItem::Message {
+                internal_chat_message_metadata_passthrough: Some(metadata),
+                ..
+            } = envelope.item.as_ref() else {
+                return true;
+            };
+            !matches!(
+                metadata.content_item_kinds.as_deref(),
+                Some([kind]) if matches!(kind.0.as_str(), "token_budget.reminder" | "compaction.auto_fallback_prompt" | "compaction.new_context_completed")
+            )
+        }).cloned());
+        // The retained suffix already contains updates through this baseline.
         if let Some(checkpoint) = state.history.world_state_checkpoint() {
             world_state_baseline = WorldStateSnapshot::from(&checkpoint.state);
         }
@@ -85,15 +103,20 @@ impl<'a> PrefixCompactionInstallation<'a> {
         }
         // Prefix replacement already retains all edits in the live suffix.
         let input_goal_ids = Default::default();
-        let (window_number, window_ids) = state.advance_auto_compact_window();
+        let (window_number, window_ids) = match self.window_ids {
+            Some(ids) => state.advance_auto_compact_window_to(ids.window_id),
+            None => state.advance_auto_compact_window(),
+        };
         Some(CompactedHistoryReplacement {
             items,
             world_state_baseline,
             metadata: CompactedHistoryMetadata {
                 input_goal_ids,
                 message: String::new(),
-                window_number,
-                window_ids,
+                window: CompactionWindow::Advanced {
+                    number: window_number,
+                    ids: window_ids,
+                },
                 compaction_response_id: Some(self.compaction_response_id),
                 compaction_model_hash: self.model_info.comp_hash.clone(),
                 reviewer_compaction_hash: self.reviewer_compaction_hash,

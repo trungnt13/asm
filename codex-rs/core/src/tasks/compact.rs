@@ -7,7 +7,6 @@ use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use crate::state::TaskKind;
-use codex_features::Feature;
 use codex_model_provider::RemoteCompactionSupport;
 use codex_user_input::ResolvedUserInput;
 use tokio_util::sync::CancellationToken;
@@ -49,18 +48,6 @@ impl SessionTask for CompactTask {
                 .build_world_state_for_step(&step_context, /*new_window*/ true)
                 .await?,
         );
-        if ctx.config.features.enabled(Feature::TokenBudget) {
-            // Preparing the context may wait; this reset never sends a model request.
-            session.check_rollout_budget()?;
-            crate::compact_token_budget::run_manual_compact_task(
-                session,
-                step_context,
-                world_state,
-            )
-            .await?;
-            return Ok(None);
-        }
-
         let result = match ctx.provider.capabilities().remote_compaction {
             RemoteCompactionSupport::V2 => {
                 emit_compact_metric(

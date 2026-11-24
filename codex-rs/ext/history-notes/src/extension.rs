@@ -5,6 +5,7 @@ use std::sync::Arc;
 use codex_analytics::AnalyticsEventsClient;
 use codex_analytics::ThreadHintStatus;
 use codex_analytics::ThreadHintStatusEvent;
+use codex_core::HistoryNotesAvailable;
 use codex_core::config::Config;
 use codex_extension_api::ConfigContributor;
 use codex_extension_api::ContentItemKind;
@@ -57,7 +58,9 @@ impl HistoryNotesExtension {
                 config.http_client_factory(),
                 context,
             ));
+            thread_store.insert(HistoryNotesAvailable);
         } else {
+            thread_store.remove::<HistoryNotesAvailable>();
             thread_store.remove::<HttpBackend>();
         }
     }

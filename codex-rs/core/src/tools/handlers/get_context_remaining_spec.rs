@@ -12,13 +12,15 @@ pub(crate) const GET_CONTEXT_REMAINING_TOOL_NAME: &str = "get_context_remaining"
 pub fn create_get_context_remaining_tool(messages: Option<&ToolMessage>) -> ToolSpec {
     let tool = ResponsesApiTool {
         name: GET_CONTEXT_REMAINING_TOOL_NAME.to_string(),
-        description: "Get the remaining tokens in the current context window.".to_string(),
+        description: String::new(),
         strict: false,
         defer_loading: None,
         parameters: JsonSchema::object(BTreeMap::new(), /*required*/ None, Some(false.into())),
         output_schema: Some(get_context_remaining_output_schema().into()),
     };
-    ToolSpec::Function(with_catalog_tool_message(tool, messages))
+    let mut tool = with_catalog_tool_message(tool, messages);
+    tool.description = "Check the estimated tokens remaining before compaction in the current context window. This does not compact or reset context.".to_string();
+    ToolSpec::Function(tool)
 }
 
 fn get_context_remaining_output_schema() -> Value {

@@ -749,6 +749,10 @@ Top-level `continue_when_model_at_capacity = true` enables unlimited `ServerOver
 
 Apply `[agents] max_depth` to V2 creation, with root at 0. Default 1 permits direct children only. Reject deeper creation before child preparation. Keep existing agents/communication available.
 
+### Context budget and compaction
+
+`token_budget` adds a read-only budget counter and reminders without disabling summary compaction. Use catalog notes instructions and allow `new_context` to reset without a summary only while official Context Management and its native notes tools are active. Otherwise, `new_context` requests summary compaction. Reuse or await eligible background work; below the async threshold, use foreground compaction.
+
 ### Subagent context windows, reasoning defaults, service tiers, and picker
 
 Optional `[subagent_default_reasoning]` maps exact final canonical model IDs to reasoning efforts, e.g. `"gpt-6.1-sol" = "high"`. Apply only when spawning V2 children, after model and role resolution and before effort validation and tier selection. Explicit spawn efforts and role efforts retain their existing precedence over this default. Matching entries override `[agents] default_subagent_reasoning_effort`, inherited root effort, and model defaults; unmatched behavior stays unchanged. Keep root/internal workers unchanged. Persist the selected child effort normally; do not reapply this spawn default on reload or later model changes. Reject invalid effort values and unsupported matched efforts through existing validation. Add no API or rollout fields.

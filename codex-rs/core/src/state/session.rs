@@ -386,8 +386,14 @@ impl SessionState {
     }
 
     pub(crate) fn advance_auto_compact_window(&mut self) -> (u64, AutoCompactWindowIds) {
-        self.auto_compact_window
-            .advance(self.history.context_ids().next_window())
+        self.advance_auto_compact_window_to(self.history.context_ids().next_window())
+    }
+
+    pub(crate) fn advance_auto_compact_window_to(
+        &mut self,
+        window_id: codex_protocol::ContextWindowId,
+    ) -> (u64, AutoCompactWindowIds) {
+        self.auto_compact_window.advance(window_id)
     }
 
     pub(crate) fn request_new_context_window(&mut self) {

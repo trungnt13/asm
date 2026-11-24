@@ -22,5 +22,7 @@ Scenario: New context window tool installs fresh full context before the next fo
     [03] </context_window>
 03:message/user:
     <ENVIRONMENT_CONTEXT>
-04:function_call/update_plan:{"plan":[{"status":"in_progress","step":"Continue in the new context window"}]}
-05:function_call_output:Plan updated
+04:message/developer:
+    The new_context call completed. Continue the task without repeating that call.
+05:function_call/update_plan:{"plan":[{"status":"in_progress","step":"Continue in the new context window"}]}
+06:function_call_output:Plan updated

@@ -26,6 +26,7 @@ use crate::agents_md_manager::SessionInstructions;
 use crate::attestation::AttestationProvider;
 use crate::compact;
 use crate::compact::CompactedHistoryMetadata;
+use crate::compact::CompactionWindow;
 use crate::config::ManagedFeatures;
 use crate::context::ContextualUserFragment;
 use crate::context::DeveloperInstructions;
@@ -307,7 +308,7 @@ mod system1_evidence;
 mod system1_task;
 mod thread_settings;
 pub(crate) mod time_reminder;
-mod token_budget;
+pub(crate) mod token_budget;
 pub(crate) mod turn;
 pub(crate) mod turn_context;
 mod turn_input;
@@ -4891,11 +4892,7 @@ impl Session {
         } else {
             self.dynamic_tools().await
         };
-        let token_budget = token_budget::resolve_token_budget(
-            turn_context.configured_token_budget.as_ref(),
-            turn_context.use_model_token_budget_defaults,
-            settings.model_info.as_ref(),
-        );
+        let token_budget = turn_context.token_budget_for_model(&settings.model_info);
         let session_telemetry = settings.telemetry(&turn_context.session_telemetry);
         let environments = environments.or_cancel(cancellation_token).await?;
         let inherited_environments = inherited_environments.unwrap_or_else(|| environments.clone());
@@ -5424,6 +5421,17 @@ impl Session {
                 metadata,
                 started_item,
             } = replacement;
+            let (window_number, window_ids) = match metadata.window {
+                CompactionWindow::Advanced { number, ids } => (number, ids),
+                CompactionWindow::Planned(ids) => {
+                    if ids.previous_window_id.as_ref()
+                        != Some(&state.auto_compact_window_ids().window_id)
+                    {
+                        return false;
+                    }
+                    state.advance_auto_compact_window_to(ids.window_id)
+                }
+            };
             // History assigns sequences on append and on legacy replay. Only newly
             // rendered context in this replacement should receive a prefix ID.
             let fresh = items.iter_mut().filter(|entry| {
@@ -5485,10 +5493,10 @@ impl Session {
                 guardian_history: state.history.guardian_history_checkpoint(),
                 retained_context: Some(state.history.retained_context().clone()),
                 mcp_resource_origins: self.services.mcp_runtime.resource_origin_checkpoint(),
-                window_number: Some(metadata.window_number),
-                first_window_id: Some(metadata.window_ids.first_window_id),
-                previous_window_id: metadata.window_ids.previous_window_id,
-                window_id: Some(metadata.window_ids.window_id),
+                window_number: Some(window_number),
+                first_window_id: Some(window_ids.first_window_id),
+                previous_window_id: window_ids.previous_window_id,
+                window_id: Some(window_ids.window_id),
                 compaction_response_id: metadata.compaction_response_id,
                 latest_token_usage_record: state.latest_token_usage_record.clone(),
                 resume_metadata: Some(resume_metadata),
@@ -5634,13 +5642,15 @@ impl Session {
         world_state: &WorldState,
     ) -> (Vec<WorldStateUpdate>, WorldStateSnapshot) {
         let rendered = world_state.render_full_with_host_roster().await;
-        self.assemble_initial_context(step_context, rendered).await
+        self.assemble_initial_context(step_context, rendered, /*window_ids*/ None)
+            .await
     }
 
     pub(crate) async fn assemble_initial_context(
         &self,
         step_context: &StepContext,
         (snapshot, updates): (WorldStateSnapshot, Vec<WorldStateUpdate>),
+        window_ids: Option<AutoCompactWindowIds>,
     ) -> (Vec<WorldStateUpdate>, WorldStateSnapshot) {
         let turn_context = step_context.turn.as_ref();
         let mut developer_sections = Vec::<RenderedFragment>::with_capacity(8);
@@ -5651,7 +5661,7 @@ impl Session {
             let state = self.state.lock().await;
             (
                 state.session_configuration.session_source.clone(),
-                state.auto_compact_window_ids().clone(),
+                window_ids.unwrap_or_else(|| state.auto_compact_window_ids().clone()),
             )
         };
         let separate_guardian_developer_message =
@@ -5997,6 +6007,16 @@ impl Session {
         state.advance_auto_compact_window()
     }
 
+    pub(crate) async fn plan_compaction_window_ids(&self) -> AutoCompactWindowIds {
+        let state = self.state.lock().await;
+        let current = state.auto_compact_window_ids();
+        AutoCompactWindowIds {
+            first_window_id: current.first_window_id.clone(),
+            previous_window_id: Some(current.window_id.clone()),
+            window_id: self.context_ids.next_window(),
+        }
+    }
+
     pub(crate) async fn request_new_context_window(&self) {
         let mut state = self.state.lock().await;
         state.request_new_context_window();
@@ -6025,8 +6045,9 @@ impl Session {
         // Resolve the roster before allocating a new context window.
         let rendered = world_state.render_full_with_host_roster().await;
         let (window_number, window_ids) = self.state.lock().await.start_new_context_window();
-        let (context_updates, world_state_snapshot) =
-            self.assemble_initial_context(step_context, rendered).await;
+        let (context_updates, world_state_snapshot) = self
+            .assemble_initial_context(step_context, rendered, /*window_ids*/ None)
+            .await;
         let context_items =
             crate::context_manager::updates::merge_world_state_updates(context_updates)
                 .into_iter()
@@ -6043,8 +6064,10 @@ impl Session {
                 CompactedHistoryMetadata {
                     input_goal_ids,
                     message: String::new(),
-                    window_number,
-                    window_ids,
+                    window: CompactionWindow::Advanced {
+                        number: window_number,
+                        ids: window_ids,
+                    },
                     compaction_response_id: None,
                     compaction_model_hash: None,
                     reviewer_compaction_hash: None,

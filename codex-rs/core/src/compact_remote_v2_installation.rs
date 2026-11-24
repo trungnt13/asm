@@ -3,11 +3,13 @@
 //! Prepared prefixes are validated by the history replacement primitive before mutation.
 
 use super::*;
+use crate::compact::CompactionWindow;
 use crate::compact::build_compaction_replacement_history;
 use crate::context::world_state::split_prefix_updates;
 use crate::context_manager::updates::merge_world_state_updates;
 use crate::session::CompactedHistoryInstallation;
 use crate::session::PrefixCompactionInstallation;
+use codex_features::Feature;
 use codex_rollout_trace::CompactionCheckpointTracePayload;
 
 #[cfg(test)]
@@ -223,8 +225,21 @@ async fn build_and_install_compaction(
     );
     let reviewer_compaction_hash = reviewer_compaction_hash(sess, turn_context).await;
     let installed = if let Some((prefix, model_info, cutoff_world_state)) = prefix {
+        // Render token-budget metadata for the destination without advancing a
+        // window until the prepared result passes validation under the state lock.
+        let window_ids = if replacement_step_context
+            .turn
+            .config
+            .features
+            .enabled(Feature::TokenBudget)
+        {
+            Some(sess.plan_compaction_window_ids().await)
+        } else {
+            None
+        };
+        let rendered = cutoff_world_state.render_full_with_host_roster().await;
         let (initial_context, world_state_baseline) = sess
-            .build_initial_context_with_world_state(replacement_step_context, &cutoff_world_state)
+            .assemble_initial_context(replacement_step_context, rendered, window_ids.clone())
             .await;
         let (prefix_context, initial_context) = split_prefix_updates(initial_context);
         let initial_context = merge_world_state_updates(initial_context)
@@ -240,6 +255,7 @@ async fn build_and_install_compaction(
                 prefix,
                 prefix_context,
                 initial_context,
+                window_ids,
                 reset_world_state_sections: world_state
                     .full_context_excluded_section_ids()
                     .chain(cutoff_world_state.full_context_excluded_section_ids())
@@ -253,19 +269,20 @@ async fn build_and_install_compaction(
         )
         .await
     } else {
+        // Rendering can be interrupted; advance the live window only when installing the summary.
+        let window_ids = sess.plan_compaction_window_ids().await;
         let (new_history, world_state_baseline) = build_compaction_replacement_history(
             sess,
             replacement_step_context,
             world_state,
             compacted_history,
+            Some(window_ids.clone()),
         )
         .await;
-        let (window_number, window_ids) = sess.advance_auto_compact_window().await;
         let installation = CompactedHistoryMetadata {
             input_goal_ids,
             message: String::new(),
-            window_number,
-            window_ids,
+            window: CompactionWindow::Planned(window_ids),
             compaction_response_id: Some(compaction_response_id),
             compaction_model_hash: compaction_turn_context.model_info().comp_hash.clone(),
             reviewer_compaction_hash,

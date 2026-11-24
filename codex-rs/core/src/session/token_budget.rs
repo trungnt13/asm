@@ -1,5 +1,5 @@
 use super::session::Session;
-use super::turn_context::TurnContext;
+use super::step_context::StepContext;
 use crate::config::Config;
 use crate::config::TokenBudgetConfig;
 use crate::config::resolve_token_budget_config;
@@ -11,6 +11,15 @@ use codex_protocol::account::PlanType;
 use codex_protocol::auth::AuthMode;
 use codex_protocol::openai_models::ModelInfo;
 
+/// Marks a thread with the native notes tools installed.
+pub struct HistoryNotesAvailable;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ContextWindowAction {
+    Summarize,
+    ResetWithNotes,
+}
+
 fn experimental_context_is_eligible(auth_mode: AuthMode, plan_type: Option<PlanType>) -> bool {
     auth_mode == AuthMode::Chatgpt
         && matches!(
@@ -19,23 +28,27 @@ fn experimental_context_is_eligible(auth_mode: AuthMode, plan_type: Option<PlanT
         )
 }
 
+pub(super) fn official_context_is_eligible(config: &Config, auth: Option<&CodexAuth>) -> bool {
+    let provider = &config.model_provider;
+    config.features.enabled(Feature::ContextManagement)
+        && provider.supports_codex_backend_routes()
+        && provider.requires_openai_auth
+        && provider.env_key.is_none()
+        && provider.experimental_bearer_token.is_none()
+        && provider.auth.is_none()
+        && provider.aws.is_none()
+        && auth.is_some_and(|auth| {
+            experimental_context_is_eligible(auth.auth_mode(), auth.account_plan_type())
+        })
+}
+
 pub(super) fn apply_experimental_context(
     config: &mut Config,
     auth: Option<&CodexAuth>,
     starting_model: &ModelInfo,
 ) -> std::io::Result<()> {
-    let provider = &config.model_provider;
-    if !config.features.enabled(Feature::ContextManagement)
-        || !starting_model.supports_experimental_context
-        || !provider.supports_codex_backend_routes()
-        || !provider.requires_openai_auth
-        || provider.env_key.is_some()
-        || provider.experimental_bearer_token.is_some()
-        || provider.auth.is_some()
-        || provider.aws.is_some()
-        || !auth.is_some_and(|auth| {
-            experimental_context_is_eligible(auth.auth_mode(), auth.account_plan_type())
-        })
+    if !starting_model.supports_experimental_context
+        || !official_context_is_eligible(config, auth)
         || config.features.enable(Feature::TokenBudget).is_err()
         || !config.features.enabled(Feature::TokenBudget)
     {
@@ -48,10 +61,20 @@ pub(super) fn apply_experimental_context(
         config.token_budget = resolve_token_budget_config(&config_toml, &config.features)?;
     }
 
-    config
-        .token_budget
-        .get_or_insert_default()
-        .use_history_notes_extension = true;
+    let explicitly_disabled = config
+        .config_layer_stack
+        .effective_config()
+        .get("features")
+        .and_then(|features| features.get("token_budget"))
+        .and_then(|budget| budget.get("use_history_notes_extension"))
+        .and_then(toml::Value::as_bool)
+        == Some(false);
+    if !explicitly_disabled {
+        config
+            .token_budget
+            .get_or_insert_default()
+            .use_history_notes_extension = true;
+    }
     Ok(())
 }
 
@@ -84,6 +107,7 @@ pub(super) fn resolve_token_budget(
     configured_token_budget: Option<&TokenBudgetConfig>,
     use_model_defaults: bool,
     model_info: &ModelInfo,
+    context_window_action: ContextWindowAction,
 ) -> Option<TokenBudgetConfig> {
     if !use_model_defaults {
         return configured_token_budget.cloned();
@@ -120,7 +144,15 @@ pub(super) fn resolve_token_budget(
         return configured_token_budget.cloned();
     }
 
-    Some(token_budget)
+    match context_window_action {
+        ContextWindowAction::ResetWithNotes => Some(token_budget),
+        ContextWindowAction::Summarize => Some(TokenBudgetConfig {
+            context_window_as_tool_output: token_budget.context_window_as_tool_output,
+            use_history_notes_extension: token_budget.use_history_notes_extension,
+            reminder_threshold_tokens: token_budget.reminder_threshold_tokens,
+            ..TokenBudgetConfig::default()
+        }),
+    }
 }
 
 /// Applies model activation defaults before thread extensions are initialized.
@@ -164,10 +196,11 @@ pub(super) fn apply_model_defaults(config: &mut Config, model_info: &ModelInfo) 
 
 pub(super) async fn maybe_record(
     sess: &Session,
-    turn_context: &TurnContext,
+    step_context: &StepContext,
     base_window_tokens_remaining: Option<i64>,
     allow_auto_compact_fallback: bool,
 ) {
+    let turn_context = &step_context.turn;
     if !turn_context.config.features.enabled(Feature::TokenBudget) {
         return;
     }
@@ -175,7 +208,7 @@ pub(super) async fn maybe_record(
         return;
     };
 
-    let Some(config) = turn_context.config.token_budget.as_ref() else {
+    let Some(config) = step_context.token_budget.as_ref() else {
         return;
     };
 
@@ -195,7 +228,7 @@ pub(super) async fn maybe_record(
                 ));
             sess.record_conversation_items(
                 turn_context,
-                turn_context.model_info(),
+                &step_context.settings.model_info,
                 std::slice::from_ref(&response_item),
             )
             .await;
@@ -221,7 +254,7 @@ pub(super) async fn maybe_record(
         ContextualUserFragment::into(crate::context::AutoCompactFallbackPrompt::new(prompt));
     sess.record_conversation_items(
         turn_context,
-        turn_context.model_info(),
+        &step_context.settings.model_info,
         std::slice::from_ref(&response_item),
     )
     .await;

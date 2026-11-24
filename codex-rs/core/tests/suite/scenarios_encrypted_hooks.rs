@@ -3,6 +3,7 @@
 use super::super::rmcp_client::remote_aware_environment_id;
 use super::super::rmcp_client::remote_aware_stdio_server_bin;
 use super::*;
+use codex_config::types::McpServerConfig;
 use core_test_support::hooks::trust_discovered_hooks;
 use pretty_assertions::assert_eq;
 
