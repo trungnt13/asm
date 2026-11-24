@@ -307,9 +307,14 @@ async fn extension_window_prefix_precedes_retained_turns_and_is_not_repeated() {
         }),
     );
     let retained = vec![user_message("earlier turn"), user_message("latest turn")];
-    let (replacement, snapshot) =
-        build_compaction_replacement_history(&session, &step, &world, annotated(retained.clone()))
-            .await;
+    let (replacement, snapshot) = build_compaction_replacement_history(
+        &session,
+        &step,
+        &world,
+        annotated(retained.clone()),
+        /*window_ids*/ None,
+    )
+    .await;
     let items = raw(replacement);
     let ResponseItem::Message { role, content, .. } = &items[0] else {
         panic!("expected a separate developer prefix");

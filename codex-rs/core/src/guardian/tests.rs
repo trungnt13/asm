@@ -2138,8 +2138,10 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
             crate::compact::CompactedHistoryMetadata {
                 input_goal_ids: Default::default(),
                 message: String::new(),
-                window_number,
-                window_ids,
+                window: crate::compact::CompactionWindow::Advanced {
+                    number: window_number,
+                    ids: window_ids,
+                },
                 compaction_response_id: None,
                 compaction_model_hash: Some("test-checkpoint".to_owned()),
                 reviewer_compaction_hash: Some("test-checkpoint".to_owned()),

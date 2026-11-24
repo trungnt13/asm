@@ -26,6 +26,7 @@ use crate::agents_md_manager::SessionInstructions;
 use crate::attestation::AttestationProvider;
 use crate::compact;
 use crate::compact::CompactedHistoryMetadata;
+use crate::compact::CompactionWindow;
 use crate::config::ManagedFeatures;
 use crate::context::ContextualUserFragment;
 use crate::context::DeveloperInstructions;
@@ -5420,6 +5421,17 @@ impl Session {
                 metadata,
                 started_item,
             } = replacement;
+            let (window_number, window_ids) = match metadata.window {
+                CompactionWindow::Advanced { number, ids } => (number, ids),
+                CompactionWindow::Planned(ids) => {
+                    if ids.previous_window_id.as_ref()
+                        != Some(&state.auto_compact_window_ids().window_id)
+                    {
+                        return false;
+                    }
+                    state.advance_auto_compact_window_to(ids.window_id)
+                }
+            };
             // History assigns sequences on append and on legacy replay. Only newly
             // rendered context in this replacement should receive a prefix ID.
             let fresh = items.iter_mut().filter(|entry| {
@@ -5481,10 +5493,10 @@ impl Session {
                 guardian_history: state.history.guardian_history_checkpoint(),
                 retained_context: Some(state.history.retained_context().clone()),
                 mcp_resource_origins: self.services.mcp_runtime.resource_origin_checkpoint(),
-                window_number: Some(metadata.window_number),
-                first_window_id: Some(metadata.window_ids.first_window_id),
-                previous_window_id: metadata.window_ids.previous_window_id,
-                window_id: Some(metadata.window_ids.window_id),
+                window_number: Some(window_number),
+                first_window_id: Some(window_ids.first_window_id),
+                previous_window_id: window_ids.previous_window_id,
+                window_id: Some(window_ids.window_id),
                 compaction_response_id: metadata.compaction_response_id,
                 latest_token_usage_record: state.latest_token_usage_record.clone(),
                 resume_metadata: Some(resume_metadata),
@@ -6052,8 +6064,10 @@ impl Session {
                 CompactedHistoryMetadata {
                     input_goal_ids,
                     message: String::new(),
-                    window_number,
-                    window_ids,
+                    window: CompactionWindow::Advanced {
+                        number: window_number,
+                        ids: window_ids,
+                    },
                     compaction_response_id: None,
                     compaction_model_hash: None,
                     reviewer_compaction_hash: None,

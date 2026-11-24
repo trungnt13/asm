@@ -3,6 +3,7 @@
 //! Prepared prefixes are validated by the history replacement primitive before mutation.
 
 use super::*;
+use crate::compact::CompactionWindow;
 use crate::compact::build_compaction_replacement_history;
 use crate::context::world_state::split_prefix_updates;
 use crate::context_manager::updates::merge_world_state_updates;
@@ -268,19 +269,20 @@ async fn build_and_install_compaction(
         )
         .await
     } else {
-        let (window_number, window_ids) = sess.advance_auto_compact_window().await;
+        // Rendering can be interrupted; advance the live window only when installing the summary.
+        let window_ids = sess.plan_compaction_window_ids().await;
         let (new_history, world_state_baseline) = build_compaction_replacement_history(
             sess,
             replacement_step_context,
             world_state,
             compacted_history,
+            Some(window_ids.clone()),
         )
         .await;
         let installation = CompactedHistoryMetadata {
             input_goal_ids,
             message: String::new(),
-            window_number,
-            window_ids,
+            window: CompactionWindow::Planned(window_ids),
             compaction_response_id: Some(compaction_response_id),
             compaction_model_hash: compaction_turn_context.model_info().comp_hash.clone(),
             reviewer_compaction_hash,

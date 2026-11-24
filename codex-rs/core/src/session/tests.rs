@@ -5889,8 +5889,10 @@ async fn settings_checkpoint_waits_for_accepted_settings_persistence() {
             CompactedHistoryMetadata {
                 input_goal_ids: Default::default(),
                 message: "summary".to_string(),
-                window_number,
-                window_ids,
+                window: crate::compact::CompactionWindow::Advanced {
+                    number: window_number,
+                    ids: window_ids,
+                },
                 compaction_response_id: None,
                 compaction_model_hash: None,
                 reviewer_compaction_hash: None,
@@ -6142,8 +6144,10 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
                 CompactedHistoryMetadata {
                     input_goal_ids,
                     message: String::new(),
-                    window_number,
-                    window_ids,
+                    window: crate::compact::CompactionWindow::Advanced {
+                        number: window_number,
+                        ids: window_ids,
+                    },
                     compaction_response_id: None,
                     compaction_model_hash: None,
                     reviewer_compaction_hash: None,
@@ -11447,6 +11451,7 @@ async fn build_initial_context_uses_retained_step_after_model_change() {
         &step_a,
         &world_a,
         Vec::new(),
+        /*window_ids*/ None,
     )
     .await;
 
@@ -11487,6 +11492,7 @@ async fn build_initial_context_uses_retained_step_after_model_change() {
         &step_a,
         &world_a,
         Vec::new(),
+        /*window_ids*/ None,
     )
     .await;
 

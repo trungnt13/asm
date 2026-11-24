@@ -5,6 +5,7 @@
 use codex_login::AuthOwner;
 use std::sync::Arc;
 
+use crate::compact::AutoCompactionDisabled;
 use crate::compact_remote_v2::BackgroundCompactionCandidate;
 use crate::compact_remote_v2::capture_background_input;
 use crate::compact_remote_v2::run_background_compaction;
@@ -80,6 +81,11 @@ pub(super) async fn maybe_start(
         return;
     }
     if !enabled(turn_context)
+        || sess
+            .services
+            .thread_extension_data
+            .get::<AutoCompactionDisabled>()
+            .is_some()
         || sess.work_budget().is_exhausted()
         || token_status.token_limit_reached
         || (matches!(phase, CompactionPhase::PostTurn)

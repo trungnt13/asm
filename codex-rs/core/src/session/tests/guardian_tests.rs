@@ -1162,6 +1162,7 @@ async fn compaction_initial_context_preserves_separate_guardian_developer_messag
         &step_context,
         &world_state,
         Vec::new(),
+        /*window_ids*/ None,
     )
     .await;
 

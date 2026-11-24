@@ -83,11 +83,18 @@ pub struct AutoCompactionDisabled;
 pub(crate) struct CompactedHistoryMetadata {
     pub(crate) input_goal_ids: HashSet<ResponseItemId>,
     pub(crate) message: String,
-    pub(crate) window_number: u64,
-    pub(crate) window_ids: AutoCompactWindowIds,
+    pub(crate) window: CompactionWindow,
     pub(crate) compaction_response_id: Option<String>,
     pub(crate) compaction_model_hash: Option<String>,
     pub(crate) reviewer_compaction_hash: Option<String>,
+}
+
+pub(crate) enum CompactionWindow {
+    Advanced {
+        number: u64,
+        ids: AutoCompactWindowIds,
+    },
+    Planned(AutoCompactWindowIds),
 }
 
 /// Renders the window prefix and ordinary context with their comparison baseline.
@@ -96,9 +103,11 @@ pub(crate) async fn build_compaction_replacement_history(
     step_context: &StepContext,
     world_state: &WorldState,
     compacted_history: Vec<ResponseItemEnvelope>,
+    window_ids: Option<AutoCompactWindowIds>,
 ) -> (Vec<ResponseItemEnvelope>, WorldStateSnapshot) {
+    let rendered = world_state.render_full_with_host_roster().await;
     let (updates, snapshot) = sess
-        .build_initial_context_with_world_state(step_context, world_state)
+        .assemble_initial_context(step_context, rendered, window_ids)
         .await;
     let (prefix, context) = split_prefix_updates(updates);
     let context = merge_world_state_updates(context);
@@ -481,8 +490,10 @@ async fn run_compact_task_inner_impl(
         CompactedHistoryMetadata {
             input_goal_ids,
             message: summary_text,
-            window_number,
-            window_ids,
+            window: CompactionWindow::Advanced {
+                number: window_number,
+                ids: window_ids,
+            },
             compaction_response_id: Some(compaction_response.response_id),
             compaction_model_hash: turn_context.model_info().comp_hash.clone(),
             reviewer_compaction_hash: None,

@@ -5,6 +5,7 @@ use super::CompactionPrefix;
 use super::turn_context::TurnContext;
 use crate::compact;
 use crate::compact::CompactedHistoryMetadata;
+use crate::compact::CompactionWindow;
 use crate::context::world_state::WorldStateSnapshot;
 use crate::state::AutoCompactWindowIds;
 use crate::state::SessionState;
@@ -112,8 +113,10 @@ impl<'a> PrefixCompactionInstallation<'a> {
             metadata: CompactedHistoryMetadata {
                 input_goal_ids,
                 message: String::new(),
-                window_number,
-                window_ids,
+                window: CompactionWindow::Advanced {
+                    number: window_number,
+                    ids: window_ids,
+                },
                 compaction_response_id: Some(self.compaction_response_id),
                 compaction_model_hash: self.model_info.comp_hash.clone(),
                 reviewer_compaction_hash: self.reviewer_compaction_hash,
