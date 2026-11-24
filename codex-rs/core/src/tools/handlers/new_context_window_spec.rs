@@ -17,7 +17,7 @@ pub(super) fn create_new_context_window_tool(
             "Start a fresh context window. This discards the active conversation and any existing summary without making a new summary. Save important details in notes first. This does not change files."
         }
         ContextWindowAction::Summarize => {
-            "Replace the active conversation with a summary. This can lower future input cost and speed up later requests, but details can be lost. Background compaction may already have a summary; otherwise this may wait for a summary request and incur model usage. Use when the savings outweigh the lost detail and immediate delay."
+            "Replace the active conversation with a summary. Use this when the conversation is large and you can continue without every detail. Summarizing uses tokens and may delay the next step, but can make later requests faster and cheaper."
         }
     };
     let tool = ResponsesApiTool {
