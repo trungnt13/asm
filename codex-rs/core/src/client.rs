@@ -1533,11 +1533,27 @@ impl ModelClient {
             &prompt.output_schema,
             prompt.output_schema_strict,
         );
+        let provider = self.state.provider.info();
         let service_tier = model_info
             .service_tier_for_request(service_tier)
-            .filter(|tier| {
-                provider_allows_service_tier(self.state.provider.info(), model_info, tier)
-            });
+            .filter(|tier| provider_allows_service_tier(provider, model_info, tier));
+        // Fireworks selects Ultra-fast by model ID instead of a wire service tier.
+        let (model, service_tier) = if service_tier.as_deref() == Some("ultrafast")
+            && model_info.slug == "accounts/fireworks/models/deepseek-v4p1-flash-1017"
+            && provider
+                .base_url
+                .as_deref()
+                .and_then(|base_url| url::Url::parse(base_url).ok())
+                .is_some_and(|url| {
+                    url.scheme() == "https" && url.host_str() == Some("api.fireworks.ai")
+                }) {
+            (
+                "accounts/fireworks/routers/deepseek-v4p1-flash-1017-ultrafast".to_string(),
+                None,
+            )
+        } else {
+            (model_info.slug.clone(), service_tier)
+        };
         // Project only the request copy. Reviewer history keeps native IDs for deduplication.
         if self.quotes_guardian_replies() {
             for item in &mut input {
@@ -1548,7 +1564,7 @@ impl ModelClient {
         }
         let client_metadata = responses_metadata.client_metadata(include_internal);
         let request = ResponsesApiRequest {
-            model: model_info.slug.clone(),
+            model,
             input,
             tools,
             tool_choice: "auto".to_string(),
@@ -2383,12 +2399,17 @@ impl ResponsesHttpExecutor<'_> {
                 .await
             };
 
+            let service_tier = if is_guardian_reviewer(&responses_headers) {
+                None
+            } else {
+                sampling.service_tier.clone()
+            };
             let mut request = self.client.build_responses_request(
                 prompt,
                 model_info,
                 sampling.reasoning_effort.clone(),
                 sampling.reasoning_summary,
-                sampling.service_tier.clone(),
+                service_tier,
                 responses_metadata,
                 include_internal,
             )?;
@@ -2401,9 +2422,6 @@ impl ResponsesHttpExecutor<'_> {
                 client_setup.auth.as_ref(),
                 &responses_headers,
             );
-            if is_guardian_reviewer(&responses_headers) {
-                request.service_tier = None;
-            }
             if !chat_completions
                 && let Some(header_value) = self.client.build_routing_hint_header(
                     client_setup.auth.as_ref(),
@@ -2617,20 +2635,22 @@ impl ModelClientSession {
                 pending_retry,
             )
             .map_err(|error| self.client.state.provider.map_api_error(error))?;
+            let service_tier = if is_guardian_reviewer(&responses_headers) {
+                None
+            } else {
+                sampling.service_tier.clone()
+            };
             let mut request = self.client.build_responses_request(
                 prompt,
                 model_info,
                 sampling.reasoning_effort.clone(),
                 sampling.reasoning_summary,
-                sampling.service_tier.clone(),
+                service_tier,
                 responses_metadata,
                 include_internal,
             )?;
             if self.client.uses_codex_backend(client_setup.auth.as_ref()) {
                 request.request_country = responses_metadata.request_country.clone();
-            }
-            if is_guardian_reviewer(&responses_headers) {
-                request.service_tier = None;
             }
             request.access_programs = cyber_access_program::for_auth(
                 client_setup.auth.as_ref(),

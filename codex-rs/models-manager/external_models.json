@@ -375,6 +375,13 @@
       "visibility": "list",
       "supported_in_api": true,
       "priority": 110,
+      "service_tiers": [
+        {
+          "id": "ultrafast",
+          "name": "Ultra-fast",
+          "description": "Uses the Fireworks Ultra-fast preview router at higher token prices."
+        }
+      ],
       "availability_nux": null,
       "upgrade": null,
       "include_skills_usage_instructions": false,
@@ -393,6 +400,30 @@
       "model_provider": "fireworks",
       "input_modalities": ["text", "image"],
       "tool_mode": "code_mode_only",
+      "context_window": 300000,
+      "max_context_window": 1000000
+    },
+    {
+      "slug": "accounts/fireworks/models/glm-5p3",
+      "alias": "fireworks/glm-5.3",
+      "display_name": "GLM 5.3 · Fireworks",
+      "description": "Uses the configured Fireworks provider with direct ASM tools.",
+      "supported_reasoning_levels": [],
+      "shell_type": "default",
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 111,
+      "include_apps_usage_instructions": false,
+      "support_verbosity": false,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "model_provider": "fireworks",
+      "input_modalities": ["text"],
+      "tool_mode": "direct",
       "context_window": 300000,
       "max_context_window": 1000000
     }
