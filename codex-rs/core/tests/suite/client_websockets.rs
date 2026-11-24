@@ -87,6 +87,9 @@ use tracing_test::traced_test;
 #[path = "client_websockets_runtime_auth.rs"]
 mod runtime_auth_tests;
 
+#[path = "client_websockets_catalog_etag.rs"]
+mod catalog_etag_tests;
+
 const MODEL: &str = "gpt-5.4";
 const OPENAI_BETA_HEADER: &str = "OpenAI-Beta";
 const USER_AGENT_HEADER: &str = "user-agent";
@@ -310,6 +313,10 @@ async fn responses_websocket_streams_request() {
         Some(harness.thread_id.to_string())
     );
     assert_eq!(
+        handshake.header("x-codex-exclude-stream-fields").as_deref(),
+        Some("delta.sequence_number,reasoning.added.encrypted_content")
+    );
+    assert_eq!(
         handshake.header("session-id"),
         Some(harness.session_id.to_string())
     );
@@ -349,6 +356,11 @@ async fn responses_websocket_omits_routing_hint_for_provider_with_own_credential
     let mut provider = websocket_provider(&server);
     provider.name = ModelProviderInfo::create_openai_provider(/*base_url*/ None).name;
     provider.experimental_bearer_token = Some("provider-specific-token".into());
+    // An empty value opts out of the default stream exclusions.
+    provider
+        .http_headers
+        .get_or_insert_default()
+        .insert("X-Codex-Exclude-Stream-Fields".to_string(), "".into());
     let harness = websocket_harness_with_provider_options_and_auth(
         provider,
         /*runtime_metrics_enabled*/ false,
@@ -368,6 +380,10 @@ async fn responses_websocket_omits_routing_hint_for_provider_with_own_credential
         Some("Bearer provider-specific-token".to_string())
     );
     assert_eq!(handshake.header(X_CODEX_ROUTING_HINT_HEADER), None);
+    assert_eq!(
+        handshake.header("x-codex-exclude-stream-fields").as_deref(),
+        Some("")
+    );
 
     server.shutdown().await;
 }

@@ -1,7 +1,6 @@
 use super::*;
 use crate::app::test_support::make_test_app;
 use crate::chatwidget::tests::helpers::render_bottom_popup;
-use crate::model_catalog::ModelCatalog;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::openai_models::ModelServiceTier;
 use codex_protocol::openai_models::ReasoningEffort;
@@ -35,7 +34,7 @@ async fn subagent_picker_shows_configured_model_effort_and_tier() {
         ]);
     let mut model = app
         .model_catalog
-        .models
+        .models()
         .first()
         .expect("model preset")
         .clone();
@@ -46,7 +45,7 @@ async fn subagent_picker_shows_configured_model_effort_and_tier() {
         name: "Fast".to_string(),
         description: String::new(),
     }];
-    app.model_catalog = Arc::new(ModelCatalog::new(vec![model]));
+    Arc::make_mut(&mut app.model_catalog).set_models(vec![model]);
 
     let root_id = ThreadId::from_string("00000000-0000-0000-0000-000000000001").unwrap();
     let fast_id = ThreadId::from_string("00000000-0000-0000-0000-000000000002").unwrap();

@@ -11311,6 +11311,7 @@ async fn test_requirements_web_search_mode_allowlist_does_not_warn_when_unset() 
     let fixture = create_test_fixture()?;
 
     let requirements_toml = codex_config::ConfigRequirementsToml {
+        gateway: None,
         config_server: None,
         model_provider: None,
         model_providers: None,

@@ -60,17 +60,15 @@ async fn direct_patch_review_assesses_writable_file_without_writes() -> Result<(
     )
     .await;
 
-    test.codex
-        .inject_response_items(vec![serde_json::from_value(json!({
-            "type": "custom_tool_call",
-            "call_id": "patch-skip",
-            "name": "apply_patch",
-            "input": "*** Begin Patch\n*** Update File: guardian-skipped.txt\n@@\n-before\n+after\n*** End Patch",
-        }))?])
-        .await?;
+    let tool_call: ResponseItem = serde_json::from_value(json!({
+        "type": "custom_tool_call",
+        "call_id": "patch-skip",
+        "name": "apply_patch",
+        "input": "*** Begin Patch\n*** Update File: guardian-skipped.txt\n@@\n-before\n+after\n*** End Patch",
+    }))?;
     assert_eq!(
         test.codex
-            .guardian_review(&CancellationToken::new())
+            .guardian_review(&tool_call, &CancellationToken::new())
             .await?,
         GuardianReviewResult {
             call_id: "patch-skip".to_owned(),
@@ -124,15 +122,13 @@ async fn direct_permissions_review_returns_assessment_when_policy_disallows_requ
         ]),
     )
     .await;
-    test.codex
-        .inject_response_items(vec![serde_json::from_value(json!({
-            "type": "function_call", "name": "request_permissions", "call_id": "permissions-review",
-            "arguments": r#"{"permissions":{"network":{"enabled":true}}}"#,
-        }))?])
-        .await?;
+    let tool_call: ResponseItem = serde_json::from_value(json!({
+        "type": "function_call", "name": "request_permissions", "call_id": "permissions-review",
+        "arguments": r#"{"permissions":{"network":{"enabled":true}}}"#,
+    }))?;
     assert_eq!(
         test.codex
-            .guardian_review(&CancellationToken::new())
+            .guardian_review(&tool_call, &CancellationToken::new())
             .await?,
         GuardianReviewResult {
             call_id: "permissions-review".into(),
@@ -213,15 +209,16 @@ prefix_rule(pattern=["git", "init", "guardian-rewritten"], decision="prompt")
     )
     .await;
 
+    let tool_call: ResponseItem = serde_json::from_value(json!({
+        "type": "function_call", "call_id": "hook-review", "name": "exec_command",
+        "arguments": r#"{"cmd":"git init guardian-original"}"#,
+    }))?;
     test.codex
-        .inject_response_items(vec![serde_json::from_value(json!({
-            "type": "function_call", "call_id": "hook-review", "name": "exec_command",
-            "arguments": r#"{"cmd":"git init guardian-original"}"#,
-        }))?])
+        .inject_response_items(vec![tool_call.clone()])
         .await?;
     assert_eq!(
         test.codex
-            .guardian_review(&CancellationToken::new())
+            .guardian_review(&tool_call, &CancellationToken::new())
             .await?,
         GuardianReviewResult {
             call_id: "hook-review".to_owned(),
@@ -306,15 +303,13 @@ async fn direct_exec_review_honors_hook_denial_before_assessment() -> Result<()>
     let mock =
         responses::mount_sse_once(harness.server(), sse(vec![ev_completed("unexpected")])).await;
 
-    test.codex
-        .inject_response_items(vec![serde_json::from_value(json!({
-            "type": "function_call", "call_id": "hook-review", "name": "exec_command",
-            "arguments": r#"{"cmd":"git init guardian-original"}"#,
-        }))?])
-        .await?;
+    let tool_call: ResponseItem = serde_json::from_value(json!({
+        "type": "function_call", "call_id": "hook-review", "name": "exec_command",
+        "arguments": r#"{"cmd":"git init guardian-original"}"#,
+    }))?;
     let error = test
         .codex
-        .guardian_review(&CancellationToken::new())
+        .guardian_review(&tool_call, &CancellationToken::new())
         .await
         .expect_err("hook must reject the call before Guardian can assess it");
     assert!(matches!(

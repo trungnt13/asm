@@ -2083,7 +2083,7 @@ async fn thread_fork_freezes_active_paginated_turn_as_interrupted(
         [
             RolloutLine { item: RolloutItem::SessionMeta(_), .. },
             RolloutLine {
-                item: RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(_)),
+                item: RolloutItem::EventMsg { event: EventMsg::ThreadSettingsApplied(_), .. },
                 ..
             },
             RolloutLine {
@@ -2091,7 +2091,7 @@ async fn thread_fork_freezes_active_paginated_turn_as_interrupted(
                 ..
             },
             RolloutLine {
-                item: RolloutItem::EventMsg(EventMsg::TurnAborted(aborted)),
+                item: RolloutItem::EventMsg { event: EventMsg::TurnAborted(aborted), .. },
                 ..
             },
         ] if matches!(

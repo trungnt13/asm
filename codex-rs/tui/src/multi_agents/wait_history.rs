@@ -1,5 +1,6 @@
 //! Pair wait previews for grouped counting without changing their original history order.
 
+use super::history::CollabHistoryCell;
 use super::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,7 +22,7 @@ impl AgentWaitHistory {
     pub(crate) fn cell(
         &mut self,
         item: &ThreadItemPayload,
-        agent_metadata: impl FnMut(ThreadId) -> AgentMetadata,
+        agent_metadata: impl Fn(ThreadId) -> AgentMetadata,
     ) -> Option<AgentWaitHistoryCell> {
         let ThreadItemPayload::CollabAgentToolCall {
             id,
@@ -84,10 +85,20 @@ impl Drop for AgentWaitHistory {
 
 #[derive(Debug)]
 pub(crate) struct AgentWaitHistoryCell {
-    preview: LabeledToolCell<WebHyperlinkHistoryCell>,
+    pub(super) preview: CollabHistoryCell,
     // One namespaced identity retains group disclosure and deduplicates paired preview counts.
     count_key: String,
     state: Arc<RwLock<WaitGroupState>>,
+}
+
+impl AgentWaitHistoryCell {
+    pub(super) fn with_refreshed_preview(&self, preview: CollabHistoryCell) -> Self {
+        Self {
+            preview,
+            count_key: self.count_key.clone(),
+            state: Arc::clone(&self.state),
+        }
+    }
 }
 
 impl HistoryCell for AgentWaitHistoryCell {

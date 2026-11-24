@@ -1062,6 +1062,9 @@
             "code_mode_interrupt": {
               "type": "boolean"
             },
+            "code_mode_mcp_result_dedup": {
+              "type": "boolean"
+            },
             "code_mode_only": {
               "type": "boolean"
             },
@@ -1140,6 +1143,9 @@
             "default_mode_request_user_input": {
               "type": "boolean"
             },
+            "defer_image_generation": {
+              "type": "boolean"
+            },
             "defer_mailbox_preemption": {
               "type": "boolean"
             },
@@ -1213,6 +1219,9 @@
               "type": "boolean"
             },
             "guardian_include_additional_context": {
+              "type": "boolean"
+            },
+            "guardian_native_action_framing": {
               "type": "boolean"
             },
             "guardian_native_multi_agent_history": {
@@ -8823,6 +8832,9 @@
         "code_mode_interrupt": {
           "type": "boolean"
         },
+        "code_mode_mcp_result_dedup": {
+          "type": "boolean"
+        },
         "code_mode_only": {
           "type": "boolean"
         },
@@ -8901,6 +8913,9 @@
         "default_mode_request_user_input": {
           "type": "boolean"
         },
+        "defer_image_generation": {
+          "type": "boolean"
+        },
         "defer_mailbox_preemption": {
           "type": "boolean"
         },
@@ -8974,6 +8989,9 @@
           "type": "boolean"
         },
         "guardian_include_additional_context": {
+          "type": "boolean"
+        },
+        "guardian_native_action_framing": {
           "type": "boolean"
         },
         "guardian_native_multi_agent_history": {

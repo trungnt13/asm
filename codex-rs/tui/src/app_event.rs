@@ -313,7 +313,8 @@ pub(crate) struct AgentsOverviewThreadRefresh {
 #[derive(Debug, Default)]
 pub(crate) struct AgentPickerThreadRefresh {
     pub(crate) threads: Vec<Thread>,
-    pub(crate) archived_thread_ids: std::collections::HashSet<ThreadId>,
+    pub(crate) archived_threads:
+        std::collections::HashMap<ThreadId, crate::multi_agents::AgentMetadata>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1681,6 +1682,8 @@ pub(crate) enum AppEvent {
         model: String,
     },
 
+    /// Adopt the widget's active catalog without requesting another model list.
+    SyncModelCatalog,
     /// Fetch the current catalog even when cached models produce no picker.
     FetchModels {
         request_id: uuid::Uuid,
