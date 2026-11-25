@@ -423,7 +423,7 @@
       "supports_reasoning_summary_parameter": false,
       "model_provider": "fireworks",
       "input_modalities": ["text"],
-      "tool_mode": "direct",
+      "tool_mode": "code_mode_only",
       "context_window": 300000,
       "max_context_window": 1000000
     }
