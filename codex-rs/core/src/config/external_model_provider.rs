@@ -23,40 +23,6 @@ impl Config {
         }
     }
 
-    pub(crate) fn retains_saved_model_route(&self) -> bool {
-        self.config_layer_stack
-            .saved_model_route()
-            .is_some_and(|(model, provider)| {
-                self.model.as_deref() == Some(model) && self.model_provider_id == provider
-            })
-    }
-
-    pub(crate) fn try_retain_legacy_model_route(&mut self) -> io::Result<bool> {
-        let provider = self.model_provider_id.as_str();
-        let Some(model) = self.model.as_deref().and_then(|model| {
-            codex_models_manager::model_with_legacy_saved_provider(model, provider)
-        }) else {
-            return Ok(false);
-        };
-        if let Some(required) = self.config_layer_stack.required_model_provider()
-            && required != provider
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                format!(
-                    "Saved model provider `{provider}` conflicts with required provider `{required}`"
-                ),
-            ));
-        }
-        if !self.retains_saved_model_route() {
-            self.config_layer_stack = self
-                .config_layer_stack
-                .clone()
-                .with_saved_model_route(model, provider)?;
-        }
-        Ok(true)
-    }
-
     pub(crate) fn validate_external_subagent_model(&self) -> io::Result<()> {
         let provider = self.model_provider_id.as_str();
         if codex_models_manager::provider_has_model_bindings(provider)

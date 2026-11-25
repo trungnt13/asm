@@ -119,14 +119,12 @@ impl ConfigRequestProcessor {
         params: ConfigReadParams,
     ) -> Result<ConfigReadResponse, JSONRPCErrorError> {
         let cwd = params.cwd.as_ref().map(PathBuf::from);
-        let config = match self.config_manager.load_for_config_read(cwd).await {
+        let config = match self.load_latest_config(cwd).await {
             Ok(config) => config,
             Err(err) => {
                 // Report layer read/decoding errors before full-config validation errors, as before.
                 self.config_manager.read(params).await.map_err(map_error)?;
-                return Err(internal_error(format!(
-                    "failed to resolve feature override precedence: {err}"
-                )));
+                return Err(err);
             }
         };
         let mut response =

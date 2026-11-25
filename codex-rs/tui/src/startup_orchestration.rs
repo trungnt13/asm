@@ -500,9 +500,6 @@ pub(super) async fn run_main_inner(
 
     let mut overrides = ConfigOverrides {
         model,
-        defer_unavailable_model_provider: cli.resume_picker
-            || cli.resume_last
-            || cli.resume_session_id.is_some(),
         approval_policy,
         sandbox_mode,
         cwd: cwd_override,

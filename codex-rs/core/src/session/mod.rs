@@ -788,7 +788,7 @@ impl Session {
             .as_deref()
             .and_then(codex_models_manager::provider_for_model)
             .is_some();
-        if bound_model && !args.config.retains_saved_model_route() {
+        if bound_model {
             args.config.apply_external_model_provider()?;
             args.models_manager = crate::thread_manager::build_models_manager(
                 &args.config,

@@ -4,7 +4,6 @@ use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
-use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadSettingsSnapshot;
 use codex_rollout::InitialHistory;
 use codex_rollout::RolloutItem;
@@ -153,32 +152,6 @@ pub(super) fn latest_persisted_model_settings(
         }
     }
     None
-}
-
-pub(super) fn latest_legacy_turn_model<'a>(
-    history: &'a InitialHistory,
-    provider: &str,
-) -> Option<&'a str> {
-    let InitialHistory::Resumed(resumed) = history else {
-        return None;
-    };
-    let (RolloutItem::SessionMeta(meta), items) = resumed.history.split_first()? else {
-        return None;
-    };
-    // Legacy turn contexts have no thread ID. A fork can contain its parent's contexts.
-    if meta.meta.id != resumed.conversation_id
-        || meta.meta.history_mode != ThreadHistoryMode::Legacy
-        || meta.meta.forked_from_id.is_some()
-        || meta.meta.parent_thread_id.is_some()
-        || meta.meta.source.parent_thread_id().is_some()
-        || meta.meta.model_provider.as_deref() != Some(provider)
-    {
-        return None;
-    }
-    items.iter().rev().find_map(|item| match item {
-        RolloutItem::TurnContext(context) => Some(context.model.as_str()),
-        _ => None,
-    })
 }
 
 #[cfg(test)]
