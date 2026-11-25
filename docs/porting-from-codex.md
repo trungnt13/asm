@@ -398,6 +398,16 @@ Explicit `cursor-agent/<model>` selects official Cursor ACP (`agent acp`, JSON-R
 
 ### Minimal diagnostics
 
+Do not add optional diagnostics or telemetry, or make the change depend on either. For existing diagnostics and telemetry:
+
+1. If they do not interfere with the change, leave them alone.
+2. If a very small change resolves the conflict, make that change.
+3. Otherwise, remove only the diagnostics or telemetry that block the change.
+
+When removing a collector, keep the config and protocol behavior the Codex app needs. If the app needs the collector itself, report the conflict before removing it.
+
+When app behavior could change, verify the affected flow in the Codex app with the candidate backend. Follow the [shared compatibility gate](#shared-compatibility-gate) where it applies.
+
 - Default `diagnostic_log_capture = false`. This startup policy controls Rust stderr/file logs, persistent diagnostics, feedback ring/continuous tags, optional TUI replay, and rollout-trace recorders. `RUST_LOG`, `log_dir`, and recorder environment variables cannot enable disabled capture.
 - To opt in, set `diagnostic_log_capture = true` and restart affected processes. Keep existing filters. Explicit `log_dir` also routes SQLite logs unless managed `sqlite_home` overrides it. Propagate policy to the code-mode helper; inherited helper settings cannot override it. Standalone helpers without user config require explicit opt-in.
 - With capture disabled, do not allocate feedback capture, install its tracing layers, open/migrate diagnostic databases, or run insertion/pruning/reclamation workers. Leave historical files unchanged during ordinary startup.
