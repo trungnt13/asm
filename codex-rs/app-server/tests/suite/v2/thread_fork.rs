@@ -2599,7 +2599,8 @@ async fn assert_thread_fork_ephemeral_remains_pathless_and_omits_listing(
         assert_eq!(thread.turns.len(), 1, "expected copied fork history");
 
         let turn = &thread.turns[0];
-        assert_eq!(turn.status, TurnStatus::Completed);
+        // The legacy fixture has a user message but no saved turn completion.
+        assert_eq!(turn.status, TurnStatus::Interrupted);
         assert_eq!(turn.items.len(), 1, "expected user message item");
         match &turn.items[0].payload {
             ThreadItemPayload::UserMessage { content, .. } => {

@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios_guardian_hosted.rs
-assertion_line: 241
 expression: snapshot
 ---
 Scenario: The root sets a restriction. A hosted worker requests an inspection. Guardian reviews it with root evidence, then the worker receives the command output.
@@ -37,8 +36,8 @@ Scenario: The root sets a restriction. A hosted worker requests an inspection. G
 
 ## Window 3 (after request 2: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 3 (turn) --
-00:additional_tools/developer (1; hash=bbdbc99401a1afb0):
-        - namespace/functions; hash=42a1e6648ccef1f0
+00:additional_tools/developer (1; hash=efe536fb549d8709):
+        - namespace/functions; hash=09cfe4867283bb41
           - custom/exec
           - function/wait
 01:message/developer:
