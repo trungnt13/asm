@@ -98,7 +98,7 @@ pub(super) struct Chunk {
     break_before: BreakBefore,
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 enum BreakBefore {
     #[default]
     Preferred,
