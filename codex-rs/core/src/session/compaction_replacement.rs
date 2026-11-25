@@ -57,11 +57,11 @@ impl<'a> PrefixCompactionInstallation<'a> {
         let current = state.history.annotated_items();
         let (replaced, suffix) = current.split_at(self.prefix.len);
         let mut initial_context = self.initial_context;
-        initial_context.extend(
-            state
-                .additional_context
-                .restore_compacted_items(replaced, &mut items),
-        );
+        // The unchanged suffix already contains updates through this baseline.
+        if let Some(previous) = state.history.world_state_baseline() {
+            world_state_baseline = previous.clone();
+        }
+        initial_context.extend(world_state_baseline.restore_input_context(replaced, &mut items));
         if suffix.iter().any(|envelope| {
             crate::compact_retained_tool_outputs::is_retained_tool_output(envelope)
                 || compact::is_real_user_or_agent_message(&envelope.item)
@@ -92,10 +92,6 @@ impl<'a> PrefixCompactionInstallation<'a> {
                 Some([kind]) if matches!(kind.0.as_str(), "token_budget.reminder" | "compaction.auto_fallback_prompt" | "compaction.new_context_completed")
             )
         }).cloned());
-        // The retained suffix already contains updates through this baseline.
-        if let Some(checkpoint) = state.history.world_state_checkpoint() {
-            world_state_baseline = WorldStateSnapshot::from(&checkpoint.state);
-        }
         // Volatile sections must refresh in the new window even if their
         // previous messages and comparison state survived in the suffix.
         for section_id in self.reset_world_state_sections {

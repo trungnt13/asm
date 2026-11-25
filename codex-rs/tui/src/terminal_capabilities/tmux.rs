@@ -20,16 +20,16 @@ static PROBE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 /// Capture policy for the current terminal setup, shared by fullscreen and overlays.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum MouseCapture {
+pub(crate) enum MouseCapture {
     #[default]
     Enabled,
-    DisabledByTmux,
+    Disabled,
 }
 
 impl MouseCapture {
     fn parse(mouse: &str) -> Option<Self> {
         match mouse.trim() {
-            "0" | "off" => Some(Self::DisabledByTmux),
+            "0" | "off" => Some(Self::Disabled),
             "1" | "on" => Some(Self::Enabled),
             _ => None,
         }
@@ -62,7 +62,7 @@ fn target() -> Option<String> {
 }
 
 /// A failed refresh must preserve the last confirmed policy, including mouse off.
-pub(super) fn sample_mouse(previous: MouseCapture) -> Option<MouseCapture> {
+pub(crate) fn sample_mouse(previous: MouseCapture) -> Option<MouseCapture> {
     let target = target()?;
     // tmux clears the socket's execute bits when its last client detaches.
     // Avoid spawning commands (and filling show-messages) on an idle server.
@@ -80,7 +80,7 @@ pub(super) fn sample_mouse(previous: MouseCapture) -> Option<MouseCapture> {
     // display-message (and the user's after-display-message hook) on a change.
     let (condition, report) = match previous {
         MouseCapture::Enabled => ("#{==:#{mouse},0}", "display-message -p 0"),
-        MouseCapture::DisabledByTmux => ("#{==:#{mouse},1}", "display-message -p 1"),
+        MouseCapture::Disabled => ("#{==:#{mouse},1}", "display-message -p 1"),
     };
     command.args(["if-shell", "-F", "-t", &target, condition, report]);
     // Keep the periodic check short so a busy server cannot starve resize recovery.

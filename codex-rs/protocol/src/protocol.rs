@@ -31,6 +31,7 @@ use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::config_types::WindowsSandboxLevel;
 use crate::dynamic_tools::DynamicToolCallOutputContentItem;
 use crate::dynamic_tools::DynamicToolCallRequest;
+use crate::dynamic_tools::DynamicToolCallResult;
 use crate::dynamic_tools::DynamicToolResponse;
 use crate::dynamic_tools::DynamicToolSpec;
 use crate::error::Result as CodexResult;
@@ -223,8 +224,6 @@ pub struct ConversationStartParams {
     pub transport: Option<ConversationStartTransport>,
     /// Overrides the configured realtime protocol version for this session only.
     pub version: Option<RealtimeConversationVersion>,
-    /// None inherits the thread setting; Some(None) selects the provider default.
-    pub voice: Option<Option<RealtimeVoice>>,
 }
 
 /// Authentication selected by the embedding host for an existing call.
@@ -334,48 +333,6 @@ pub enum RealtimeVoice {
     Vale,
     Verse,
     Viola,
-}
-
-impl RealtimeVoice {
-    pub fn wire_name(self) -> &'static str {
-        match self {
-            Self::Alloy => "alloy",
-            Self::Arbor => "arbor",
-            Self::Ash => "ash",
-            Self::Aube => "aube",
-            Self::Ballad => "ballad",
-            Self::Breeze => "breeze",
-            Self::Bubbie => "bubbie",
-            Self::Cedar => "cedar",
-            Self::Coral => "coral",
-            Self::Cove => "cove",
-            Self::Echo => "echo",
-            Self::Ember => "ember",
-            Self::Haetsal => "haetsal",
-            Self::Hanul => "hanul",
-            Self::Himari => "himari",
-            Self::Juniper => "juniper",
-            Self::Leher => "leher",
-            Self::Maple => "maple",
-            Self::Marin => "marin",
-            Self::Miko => "miko",
-            Self::Neer => "neer",
-            Self::Porto => "porto",
-            Self::Rindo => "rindo",
-            Self::Rio => "rio",
-            Self::Rivage => "rivage",
-            Self::Sage => "sage",
-            Self::Selva => "selva",
-            Self::Shimmer => "shimmer",
-            Self::Sol => "sol",
-            Self::Sonna => "sonna",
-            Self::Spruce => "spruce",
-            Self::Tinta => "tinta",
-            Self::Vale => "vale",
-            Self::Verse => "verse",
-            Self::Viola => "viola",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
@@ -924,6 +881,12 @@ pub enum Op {
         /// Tool output payload.
         response: DynamicToolResponse,
     },
+    /// Reply from a client that supports structured dynamic tool results.
+    #[debug("DynamicToolResult {{ id: {id:?}, success: {} }}", response.success())]
+    DynamicToolResult {
+        id: String,
+        response: DynamicToolCallResult,
+    },
 
     /// Request MCP servers to reinitialize and refresh cached tool lists.
     RefreshMcpServers,
@@ -1183,7 +1146,9 @@ impl Op {
             Self::ResolveElicitation { .. } => "resolve_elicitation",
             Self::UserInputAnswer { .. } => "user_input_answer",
             Self::RequestPermissionsResponse { .. } => "request_permissions_response",
-            Self::DynamicToolResponse { .. } => "dynamic_tool_response",
+            Self::DynamicToolResponse { .. } | Self::DynamicToolResult { .. } => {
+                "dynamic_tool_response"
+            }
             Self::RefreshMcpServers => "refresh_mcp_servers",
             Self::ReloadUserConfig => "reload_user_config",
             Self::Compact => "compact",

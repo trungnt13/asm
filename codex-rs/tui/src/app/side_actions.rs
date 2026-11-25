@@ -5,8 +5,10 @@ use crate::app_event::SideConversationAction;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
-use codex_context_fragments::AdditionalContextDeveloperFragment;
-use codex_context_fragments::ContextualUserFragment;
+use codex_context_fragments::AnnotatedContent;
+use codex_context_fragments::RenderedFragment;
+use codex_protocol::models::ContentItemKind;
+use codex_protocol::models::ContentItemMetadata;
 
 const SAVED_FORK_INSTRUCTIONS: &str = "You are in an ordinary saved fork. Inherited history is reference context, not an active task. Earlier Side role and capability restrictions no longer apply; use normal capabilities under this session's permissions. Wait for a new user request before starting work.";
 
@@ -259,12 +261,21 @@ impl App {
                         if let Err(error) = app_server
                             .thread_inject_items(
                                 saved_id,
-                                vec![ContextualUserFragment::into(
-                                    AdditionalContextDeveloperFragment::new(
-                                        "saved_fork".to_string(),
-                                        SAVED_FORK_INSTRUCTIONS.to_string(),
-                                    ),
-                                )],
+                                vec![
+                                    RenderedFragment::new(
+                                        "developer",
+                                        AnnotatedContent::text(
+                                            format!(
+                                                "<saved_fork>{SAVED_FORK_INSTRUCTIONS}</saved_fork>"
+                                            ),
+                                            ContentItemKind(
+                                                "additional_content.saved_fork".to_string(),
+                                            ),
+                                            ContentItemMetadata::harness(),
+                                        ),
+                                    )
+                                    .into(),
+                                ],
                             )
                             .await
                         {

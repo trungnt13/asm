@@ -1,16 +1,20 @@
-//! Order intake requests by source position and acknowledge a request once its history has
-//! been routed. The acknowledgement is a lower bound; subsequent board writes remain visible.
+//! Share a root history position across queued reviews, then acknowledge each request
+//! once its evidence has been routed. Later board writes remain visible.
 use std::sync::Arc;
 use std::sync::OnceLock;
 
 use anyhow::Context;
+use codex_core::guardian_review::PendingReviewWrites;
+use codex_core::guardian_review::ReviewPreparationError;
 use codex_guardian_reviewer::ReviewerTasks;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::HistoryPosition;
 use codex_thread_store::OriginalHistoryRequest;
 use codex_thread_store::ThreadStore;
+use codex_thread_store::ThreadStoreResult;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use tokio::sync::watch;
 
 use crate::EvidenceCursor;
@@ -20,11 +24,22 @@ use crate::EvidenceSnapshot;
 #[path = "cutoff_tests.rs"]
 mod tests;
 
+enum CutoffKind {
+    Bind,
+    CatchUp,
+}
+
+struct CutoffRequest {
+    kind: CutoffKind,
+    reply: oneshot::Sender<ThreadStoreResult<Option<HistoryPosition>>>,
+}
+
 /// Installed on the root thread while its evidence intake is active.
 pub struct RootEvidence {
-    root: ThreadId,
     lifetime: Arc<ReviewerTasks>,
     history: Arc<dyn ThreadStore>,
+    cutoffs: mpsc::UnboundedSender<CutoffRequest>,
+    cutoff_failure: Arc<OnceLock<ReviewPreparationError>>,
     // Advances on enqueue. The housekeeper independently tracks successful routing.
     enqueued: Mutex<EvidenceCursor>,
     // A rejected durable record keeps its reason for subsequent reviews of this root.
@@ -36,6 +51,66 @@ pub struct RootEvidence {
 pub(super) struct Capture {
     pub snapshot: EvidenceSnapshot,
     routed: watch::Sender<HistoryPosition>,
+}
+
+async fn capture_cutoffs(
+    root: ThreadId,
+    history: Arc<dyn ThreadStore>,
+    writes: Arc<PendingReviewWrites>,
+    failure: Arc<OnceLock<ReviewPreparationError>>,
+    mut requests: mpsc::UnboundedReceiver<CutoffRequest>,
+) {
+    loop {
+        let mut batch = Vec::new();
+        if requests.recv_many(&mut batch, usize::MAX).await == 0 {
+            return;
+        }
+        batch.retain(|request| !request.reply.is_closed());
+        if batch.is_empty() {
+            continue;
+        }
+        // Seal the group before inspecting history. A later caller may need a
+        // newer record even if the root's authorization hasn't changed.
+        let reviewers = batch.len();
+        let lone_catch_up = reviewers == 1 && matches!(batch[0].kind, CutoffKind::CatchUp);
+        let cancelled = async {
+            for request in &mut batch {
+                request.reply.closed().await;
+            }
+        };
+        let capture = async {
+            // With no position to share, let enqueue read the unread records
+            // and their end position together under the cursor lock.
+            if lone_catch_up {
+                return Ok(None);
+            }
+            tracing::debug!(name: "guardian_v3.cutoff_batch", reviewers, "Capturing Guardian history position");
+            history.flush_thread(root).await?;
+            history
+                .read_original_history(root, OriginalHistoryRequest::Tail)
+                .await
+                .map(|history| Some(history.end))
+        };
+        let result = tokio::select! {
+            biased;
+            () = cancelled => continue,
+            result = async {
+                // One wait covers everyone already in this group.
+                if let Err(error) = writes.wait().await {
+                    // Publish the reason before closing the current and queued replies.
+                    let _ = failure.set(error);
+                    return None;
+                }
+                Some(capture.await)
+            } => result,
+        };
+        let Some(result) = result else {
+            return;
+        };
+        for request in batch {
+            let _ = request.reply.send(result.clone());
+        }
+    }
 }
 
 fn covers(position: HistoryPosition, cutoff: HistoryPosition) -> anyhow::Result<bool> {
@@ -89,14 +164,29 @@ impl RootEvidence {
         lifetime: Arc<ReviewerTasks>,
         history: Arc<dyn ThreadStore>,
         cursor: EvidenceCursor,
+        writes: Arc<PendingReviewWrites>,
     ) -> (Arc<Self>, mpsc::Receiver<Capture>) {
         let (pending, requests) = mpsc::channel(1);
         let routed = watch::Sender::new(cursor.position());
+        let (cutoffs, readers) = mpsc::unbounded_channel();
+        let cutoff_failure = Arc::new(OnceLock::new());
+        let capture = capture_cutoffs(
+            cursor.thread_id(),
+            Arc::clone(&history),
+            writes,
+            Arc::clone(&cutoff_failure),
+            readers,
+        );
+        let cancel = lifetime.cancellation.clone();
+        lifetime.tasks.spawn(async move {
+            let _ = cancel.run_until_cancelled(capture).await;
+        });
         (
             Arc::new(Self {
-                root: cursor.thread_id(),
                 lifetime,
                 history,
+                cutoffs,
+                cutoff_failure,
                 enqueued: Mutex::new(cursor),
                 rejection: OnceLock::new(),
                 pending,
@@ -210,13 +300,25 @@ impl RootEvidence {
 impl RootEvidence {
     /// Capture only the position. Binding an action does not enqueue any housekeeper work.
     pub(super) async fn capture_cutoff(&self) -> anyhow::Result<HistoryPosition> {
-        self.ensure_active()?;
-        self.history.flush_thread(self.root).await?;
-        Ok(self
-            .history
-            .read_original_history(self.root, OriginalHistoryRequest::Tail)
+        self.request_cutoff(CutoffKind::Bind)
             .await?
-            .end)
+            .context("Guardian binding requires a history position")
+    }
+
+    pub(super) fn cutoff_error(&self) -> ReviewPreparationError {
+        self.cutoff_failure
+            .get()
+            .copied()
+            .unwrap_or(ReviewPreparationError::EvidenceUnavailable)
+    }
+
+    async fn request_cutoff(&self, kind: CutoffKind) -> anyhow::Result<Option<HistoryPosition>> {
+        self.ensure_active()?;
+        let (reply, position) = oneshot::channel();
+        self.cutoffs
+            .send(CutoffRequest { kind, reply })
+            .map_err(|_| self.cutoff_error())?;
+        Ok(position.await.map_err(|_| self.cutoff_error())??)
     }
 
     /// Submit a catch-up through the current durable tail and return its delivery acknowledgement.
@@ -230,6 +332,10 @@ impl RootEvidence {
         &self,
         cutoff: Option<HistoryPosition>,
     ) -> anyhow::Result<impl Future<Output = anyhow::Result<HistoryPosition>> + Send + use<>> {
+        let cutoff = match cutoff {
+            Some(end) => Some(end),
+            None => self.request_cutoff(CutoffKind::CatchUp).await?,
+        };
         let target = tokio::select! { biased;
             _ = self.lifetime.cancellation.cancelled() => anyhow::bail!("Guardian intake stopped"),
             result = self.enqueue(cutoff) => result?,

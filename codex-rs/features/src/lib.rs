@@ -113,6 +113,8 @@ pub enum Feature {
     DaybreakProgramPropagation,
     /// Restrict CLI resume of attributed local threads to their creator.
     CliResumeAccountCheck,
+    /// Fetch Statsig decisions for this harness.
+    StatsigGates,
     /// Removed no-op; use `tui.fullscreen_transcript` instead.
     TranscriptV2,
     // Stable.
@@ -639,6 +641,7 @@ pub struct Features {
     legacy_usages: BTreeSet<LegacyFeatureUsage>,
     /// Spawned agents require their own opt-in, independent of the root feature flag.
     pub subagent_async_messages_enabled: bool,
+    pub async_messages_in_code_mode: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1054,10 +1057,13 @@ pub struct FeaturesToml {
 
 impl Features {
     fn apply_toml(&mut self, features: &FeaturesToml) {
-        if let Some(FeatureToml::Config(config)) = &features.send_message_to_user_async
-            && let Some(subagents) = config.subagents
-        {
-            self.subagent_async_messages_enabled = subagents;
+        if let Some(FeatureToml::Config(config)) = &features.send_message_to_user_async {
+            if let Some(subagents) = config.subagents {
+                self.subagent_async_messages_enabled = subagents;
+            }
+            if let Some(direct_only) = config.direct_only {
+                self.async_messages_in_code_mode = !direct_only;
+            }
         }
         let entries = features.entries();
         self.apply_map(&entries);
@@ -1202,6 +1208,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::CliResumeAccountCheck,
         key: "cli_resume_account_check",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::StatsigGates,
+        key: "statsig_gates",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
     },
@@ -1861,8 +1873,8 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::McpSharedReplCwd,
         key: "mcp_shared_repl_cwd",
-        stage: Stage::UnderDevelopment,
-        default_enabled: false,
+        stage: Stage::Stable,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::McpLazyStdioStartup,

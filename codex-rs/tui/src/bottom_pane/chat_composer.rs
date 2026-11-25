@@ -158,9 +158,10 @@
 //! Plain Enter on an empty generated quote-comment line removes its prefix without submitting.
 //! `Enter` submits immediately by default. Opt-in `tui.multiline_enter` inserts a newline
 //! for multiline drafts (including expanded pending pastes), only when plain Enter is bound
-//! to both submit and editor newline. Active paste Enter handling runs first. Modified submit
-//! keys flush buffered pastes and send regardless of line count; popup actions stay unchanged.
-//! `Enter` otherwise submits immediately. `Tab` requests queuing while a task is running; if no task is
+//! to both submit and editor newline. Plain Enter first checks for a pasted newline.
+//! Modified submit keys flush buffered input and submit regardless of line count.
+//! These rules do not change popup actions.
+//! `Tab` requests queuing while a task is running; if no task is
 //! running, `Tab` submits just like Enter so input is never dropped.
 //! Submit and queue bindings act only on fresh key presses; repeated events are consumed so a held
 //! key cannot dispatch a preserved draft after another input layer closes.
@@ -327,7 +328,7 @@
 //! - Unmodified Tab joins detected bursts, including short Unicode prefixes, before popup dispatch.
 //!   Expired bursts are flushed first so manual Tab keeps its normal shortcut behavior.
 //! - [`ChatComposer::flush_paste_burst_if_due`]/[`ChatComposer::handle_paste_burst_flush`]: called
-//!   from UI ticks to integrate a pending burst via [`ChatComposer::apply_paste`] or insert a
+//!   from UI ticks to display a burst while preserving its Enter deadline, or to insert a
 //!   held single character. Explicit paste events (terminal or clipboard) use
 //!   [`ChatComposer::handle_paste`], which first commits buffered typing before classifying the
 //!   pasted text. This preserves the order when a paste arrives before the next burst-flush tick;
@@ -366,6 +367,7 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::StatefulWidgetRef;
 use ratatui::widgets::Widget;
@@ -1879,9 +1881,7 @@ impl ChatComposer {
 
     /// Flush buffered typing before clearing so cancellation preserves the complete draft in history.
     pub(crate) fn clear_for_ctrl_c(&mut self) -> Option<String> {
-        if let Some(pasted) = self.draft.paste_burst.flush_before_modified_input() {
-            self.apply_paste(pasted);
-        }
+        self.flush_pending_input();
         if self.is_empty() {
             return None;
         }
@@ -2019,8 +2019,7 @@ impl ChatComposer {
     ///
     /// Call this from a UI tick to turn paste-burst transient state into explicit textarea edits:
     ///
-    /// - If a burst times out, integrate it via [`Self::apply_paste`]. Its key events have already
-    ///   been classified; [`Self::handle_paste`] classifies explicit terminal pastes instead.
+    /// - If a burst times out, display the text while preserving its Enter deadline.
     /// - If only the first ASCII char was held (flicker suppression) and no burst followed, emit it
     ///   as normal typed input.
     ///
@@ -3762,53 +3761,38 @@ impl ChatComposer {
         {
             return (InputResult::None, true);
         }
-        if self.queue_keys.is_pressed(key_event)
-            && (self.is_task_running || self.queue_submissions || !self.is_bang_shell_command())
-        {
-            return self.handle_submission(self.is_task_running || self.queue_submissions);
-        }
-
-        if key_event.code == KeyCode::Enter
-            && key_event.modifiers.is_empty()
-            && (self.submit_keys.is_pressed(key_event)
-                || self.editor_keymap.insert_newline.is_pressed(key_event))
-            && !self.blocks_direct_input
-            && !self.draft.textarea.is_vim_normal_mode()
-            && matches!(self.popups.active, ActivePopup::None)
-            && self.active_empty_quote_comment().is_some()
-        {
-            let now = tokio::time::Instant::now().into_std();
-            self.handle_paste_burst_flush(now);
-            if self.handle_paste_enter(now) {
-                return (InputResult::None, true);
-            }
-            if self.leave_empty_quote_comment() {
-                return (InputResult::None, true);
-            }
-        }
-
-        if self.submit_keys.is_pressed(key_event) {
-            if self.config.multiline_enter {
-                if key_event.code == KeyCode::Enter
-                    && key_event.modifiers == KeyModifiers::NONE
-                    && self.editor_keymap.insert_newline.is_pressed(key_event)
+        let queue = self.queue_keys.is_pressed(key_event)
+            && (self.is_task_running || self.queue_submissions || !self.is_bang_shell_command());
+        let submit = self.submit_keys.is_pressed(key_event);
+        let plain_enter = key_event.code == KeyCode::Enter && key_event.modifiers.is_empty();
+        if plain_enter && !queue {
+            let editor_newline = self.editor_keymap.insert_newline.is_pressed(key_event);
+            let empty_quote_comment = (submit || editor_newline)
+                && !self.blocks_direct_input
+                && !self.draft.textarea.is_vim_normal_mode()
+                && matches!(self.popups.active, ActivePopup::None)
+                && self.active_empty_quote_comment().is_some();
+            let multiline_enter = submit && editor_newline && self.config.multiline_enter;
+            if empty_quote_comment || multiline_enter {
+                let now = tokio::time::Instant::now().into_std();
+                self.handle_paste_burst_flush(now);
+                if self.handle_paste_enter(now)
+                    || (empty_quote_comment && self.leave_empty_quote_comment())
                 {
-                    let now = tokio::time::Instant::now().into_std();
-                    self.handle_paste_burst_flush(now);
-                    if self.handle_paste_enter(now) {
-                        return (InputResult::None, true);
-                    }
-                    if self.current_text_with_pending().contains('\n') {
-                        return self.handle_input_basic(key_event);
-                    }
-                } else if !key_event.modifiers.is_empty() {
-                    if let Some(pasted) = self.draft.paste_burst.flush_before_modified_input() {
-                        self.apply_paste(pasted);
-                    }
-                    self.draft.paste_burst.clear_after_explicit_paste();
+                    return (InputResult::None, true);
+                }
+                if multiline_enter && self.current_text_with_pending().contains('\n') {
+                    return self.handle_input_basic(key_event);
                 }
             }
-            return self.handle_submission(self.queue_submissions);
+        }
+        if queue || submit {
+            // Only a plain Enter reaching submission can still be a pasted newline.
+            if !plain_enter {
+                self.flush_pending_input();
+            }
+            return self
+                .handle_submission(self.queue_submissions || (queue && self.is_task_running));
         }
 
         if let KeyEvent {
@@ -5027,7 +5011,17 @@ impl ChatComposer {
             selection.register(footer_rect.intersection(buf.area), changed);
         }
         let style = user_message_style();
-        Block::default().style(style).render(composer_rect, buf);
+        let mut block = Block::default().style(style);
+        // Mark the padding without guessing a fill that could hide the terminal's cursor.
+        if style.bg.is_none() && !textarea_rect.is_empty() {
+            let gray = crate::terminal_palette::best_color((128, 128, 128));
+            if gray != Color::Reset {
+                block = block
+                    .borders(Borders::TOP | Borders::BOTTOM)
+                    .border_style(gray);
+            }
+        }
+        block.render(composer_rect, buf);
         if let Some(previews) = options.image_previews {
             previews.render(
                 thumbnails,
@@ -5280,17 +5274,17 @@ mod tests {
     }
 
     #[test]
-    fn light_terminal_palette_renders_light_composer_snapshot() {
+    fn composer_with_light_or_missing_palette() {
         let colors = crate::terminal_probe::DefaultColors {
             fg: (0x55, 0x57, 0x53),
             bg: (0xff, 0xff, 0xff),
         };
 
+        let (mut composer, _rx) = new_test_composer();
+        let area = Rect::new(
+            /*x*/ 0, /*y*/ 0, /*width*/ 48, /*height*/ 6,
+        );
         crate::terminal_palette::with_test_default_colors(colors, || {
-            let (composer, _rx) = new_test_composer();
-            let area = Rect::new(
-                /*x*/ 0, /*y*/ 0, /*width*/ 48, /*height*/ 6,
-            );
             let mut buffer = Buffer::empty(area);
             composer.render(area, &mut buffer);
 
@@ -5299,6 +5293,14 @@ mod tests {
                 crate::terminal_palette::rgb_color((244, 244, 244))
             );
             insta::assert_snapshot!("light_terminal_palette_composer", format!("{buffer:?}"));
+        });
+        crate::terminal_palette::with_test_default_colors(/*colors*/ None, || {
+            composer.draft.textarea.insert_str("Explain ");
+            composer.draft.textarea.insert_element("@file.rs");
+            composer.set_remote_image_urls(vec!["https://example.com/image.png".to_string()]);
+            let mut buffer = Buffer::empty(area);
+            composer.render(area, &mut buffer);
+            insta::assert_snapshot!("missing_terminal_palette_composer", format!("{buffer:?}"));
         });
     }
 
@@ -6509,20 +6511,17 @@ mod tests {
         assert_eq!(composer.footer_mode(), FooterMode::ComposerEmpty);
     }
 
-    #[test]
-    fn clear_for_ctrl_c_records_cleared_draft() {
-        let (tx, _rx) = unbounded_channel::<AppEvent>();
-        let sender = AppEventSender::new(tx);
-        let mut composer = ChatComposer::new(
-            /*has_input_focus*/ true,
-            sender,
-            /*enhanced_keys_supported*/ false,
-            "Ask Codex to do anything".to_string(),
-            /*disable_paste_burst*/ false,
-        );
-
-        composer.set_text_content("draft text".to_string(), Vec::new(), Vec::new());
+    #[tokio::test(start_paused = true)]
+    async fn clear_for_ctrl_c_records_cleared_draft() {
+        let (mut composer, _rx) = new_test_composer();
+        for ch in "draft text".chars() {
+            composer.handle_key_event(KeyEvent::from(KeyCode::Char(ch)));
+        }
+        tokio::time::advance(PasteBurst::recommended_active_flush_delay()).await;
+        assert!(composer.flush_paste_burst_if_due());
         assert_eq!(composer.clear_for_ctrl_c(), Some("draft text".to_string()));
+        composer.handle_key_event(KeyEvent::from(KeyCode::Enter));
+        composer.flush_pending_paste_burst();
         assert!(composer.is_empty());
 
         assert_eq!(

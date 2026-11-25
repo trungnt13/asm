@@ -1545,6 +1545,9 @@
             "standalone_web_search": {
               "type": "boolean"
             },
+            "statsig_gates": {
+              "type": "boolean"
+            },
             "steer": {
               "type": "boolean"
             },
@@ -4919,9 +4922,6 @@
         },
         "version": {
           "$ref": "#/definitions/RealtimeConversationVersion"
-        },
-        "voice": {
-          "$ref": "#/definitions/RealtimeVoice"
         }
       },
       "type": "object"
@@ -4930,46 +4930,6 @@
       "enum": [
         "webrtc",
         "websocket"
-      ],
-      "type": "string"
-    },
-    "RealtimeVoice": {
-      "enum": [
-        "alloy",
-        "arbor",
-        "ash",
-        "aube",
-        "ballad",
-        "breeze",
-        "bubbie",
-        "cedar",
-        "coral",
-        "cove",
-        "echo",
-        "ember",
-        "haetsal",
-        "hanul",
-        "himari",
-        "juniper",
-        "leher",
-        "maple",
-        "marin",
-        "miko",
-        "neer",
-        "porto",
-        "rindo",
-        "rio",
-        "rivage",
-        "sage",
-        "selva",
-        "shimmer",
-        "sol",
-        "sonna",
-        "spruce",
-        "tinta",
-        "vale",
-        "verse",
-        "viola"
       ],
       "type": "string"
     },
@@ -5253,8 +5213,12 @@
     },
     "SendMessageToUserAsyncConfigToml": {
       "additionalProperties": false,
-      "description": "Controls which agents can send async user messages.",
+      "description": "Controls which agents can send async user messages and how they call the tool.",
       "properties": {
+        "direct_only": {
+          "description": "Keep async user messages top-level only (default). Set to false to follow the session's tool mode.",
+          "type": "boolean"
+        },
         "root_agent": {
           "description": "Sets the root agent's feature flag, just like the plain boolean shorthand. The model catalog can still enable the tool for the root when this is false.",
           "type": "boolean"
@@ -9313,6 +9277,9 @@
           "type": "boolean"
         },
         "standalone_web_search": {
+          "type": "boolean"
+        },
+        "statsig_gates": {
           "type": "boolean"
         },
         "steer": {

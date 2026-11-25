@@ -8,6 +8,7 @@ use crate::agent::host::AgentRuntimeServices;
 use crate::agent::host::AgentSessionReader;
 use crate::connectors;
 use crate::context::TokenBudgetContext;
+use crate::context::world_state::AdditionalContextState;
 use crate::context::world_state::AgentsMdState;
 use crate::context::world_state::AppsInstructionsState;
 use crate::context::world_state::CollaborationModeState;
@@ -28,11 +29,13 @@ use crate::context::world_state::RealtimeState;
 use crate::context::world_state::ToolsState;
 use crate::context::world_state::TopLevelToolsState;
 use crate::context::world_state::WorldState;
+use crate::context::world_state::WorldStateUpdate;
 use crate::context::world_state::format_agent_paths;
 use codex_connectors::AppToolPolicyEvaluator;
 use codex_extension_api::WorldStateContributionInput;
 use codex_features::Feature;
 use codex_file_system::FileSystemSandboxContext;
+use codex_history::ResponseItemEnvelope;
 use codex_mcp::CODEX_APPS_MCP_SERVER_NAME;
 use codex_prompts::ApprovalPromptContext;
 use codex_prompts::ResolvedModelMessages;
@@ -40,11 +43,56 @@ use codex_prompts::render_model_instructions;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::BaseInstructionsProvenance;
 use codex_protocol::models::ContentItemNamespace;
+use codex_protocol::models::ResponseItem;
+use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 
 impl Session {
+    pub(super) async fn record_input_world_state(
+        &self,
+        turn_context: &TurnContext,
+        model_info: &ModelInfo,
+        section: AdditionalContextState,
+    ) {
+        let (snapshot, updates, patch) = self
+            .state
+            .lock()
+            .await
+            .history
+            .render_input_world_state(section);
+        let items = self
+            .annotated_additional_context_updates(updates)
+            .collect::<Vec<_>>();
+        if !items.is_empty() {
+            self.record_annotated_conversation_items(turn_context, model_info, items)
+                .await;
+        }
+        self.commit_world_state(snapshot, patch).await;
+    }
+
+    pub(crate) fn annotated_additional_context_updates(
+        &self,
+        updates: Vec<WorldStateUpdate>,
+    ) -> impl Iterator<Item = ResponseItemEnvelope> {
+        crate::context_manager::updates::merge_world_state_updates(updates)
+            .into_iter()
+            .map(move |item| {
+                let mut envelope = ResponseItemEnvelope::new(item);
+                if matches!(
+                    envelope.item.as_ref(),
+                    ResponseItem::FunctionCallOutput { .. }
+                ) {
+                    envelope
+                        .metadata
+                        .get_or_insert_default()
+                        .additional_context_tool_output = true;
+                }
+                self.annotate_client_response_item(envelope)
+            })
+    }
+
     pub(super) fn host_roster_reader(
         &self,
         turn_context: &TurnContext,

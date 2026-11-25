@@ -1366,7 +1366,7 @@ network.transparent_tcp = true
         let prepared = proxy
             .proxy()
             .prepare_for_optional_environment(HashMap::new(), /*environment_id*/ None)?;
-        assert_eq!(prepared.sandbox_context.transparent_tcp, capture);
+        assert_eq!(prepared.sandbox_context.portable.transparent_tcp, capture);
     }
     Ok(())
 }
@@ -4792,7 +4792,7 @@ async fn open_thread_persistence(session: &mut Session) -> PathBuf {
         .expect("thread should have rollout path")
 }
 
-async fn attach_thread_persistence(session: &mut Session) -> PathBuf {
+pub(super) async fn attach_thread_persistence(session: &mut Session) -> PathBuf {
     let rollout_path = open_thread_persistence(session).await;
     session
         .ensure_rollout_materialized(PersistContext::Standard)
@@ -6897,13 +6897,14 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         context_ids,
         agent_runtime: crate::agent::host::AgentRuntimeServices::Controller,
         outcome_reporting: None,
+        pending_review_writes: None,
         installation_id: "11111111-1111-4111-8111-111111111111".to_string(),
         tx_event,
         parent_observer_event_tx: OnceLock::new(),
         agent_status: agent_status_tx,
         state: Mutex::new(state),
         initial_context_publication: Semaphore::new(/*permits*/ 1),
-        thread_settings_persistence: Semaphore::new(/*permits*/ 1),
+        thread_settings_persistence: Arc::new(Semaphore::new(/*permits*/ 1)),
         ephemeral_rollout_items: None,
         code_mode_message_tasks: Default::default(),
         managed_network_proxy_refresh_lock: Semaphore::new(/*permits*/ 1),
@@ -9270,13 +9271,14 @@ where
         context_ids,
         agent_runtime: crate::agent::host::AgentRuntimeServices::Controller,
         outcome_reporting: None,
+        pending_review_writes: None,
         installation_id: "11111111-1111-4111-8111-111111111111".to_string(),
         tx_event,
         parent_observer_event_tx: OnceLock::new(),
         agent_status: agent_status_tx,
         state: Mutex::new(state),
         initial_context_publication: Semaphore::new(/*permits*/ 1),
-        thread_settings_persistence: Semaphore::new(/*permits*/ 1),
+        thread_settings_persistence: Arc::new(Semaphore::new(/*permits*/ 1)),
         ephemeral_rollout_items: None,
         code_mode_message_tasks: Default::default(),
         managed_network_proxy_refresh_lock: Semaphore::new(/*permits*/ 1),
@@ -11416,7 +11418,7 @@ async fn build_initial_context_uses_retained_step_after_model_change() {
         model_info.context_window = None;
         model_info.max_context_window = None;
         let messages = model_info.model_messages.as_mut().unwrap();
-        messages.instructions_template = Some("A instructions".to_string());
+        messages.instructions_template = Some("A instructions".into());
     });
     session.state.lock().await.base_instructions_provenance =
         Some(codex_protocol::models::BaseInstructionsProvenance::Model {
@@ -11465,7 +11467,7 @@ async fn build_initial_context_uses_retained_step_after_model_change() {
         .model_messages
         .as_mut()
         .unwrap()
-        .instructions_template = Some("B instructions".to_string());
+        .instructions_template = Some("B instructions".into());
     turn_context
         .next_step_settings
         .store(Arc::new(ResolvedStepSettings::new(

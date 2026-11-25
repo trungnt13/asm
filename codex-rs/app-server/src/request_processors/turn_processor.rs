@@ -17,7 +17,6 @@ use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ImageReference as CoreImageReference;
-use codex_protocol::protocol::RealtimeConversationVersion;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnEnvironmentRequests;
 use codex_protocol::protocol::TurnSettingsUpdate;
@@ -218,8 +217,15 @@ impl TurnRequestProcessor {
             EnsureConversationListenerResult::Attached => {}
             EnsureConversationListenerResult::ConnectionClosed => return Ok(None),
         }
+        // Older servers silently ignore rootEvidence. Acknowledge it on success so clients
+        // can distinguish a worker review from one that used only the injected history.
+        let used_root_evidence = params.root_evidence.is_some();
         let result = thread
-            .guardian_review(&params.tool_call, cancellation)
+            .guardian_review_with_root_evidence(
+                &params.tool_call,
+                params.root_evidence,
+                cancellation,
+            )
             .await
             .map_err(|err| match err.details() {
                 CodexErrorDetails::InvalidRequest(message) => invalid_request(message.clone()),
@@ -227,6 +233,7 @@ impl TurnRequestProcessor {
             })?;
         Ok(Some(
             ThreadGuardianReviewResponse {
+                used_root_evidence,
                 call_id: result.call_id,
                 assessment: ThreadGuardianAssessment {
                     outcome: result.assessment.outcome,
@@ -1549,8 +1556,6 @@ impl TurnRequestProcessor {
                 Some("initialItems")
             } else if params.model.is_some() {
                 Some("model")
-            } else if params.voice.is_some() {
-                Some("voice")
             } else if params.delegation_ack_filler.is_some() {
                 Some("delegationAckFiller")
             } else {
@@ -1575,23 +1580,6 @@ impl TurnRequestProcessor {
                 "Native runtimes do not support realtime conversations",
             ));
         }
-        let voice = match params.voice {
-            Some(voice) => Some(Some(voice)),
-            None if !attaches_existing_call
-                && params.version == Some(RealtimeConversationVersion::V3) =>
-            {
-                let current = thread.config().await;
-                let latest = Box::pin(self.config_manager.load_latest_config_with_session_layers(
-                    &current.config_layer_stack,
-                    &current.cwd,
-                ))
-                .await
-                .map_err(|error| config_load_error(&error))?;
-                // Preserve a cleared preference instead of inheriting the thread's old voice.
-                Some(latest.realtime.voice)
-            }
-            None => None,
-        };
         self.submit_core_op(
             request_id,
             thread.as_ref(),
@@ -1641,7 +1629,6 @@ impl TurnRequestProcessor {
                     }
                 }),
                 version: params.version,
-                voice,
             }),
         )
         .await

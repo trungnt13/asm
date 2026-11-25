@@ -1,4 +1,5 @@
 use super::bridge::ExternalMessageBridge;
+use crate::context::world_state::WorldStateSnapshot;
 use codex_external_runtime::ClaudeRuntime;
 use codex_external_runtime::CursorRuntime;
 use codex_protocol::openai_models::NativeRuntime;
@@ -365,6 +366,9 @@ pub(crate) struct RuntimeSlot {
     // Native queued input is absorbed only after the current tool boundary.
     pub(crate) queued_input_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     pub(crate) authentication_required: std::sync::atomic::AtomicBool,
+    // Native prompt admission and Page filtering happen after rendering this context.
+    // Do not put this tentative baseline in the persisted Responses world state.
+    pub(super) additional_context_baseline: std::sync::Mutex<Option<WorldStateSnapshot>>,
     state: std::sync::Mutex<SlotState>,
     returned: tokio::sync::Notify,
     pub(crate) continuation_admission: tokio::sync::Semaphore,
@@ -377,6 +381,7 @@ impl Default for RuntimeSlot {
         Self {
             queued_input_count: Default::default(),
             authentication_required: Default::default(),
+            additional_context_baseline: Default::default(),
             state: Default::default(),
             returned: Default::default(),
             continuation_admission: tokio::sync::Semaphore::new(/*permits*/ 1),

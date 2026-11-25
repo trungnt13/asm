@@ -20,7 +20,6 @@ use codex_protocol::protocol::RealtimeHandoffRequested;
 use codex_protocol::protocol::RealtimeTranscriptDelta;
 use codex_protocol::protocol::RealtimeTranscriptDone;
 use codex_protocol::protocol::RealtimeTranscriptEntry;
-use codex_protocol::protocol::RealtimeVoice;
 use futures::SinkExt;
 use futures::StreamExt;
 use http::HeaderMap;
@@ -163,7 +162,6 @@ async fn realtime_ws_e2e_session_create_and_event_flow() {
                 event_parser: RealtimeEventParser::V1,
                 session_mode: RealtimeSessionMode::Conversational,
                 output_modality: RealtimeOutputModality::Audio,
-                voice: Some(RealtimeVoice::Cove),
             },
             HeaderMap::new(),
             HeaderMap::new(),
@@ -269,7 +267,6 @@ async fn realtime_ws_connect_webrtc_sideband_retries_join_until_server_is_availa
                 event_parser: RealtimeEventParser::RealtimeV2,
                 session_mode: RealtimeSessionMode::Conversational,
                 output_modality: RealtimeOutputModality::Audio,
-                voice: Some(RealtimeVoice::Marin),
             },
             "rtc_test",
             HeaderMap::new(),
@@ -350,7 +347,6 @@ async fn realtime_ws_existing_call_retries_activation_404_with_a_bounded_budget(
                         event_parser: RealtimeEventParser::RealtimeV2,
                         session_mode: RealtimeSessionMode::Conversational,
                         output_modality: RealtimeOutputModality::Audio,
-                        voice: Some(RealtimeVoice::Marin),
                     },
                     "rtc_prepared",
                     HeaderMap::new(),
@@ -406,7 +402,6 @@ async fn realtime_ws_existing_call_transport_close_preserves_session() {
                     event_parser,
                     session_mode: RealtimeSessionMode::Conversational,
                     output_modality: RealtimeOutputModality::Audio,
-                    voice: Some(RealtimeVoice::Marin),
                 },
                 "rtc_frontend_owned",
                 HeaderMap::new(),
@@ -462,7 +457,6 @@ async fn realtime_ws_frameless_session_close_still_ends_session() {
                 event_parser: RealtimeEventParser::FramelessBidi,
                 session_mode: RealtimeSessionMode::Conversational,
                 output_modality: RealtimeOutputModality::Audio,
-                voice: Some(RealtimeVoice::Marin),
             },
             "rtc_session_owner",
             HeaderMap::new(),
@@ -526,7 +520,6 @@ async fn realtime_ws_e2e_send_while_next_event_waits() {
                 event_parser: RealtimeEventParser::V1,
                 session_mode: RealtimeSessionMode::Conversational,
                 output_modality: RealtimeOutputModality::Audio,
-                voice: Some(RealtimeVoice::Cove),
             },
             HeaderMap::new(),
             HeaderMap::new(),
@@ -596,7 +589,6 @@ async fn realtime_ws_e2e_disconnected_emitted_once() {
                 event_parser: RealtimeEventParser::V1,
                 session_mode: RealtimeSessionMode::Conversational,
                 output_modality: RealtimeOutputModality::Audio,
-                voice: Some(RealtimeVoice::Cove),
             },
             HeaderMap::new(),
             HeaderMap::new(),
@@ -662,7 +654,6 @@ async fn realtime_ws_e2e_ignores_unknown_text_events() {
                 event_parser: RealtimeEventParser::V1,
                 session_mode: RealtimeSessionMode::Conversational,
                 output_modality: RealtimeOutputModality::Audio,
-                voice: Some(RealtimeVoice::Cove),
             },
             HeaderMap::new(),
             HeaderMap::new(),
@@ -771,7 +762,6 @@ async fn realtime_ws_e2e_realtime_v2_parser_emits_handoff_requested() {
                 event_parser: RealtimeEventParser::RealtimeV2,
                 session_mode: RealtimeSessionMode::Conversational,
                 output_modality: RealtimeOutputModality::Audio,
-                voice: Some(RealtimeVoice::Marin),
             },
             HeaderMap::new(),
             HeaderMap::new(),

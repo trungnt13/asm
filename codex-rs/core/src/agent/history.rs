@@ -350,6 +350,9 @@ type ForkedHistory = (
     Option<ThreadHistoryMode>,
     Option<PortableHistory>,
 );
+
+/// Prepare copied history while leaving startup settings and timing with the caller.
+#[tracing::instrument(name = "agent.spawn.prepare_forked_history", skip_all)]
 pub(super) async fn prepare_forked_history(
     state: &ThreadManagerState,
     session_source: &SessionSource,

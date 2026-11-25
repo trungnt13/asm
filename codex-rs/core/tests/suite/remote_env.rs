@@ -2726,7 +2726,7 @@ async fn ready_before_selection_resolves_resumed_thread_capability_root_after_wa
         .await;
 
     let runtime_paths = ExecServerRuntimeOptions::new(
-        std::env::current_exe()?,
+        core_test_support::exec_server_helper_exe()?,
         /*codex_linux_sandbox_exe*/ None,
     )?;
     let remote_config = RemoteEnvironmentConfig::new(

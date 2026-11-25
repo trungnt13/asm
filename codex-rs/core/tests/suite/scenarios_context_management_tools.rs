@@ -6,8 +6,8 @@ use codex_protocol::openai_models::ModelInfo;
 
 fn configure_tools(model: &mut ModelInfo, description: &str) {
     let message = ToolMessage {
-        description: Some(description.to_string()),
-        parameters: Some(r#"{"type":"object","properties":{},"additionalProperties":false,"description":"Catalog arguments."}"#.to_string()),
+        description: Some(description.into()),
+        parameters: Some(r#"{"type":"object","properties":{},"additionalProperties":false,"description":"Catalog arguments."}"#.into()),
     };
     model
         .model_messages

@@ -2452,6 +2452,8 @@ async fn thread_fork_surfaces_cloud_config_bundle_load_errors() -> Result<()> {
     let refresh_token_url = format!("{}/oauth/token", server.uri());
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
+        // Startup falls back to defaults after the 401 and ignores config.toml.
+        .with_args(&["-c", &format!("chatgpt_base_url={chatgpt_base_url:?}")])
         .without_auto_env()
         .with_env_overrides(&[
             ("OPENAI_API_KEY", None),
@@ -2597,7 +2599,8 @@ async fn assert_thread_fork_ephemeral_remains_pathless_and_omits_listing(
         assert_eq!(thread.turns.len(), 1, "expected copied fork history");
 
         let turn = &thread.turns[0];
-        assert_eq!(turn.status, TurnStatus::Completed);
+        // The legacy fixture has a user message but no saved turn completion.
+        assert_eq!(turn.status, TurnStatus::Interrupted);
         assert_eq!(turn.items.len(), 1, "expected user message item");
         match &turn.items[0].payload {
             ThreadItemPayload::UserMessage { content, .. } => {

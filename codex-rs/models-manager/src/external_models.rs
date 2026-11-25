@@ -21,7 +21,7 @@ static CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
     for entry in &mut catalog.models {
         if entry.model_provider.is_some() && entry.model.model_messages.is_none() {
             entry.model.model_messages = Some(codex_protocol::openai_models::ModelMessages {
-                instructions_template: Some(crate::model_info::BASE_INSTRUCTIONS.to_owned()),
+                instructions_template: Some(crate::model_info::BASE_INSTRUCTIONS.into()),
                 ..Default::default()
             });
         }

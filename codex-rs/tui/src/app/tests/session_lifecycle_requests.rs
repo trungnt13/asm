@@ -1841,9 +1841,6 @@ pub(super) enum HistoryCapabilities {
     ConfigReadUnsupported(i64),
     ConfigReadFails,
     SuperBindingsUnsupported,
-    ConfigReadUnknownVoice,
-    VoiceCatalogCustom,
-    VoiceCatalogUnavailable,
 }
 
 /// Returns and resets `(thread/loaded/list, thread/read)` request counts.
@@ -2153,17 +2150,6 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                                     .to_string(),
                             },
                         })
-                    } else if history_capabilities == HistoryCapabilities::VoiceCatalogUnavailable
-                        && request.method == "thread/realtime/listVoices"
-                    {
-                        JSONRPCMessage::Error(JSONRPCError {
-                            id: request_id,
-                            error: JSONRPCErrorError {
-                                code: -32601,
-                                data: None,
-                                message: "method not found".to_string(),
-                            },
-                        })
                     } else if matches!(
                         history_capabilities,
                         HistoryCapabilities::ThreadStartFails
@@ -2300,26 +2286,9 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                                 },
                             })
                         } else {
-                            let unknown_voice = history_capabilities
-                                == HistoryCapabilities::ConfigReadUnknownVoice
-                                && matches!(&request, ClientRequest::ConfigRead { .. });
-                            let custom_voice_catalog = history_capabilities
-                                == HistoryCapabilities::VoiceCatalogCustom
-                                && matches!(
-                                    &request,
-                                    ClientRequest::ThreadRealtimeListVoices { .. }
-                                );
                             let mut result = embedded.request(request).await?;
                             if advertise_paginated && let Ok(value) = &mut result {
                                 value["thread"]["historyMode"] = serde_json::json!("paginated");
-                            }
-                            if unknown_voice && let Ok(value) = &mut result {
-                                value["config"]["realtime"]["voice"] =
-                                    serde_json::json!("future_voice");
-                            }
-                            if custom_voice_catalog && let Ok(value) = &mut result {
-                                value["voices"]["v3"] =
-                                    serde_json::json!(["maple", "cove", "juniper"]);
                             }
                             if background {
                                 let terminal = r#"{"data":[{"itemId":"x","processId":"x","command":"x","cwd":"/"}],"nextCursor":null}"#;
@@ -3909,6 +3878,7 @@ async fn embedded_server_dispatches_only_its_own_dynamic_tools() -> Result<()> {
                 ServerRequest::DynamicToolCall {
                     request_id: AppServerRequestId::Integer(id),
                     params: codex_app_server_protocol::DynamicToolCallParams {
+                        supported_result_format: None,
                         thread_id: "thread-1".to_string(),
                         turn_id: "turn-1".to_string(),
                         call_id: "call-1".to_string(),
@@ -4052,6 +4022,7 @@ async fn check_dynamic_tool_requests(
                 ServerRequest::DynamicToolCall {
                     request_id: AppServerRequestId::Integer(100),
                     params: codex_app_server_protocol::DynamicToolCallParams {
+                        supported_result_format: None,
                         thread_id: thread_id.clone(),
                         turn_id: "turn-1".to_string(),
                         call_id: "call-1".to_string(),
@@ -4072,6 +4043,7 @@ async fn check_dynamic_tool_requests(
             ServerRequest::DynamicToolCall {
                 request_id: AppServerRequestId::Integer(101),
                 params: codex_app_server_protocol::DynamicToolCallParams {
+                    supported_result_format: None,
                     thread_id: thread_id.clone(),
                     turn_id: "turn-1".to_string(),
                     call_id: "call-2".to_string(),
@@ -4131,6 +4103,7 @@ async fn check_dynamic_tool_requests(
             ServerRequest::DynamicToolCall {
                 request_id: AppServerRequestId::Integer(102),
                 params: codex_app_server_protocol::DynamicToolCallParams {
+                    supported_result_format: None,
                     thread_id: thread_id.clone(),
                     turn_id: "turn-1".to_string(),
                     call_id: "call-3".to_string(),
@@ -4176,6 +4149,7 @@ async fn check_dynamic_tool_requests(
                 ServerRequest::DynamicToolCall {
                     request_id: AppServerRequestId::String(format!("rejected-{index}")),
                     params: codex_app_server_protocol::DynamicToolCallParams {
+                        supported_result_format: None,
                         thread_id: thread_id.clone(),
                         turn_id: "turn-1".to_string(),
                         call_id: format!("rejected-{index}"),
@@ -4255,6 +4229,7 @@ async fn check_dynamic_tool_requests(
         &app_server,
         AppServerRequestId::Integer(103),
         codex_app_server_protocol::DynamicToolCallParams {
+            supported_result_format: None,
             thread_id: creation_source.to_string(),
             turn_id: "turn-1".to_string(),
             call_id: "call-4".to_string(),
@@ -4379,6 +4354,7 @@ async fn check_dynamic_tool_requests(
         &app_server,
         AppServerRequestId::Integer(104),
         codex_app_server_protocol::DynamicToolCallParams {
+            supported_result_format: None,
             thread_id: thread_id.clone(),
             turn_id: "turn-1".to_string(),
             call_id: "call-5".to_string(),
@@ -4929,6 +4905,7 @@ async fn remote_legacy_history_start_negotiates_once_for_resume_and_fork() -> Re
     let response = crate::dynamic_tools::execute(
         app_server.request_handle(),
         codex_app_server_protocol::DynamicToolCallParams {
+            supported_result_format: None,
             thread_id: started.session.thread_id.to_string(),
             turn_id: "source-turn".to_string(),
             call_id: "legacy-wait".to_string(),

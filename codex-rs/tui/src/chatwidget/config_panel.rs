@@ -220,9 +220,7 @@ impl ChatWidget {
 
     fn config_panel_status(&self) -> ConfigPanelStatus {
         ConfigPanelStatus {
-            copy_on_select: self
-                .local_settings
-                .copy_on_select(&codex_terminal_detection::terminal_info()),
+            copy_on_select: self.local_settings.copy_on_select(),
             right_click_paste: crate::app::PasteEnvironment::detect().status(
                 self.local_settings.tui.right_click_paste,
                 self.local_settings.transcript_mode,
