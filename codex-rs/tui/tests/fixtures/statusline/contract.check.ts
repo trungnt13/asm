@@ -1,6 +1,8 @@
 import type {
   CodeElement,
   ColElement,
+  BoxElement,
+  SpacerElement,
   Color,
   RowElement,
   StatuslineItemId,
@@ -45,6 +47,29 @@ export function render(state: StatuslineState): UiTree {
 }
 
 const indented: UiTree = { type: "text", props: { preserveWhitespace: true }, children: ["  ready"] };
+
+const summary: UiTree = { type: "text", props: { maxLines: 2 }, children: ["build results"] };
+
+const spacer: SpacerElement = { type: "spacer" };
+const emptySpacer: SpacerElement = { ...spacer, children: [] };
+// @ts-expect-error A spacer has no contents.
+const invalidSpacer: SpacerElement = { ...spacer, children: ["x"] };
+
+const stacked: BoxElement = { type: "box", props: { gap: 1 }, children: [summary, indented] };
+const horizontal: BoxElement = { ...stacked, props: { gap: 0, direction: "row", justify: "end" } };
+const responsive = (compact: boolean): BoxElement => ({
+  ...stacked,
+  props: { gap: 1, direction: compact ? "col" : "row" },
+});
+const responsiveAlignment = (compact: boolean): BoxElement["props"] =>
+  compact ? { gap: 1 } : { gap: 1, direction: "row", justify: "end" };
+// @ts-expect-error Omitted direction defaults to a column.
+const implicitColumn: BoxElement["props"] = { gap: 1, justify: "end" };
+const invalidResponsive = (compact: boolean): BoxElement["props"] =>
+  // @ts-expect-error The column branch cannot carry row-only props.
+  ({ gap: 1, direction: compact ? "col" : "row", wrap: "wrap" });
+// @ts-expect-error Boxes require a gap in either direction.
+const missingBoxGap: BoxElement = { ...stacked, props: { direction: "col" } };
 
 const command: CodeElement = {
   type: "code",

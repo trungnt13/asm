@@ -3596,7 +3596,7 @@ dependencies = [
 name = "codex-features"
 version = "0.173.1-alpha.5"
 dependencies = [
- "codex-network-proxy",
+ "codex-network-policy-types",
  "codex-protocol",
  "codex-utils-redacted-string",
  "pretty_assertions",
@@ -4541,6 +4541,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-network-policy-types"
+version = "0.173.1-alpha.5"
+dependencies = [
+ "schemars 0.8.22",
+ "serde",
+]
+
+[[package]]
 name = "codex-network-proxy"
 version = "0.173.1-alpha.5"
 dependencies = [
@@ -4550,6 +4558,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "clap",
+ "codex-network-policy-types",
  "codex-utils-absolute-path",
  "codex-utils-home-dir",
  "codex-utils-path-uri",
@@ -4762,7 +4771,7 @@ dependencies = [
  "codex-execpolicy-rules",
  "codex-extension-items",
  "codex-http-client",
- "codex-network-proxy",
+ "codex-network-policy-types",
  "codex-utils-absolute-path",
  "codex-utils-cached-str",
  "codex-utils-image",
@@ -5133,7 +5142,6 @@ dependencies = [
  "dunce",
  "futures",
  "insta",
- "opentelemetry_sdk",
  "pretty_assertions",
  "schemars 0.8.22",
  "serde",
@@ -5371,6 +5379,7 @@ dependencies = [
  "codex-shell-command",
  "codex-skills",
  "codex-state",
+ "codex-statsig",
  "codex-terminal-detection",
  "codex-tools",
  "codex-uds",

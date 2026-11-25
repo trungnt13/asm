@@ -28,10 +28,7 @@ pub enum StatsigSurface {
 
 /// The credential source selected by the launch path.
 pub enum HostIdentity {
-    ServingAccount {
-        auth: Arc<AuthManager>,
-        default_analytics_enabled: bool,
-    },
+    ServingAccount { auth: Arc<AuthManager> },
     LocalAccount,
     Installation,
 }
@@ -75,11 +72,8 @@ impl Config {
                 credentials: auth,
             })
         };
-        let (identity, default_analytics_enabled) = match identity {
-            HostIdentity::ServingAccount {
-                auth,
-                default_analytics_enabled,
-            } => (account_identity(auth), Some(default_analytics_enabled)),
+        let identity = match identity {
+            HostIdentity::ServingAccount { auth } => account_identity(auth),
             HostIdentity::LocalAccount => {
                 // Workload identity requires a token exchange, even when the auth modes are filtered.
                 if !is_workload_identity_selected()
@@ -95,24 +89,13 @@ impl Config {
                     .await
                     && auth.auth_cached().is_some()
                 {
-                    (
-                        account_identity(auth),
-                        (!matches!(surface, StatsigSurface::ExecServer)).then_some(true),
-                    )
+                    account_identity(auth)
                 } else {
-                    (
-                        StatsigIdentity::Installation(self.http_client_factory()),
-                        None,
-                    )
+                    StatsigIdentity::Installation(self.http_client_factory())
                 }
             }
-            HostIdentity::Installation => (
-                StatsigIdentity::Installation(self.http_client_factory()),
-                None,
-            ),
+            HostIdentity::Installation => StatsigIdentity::Installation(self.http_client_factory()),
         };
-        let exposure_logging_enabled = default_analytics_enabled
-            .is_some_and(|default_enabled| self.analytics_enabled.unwrap_or(default_enabled));
         Some(StatsigRuntime::start_process(
             identity,
             self.chatgpt_base_url.clone(),
@@ -135,7 +118,9 @@ impl Config {
                 },
                 brand_name: "codex",
             },
-            exposure_logging_enabled,
+            // Opting in to gate evaluations does not enable exposure telemetry.
+            /*exposure_logging_enabled*/
+            false,
         ))
     }
 }

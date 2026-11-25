@@ -835,6 +835,14 @@ pub async fn run_main_with_transport_options(
         ));
     }
     let installation_id = resolve_installation_id(&config.codex_home).await?;
+    let statsig = config
+        .start_statsig(
+            codex_core::statsig::StatsigSurface::AppServer,
+            codex_core::statsig::HostIdentity::ServingAccount {
+                auth: Arc::clone(&auth_manager),
+            },
+        )
+        .await;
     let transport_shutdown_token = CancellationToken::new();
     // Remote enrollment must cancel before RPC drain without shutting down telemetry.
     let remote_control_shutdown_token = transport_shutdown_token.child_token();
@@ -1447,6 +1455,7 @@ pub async fn run_main_with_transport_options(
         let _ = handle.await;
     }
 
+    codex_core::statsig::StatsigRuntime::finish(statsig).await;
     Ok(AppServerExit::Graceful)
 }
 

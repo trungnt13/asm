@@ -4860,7 +4860,6 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     tui.terminal = terminal_at(wide);
     keys!(toggle);
     let path = app.local_settings.user_config_path.clone();
-    let before = std::fs::read(&path).ok();
     let divider_at = |tui: &tui::Tui, y| {
         (0..wide.width)
             .find(|&x| tui.terminal.previous_buffer()[(x, y)].symbol() == "│")
@@ -4868,6 +4867,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     };
     let mut previews = Vec::new();
     for with_image in [false, true] {
+        let before = std::fs::read(&path).ok();
         if with_image {
             let image_path = app.config.codex_home.join("divider.png");
             image::RgbaImage::from_pixel(8, 16, image::Rgba([80, 30, 20, 255]))
@@ -4933,7 +4933,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
             .await?;
         } else {
             assert!(columns.iter().all(|x| *x == divider - 1));
-            // A fresh transcript press cancels a drag whose release was lost.
+            // A fresh press ends a drag whose release was lost, keeping its last width.
             for kind in [MouseEventKind::Down(left), MouseEventKind::Up(left)] {
                 boxed_future!(app.handle_tui_event(
                     &mut tui,
@@ -4942,7 +4942,20 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
                 ))
                 .await?;
             }
-            assert_eq!(std::fs::read(&path).ok(), before);
+            side_frame(&mut app, &mut tui, wide)?;
+            assert_eq!(divider_at(&tui, 0), divider - 1);
+            // The release position wins even if no intervening motion was delivered.
+            for (kind, x) in [
+                (MouseEventKind::Down(left), divider - 1),
+                (MouseEventKind::Up(left), divider),
+            ] {
+                boxed_future!(app.handle_tui_event(
+                    &mut tui,
+                    &mut app_server,
+                    mouse(kind, x, /*row*/ 4)
+                ))
+                .await?;
+            }
             side_frame(&mut app, &mut tui, wide)?;
             assert_eq!(divider_at(&tui, 0), divider);
         }
@@ -5643,13 +5656,13 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     let buffer = tui.terminal.previous_buffer();
     let style = |x| buffer[(x, chooser.y)].style();
     assert_eq!([close_x - 1, close_x + 1].map(style), [style(close_x); 2]);
-    for kind in [down, release] {
-        boxed_future!(app.handle_tui_event(
-            &mut tui,
-            &mut app_server,
-            mouse(kind, close_x + 1, chooser.y)
-        ))
-        .await?;
+    // Rex reports focus again between the press and release of a single click.
+    for event in [
+        mouse(down, close_x + 1, chooser.y),
+        TuiEvent::FocusGained,
+        mouse(release, close_x + 1, chooser.y),
+    ] {
+        boxed_future!(app.handle_tui_event(&mut tui, &mut app_server, event)).await?;
     }
     let frame = side_frame(&mut app, &mut tui, even)?;
     let dialog = frame
