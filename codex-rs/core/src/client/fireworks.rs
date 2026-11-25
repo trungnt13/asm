@@ -94,20 +94,38 @@ pub(super) fn project_input(
     input: &[Arc<ResponseItem>],
     history: &[Arc<ResponseItem>],
 ) -> Option<Vec<Arc<ResponseItem>>> {
-    let exec_calls: HashSet<_> = history
+    let mut pending_outputs: HashSet<_> = input
         .iter()
         .filter_map(|item| match item.as_ref() {
-            ResponseItem::CustomToolCall {
+            ResponseItem::CustomToolCallOutput { call_id, name, .. }
+                if name.as_deref().is_none_or(|name| name == PUBLIC_TOOL_NAME) =>
+            {
+                Some(call_id.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    let mut exec_calls = HashSet::new();
+    if !pending_outputs.is_empty() {
+        // Most continuation results belong to recent calls; stop once the wire slice
+        // has no remaining outputs to classify.
+        for item in history.iter().rev() {
+            if let ResponseItem::CustomToolCall {
                 name,
                 namespace,
                 call_id,
                 ..
-            } if is_exec(name, namespace.as_deref()) => Some(call_id.as_str()),
-            _ => None,
-        })
-        .collect();
-    if exec_calls.is_empty() {
-        return None;
+            } = item.as_ref()
+                && pending_outputs.remove(call_id.as_str())
+            {
+                if is_exec(name, namespace.as_deref()) {
+                    exec_calls.insert(call_id.as_str());
+                }
+                if pending_outputs.is_empty() {
+                    break;
+                }
+            }
+        }
     }
 
     let mut projected = None;
@@ -173,9 +191,12 @@ pub(super) fn project_input(
             _ => None,
         };
         if let Some(wire_item) = wire_item {
-            projected
-                .get_or_insert_with(|| input[..index].to_vec())
-                .push(Arc::new(wire_item));
+            let projected = projected.get_or_insert_with(|| {
+                let mut items = Vec::with_capacity(input.len());
+                items.extend_from_slice(&input[..index]);
+                items
+            });
+            projected.push(Arc::new(wire_item));
         } else if let Some(projected) = &mut projected {
             projected.push(Arc::clone(item));
         }
@@ -211,8 +232,8 @@ pub(super) fn normalize_event(
                 .starts_with('{')
                 .then(|| serde_json::from_str::<ExecArguments<String>>(arguments).ok())
                 .flatten()
-                .ok_or_else(|| {
-                    ApiError::Stream("invalid Fireworks Code Mode exec arguments".into())
+                .ok_or_else(|| ApiError::InvalidRequest {
+                    message: "Fireworks returned invalid Code Mode exec arguments; expected an object with one string field named input.".into(),
                 })?;
             args.input
         } else {

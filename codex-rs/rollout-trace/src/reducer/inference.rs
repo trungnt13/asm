@@ -68,12 +68,6 @@ impl TraceReducer {
         let inference_call_id = started.inference_call_id.clone();
         let thread_id = started.thread_id.clone();
         let codex_turn_id = started.codex_turn_id.clone();
-        // A warmup has no inference row to follow. Preserve its formatted context for
-        // the transcript while keeping the actual (often empty) delta available for mocks.
-        let context = started
-            .warmup_context_payload
-            .as_ref()
-            .unwrap_or(&started.request_payload);
         let Some(turn) = self.rollout.codex_turns.get(&codex_turn_id) else {
             bail!(
                 "inference start {inference_call_id} referenced unknown codex turn {codex_turn_id}"
@@ -87,14 +81,7 @@ impl TraceReducer {
             );
         }
 
-        let request_item_ids = self.reduce_inference_request(
-            wall_time_unix_ms,
-            &inference_call_id,
-            &thread_id,
-            &codex_turn_id,
-            context,
-            started.stripped_tool_output_ids,
-        )?;
+        let request_item_ids = self.reduce_inference_request(wall_time_unix_ms, &started)?;
 
         self.thread_mut(&thread_id)?;
 

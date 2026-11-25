@@ -3326,9 +3326,14 @@ impl OpenedModelResponse {
             self.stream.boxed()
         };
         let provider_stream = if self.normalize_fireworks_exec {
-            provider_stream
-                .map(|event| event.and_then(fireworks::normalize_event))
-                .boxed()
+            // A buffered completion must not seed continuation after a rejected tool call.
+            futures::stream::try_unfold(provider_stream, |mut stream| async move {
+                let Some(event) = stream.next().await else {
+                    return Ok(None);
+                };
+                Ok(Some((fireworks::normalize_event(event?)?, stream)))
+            })
+            .boxed()
         } else {
             provider_stream
         };
