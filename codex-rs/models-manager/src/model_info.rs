@@ -14,6 +14,7 @@ use codex_protocol::openai_models::default_input_modalities;
 use codex_utils_cached_str::CodexCachedStr;
 
 use crate::config::ModelsManagerConfig;
+use crate::external_models::chat_completions_only_service_tiers;
 use codex_utils_output_truncation::approx_bytes_for_tokens;
 use tracing::warn;
 
@@ -64,6 +65,20 @@ pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig)
         model.use_responses_lite = false;
         model.supports_search_tool = false;
         model.supports_reasoning_effort_updates = false;
+    } else {
+        let restricted = chat_completions_only_service_tiers(&model.slug);
+        if !restricted.is_empty() {
+            model
+                .service_tiers
+                .retain(|tier| !restricted.contains(&tier.id));
+            if model
+                .default_service_tier
+                .as_ref()
+                .is_some_and(|tier| restricted.contains(tier))
+            {
+                model.default_service_tier = None;
+            }
+        }
     }
     if let Some(auto_compact_token_limit) = config.model_auto_compact_token_limit {
         model.auto_compact_token_limit = Some(auto_compact_token_limit);
