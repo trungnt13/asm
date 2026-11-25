@@ -69,6 +69,7 @@ async fn decode_gemini_stream(
     request_started_at: Instant,
     events: &mpsc::Sender<Result<ResponseEvent, ApiError>>,
 ) -> Result<(), ApiError> {
+    let stream_open_ms = request_started_at.elapsed().as_millis();
     let mut stream = stream.bytes.eventsource();
     let mut provider_id: Option<String> = None;
     let mut response_id = None;
@@ -76,9 +77,11 @@ async fn decode_gemini_stream(
     let mut next_index = 0;
     let mut call_ids = HashSet::new();
     let mut pending_output = Vec::new();
-    let mut usage = None;
+    let mut usage = GeminiUsage::default();
+    let mut first_tool_start_ms = None;
+    let mut last_tool_stop_ms = None;
     let malformed = || stream_error("invalid or unsupported Gemini SSE event");
-    let (response_id, end_turn) = loop {
+    let (response_id, end_turn, completion_ms) = loop {
         let start = Instant::now();
         let poll = tokio::select! {
             biased;
@@ -131,7 +134,7 @@ async fn decode_gemini_stream(
             Some("error") => return Err(stream_error("provider reported a Gemini stream error")),
             _ if response_id.is_none() => return Err(malformed()),
             Some("interaction.status_update") if matches_provider_id(&frame["interaction_id"]) => {
-                usage = token_usage(&frame["usage"]).or(usage);
+                usage.record(&frame["usage"]);
             }
             Some("step.start") if step.is_none() && index_matches => {
                 let wire_step = frame["step"].take();
@@ -156,7 +159,11 @@ async fn decode_gemini_stream(
                             }
                         }
                     }
-                    Some("thought" | "function_call") => {}
+                    Some("thought") => {}
+                    Some("function_call") => {
+                        first_tool_start_ms
+                            .get_or_insert_with(|| request_started_at.elapsed().as_millis());
+                    }
                     _ => return Err(malformed()),
                 }
                 step = Some((wire_step, fragments));
@@ -201,7 +208,7 @@ async fn decode_gemini_stream(
             Some("step.stop") if index_matches => {
                 let (wire_step, fragments) = step.take().ok_or_else(malformed)?;
                 next_index += 1;
-                usage = token_usage(&frame["usage"]).or(usage);
+                usage.record(&frame["usage"]);
                 let item = match wire_step["type"].as_str() {
                     Some("model_output") => {
                         let Some(text) = fragments else { continue };
@@ -209,6 +216,7 @@ async fn decode_gemini_stream(
                     }
                     Some("thought") => thought_item(&wire_step),
                     Some("function_call") => {
+                        last_tool_stop_ms = Some(request_started_at.elapsed().as_millis());
                         let id = wire_step["id"]
                             .as_str()
                             .filter(|id| !id.is_empty())
@@ -246,7 +254,18 @@ async fn decode_gemini_stream(
             Some("interaction.completed")
                 if matches_provider_id(&interaction["id"]) && step.is_none() =>
             {
-                usage = token_usage(&interaction["usage"]).or(usage);
+                usage.record(&interaction["usage"]);
+                let completion_ms = request_started_at.elapsed().as_millis();
+                tracing::debug!(
+                    stream_open_ms,
+                    ?first_tool_start_ms,
+                    ?last_tool_stop_ms,
+                    completion_ms,
+                    tool_calls = call_ids.len(),
+                    terminal_cached_tokens = ?interaction["usage"]["total_cached_tokens"].as_i64(),
+                    reported_cached_tokens = ?usage.reported_cached_tokens,
+                    "Gemini interaction terminal frame received"
+                );
                 let end_turn = match interaction["status"].as_str() {
                     Some("completed") if call_ids.is_empty() => true,
                     Some("requires_action") if !call_ids.is_empty() => false,
@@ -260,18 +279,17 @@ async fn decode_gemini_stream(
                                 reason: reason.to_owned(),
                                 partial_output: Vec::new(),
                                 response_id,
-                                token_usage: usage,
+                                token_usage: usage.totals,
                             },
                         )));
                     }
                     _ => return Err(stream_error("unexpected Gemini interaction status")),
                 };
-                break (response_id.ok_or_else(malformed)?, end_turn);
+                break (response_id.ok_or_else(malformed)?, end_turn, completion_ms);
             }
             _ => return Err(malformed()),
         }
     };
-    let complete_at = Instant::now();
     for item in pending_output {
         if events
             .send(Ok(ResponseEvent::OutputItemDone(item)))
@@ -284,12 +302,9 @@ async fn decode_gemini_stream(
     let _ = events
         .send(Ok(ResponseEvent::Completed {
             response_id,
-            token_usage: usage,
+            token_usage: usage.totals,
             usage_metadata: None,
-            request_duration_ms: Some(
-                i64::try_from(complete_at.duration_since(request_started_at).as_millis())
-                    .unwrap_or(i64::MAX),
-            ),
+            request_duration_ms: Some(i64::try_from(completion_ms).unwrap_or(i64::MAX)),
             generation_duration_ms: None,
             reasoning_removals: None,
             end_turn: Some(end_turn),
@@ -341,20 +356,40 @@ fn thought_item(step: &Value) -> ResponseItem {
     }
 }
 
-fn token_usage(usage: &Value) -> Option<TokenUsage> {
-    let reasoning_output_tokens = usage["total_thought_tokens"].as_i64().unwrap_or_default();
-    Some(TokenUsage {
-        input_tokens: usage["total_input_tokens"].as_i64()?,
-        cached_input_tokens: usage["total_cached_tokens"].as_i64().unwrap_or_default(),
-        // Gemini reports visible output and thought tokens separately.
-        output_tokens: usage["total_output_tokens"]
+#[derive(Default)]
+struct GeminiUsage {
+    totals: Option<TokenUsage>,
+    reported_cached_tokens: Option<i64>,
+}
+
+impl GeminiUsage {
+    fn record(&mut self, usage: &Value) {
+        // Usage updates are cumulative, but may omit individual counters.
+        self.reported_cached_tokens = usage["total_cached_tokens"]
             .as_i64()
-            .unwrap_or_default()
-            .saturating_add(reasoning_output_tokens),
-        reasoning_output_tokens,
-        total_tokens: usage["total_tokens"].as_i64()?,
-        ..Default::default()
-    })
+            .or(self.reported_cached_tokens);
+        if let (Some(input_tokens), Some(total_tokens)) = (
+            usage["total_input_tokens"].as_i64(),
+            usage["total_tokens"].as_i64(),
+        ) {
+            let reasoning_output_tokens =
+                usage["total_thought_tokens"].as_i64().unwrap_or_default();
+            self.totals = Some(TokenUsage {
+                input_tokens,
+                // Gemini reports visible output and thought tokens separately.
+                output_tokens: usage["total_output_tokens"]
+                    .as_i64()
+                    .unwrap_or_default()
+                    .saturating_add(reasoning_output_tokens),
+                reasoning_output_tokens,
+                total_tokens,
+                ..Default::default()
+            });
+        }
+        if let Some(totals) = &mut self.totals {
+            totals.cached_input_tokens = self.reported_cached_tokens.unwrap_or_default();
+        }
+    }
 }
 
 fn stream_error(message: &str) -> ApiError {
