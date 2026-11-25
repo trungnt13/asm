@@ -881,9 +881,9 @@ async fn thread_settings_updated_during_replay_restores_effort_without_animating
         assert!(render_bottom_popup(&chat, /*width*/ 80).contains("max"));
         chat.handle_server_notification(settings(ReasoningEffortConfig::Ultra), replay);
         insta::assert_snapshot!(render_bottom_popup(&chat, /*width*/ 80), @"
-                                                                                   Main
-        › Ask ASM to do anything
-
+        ────────────────────────────────────────────────────────────────────────── Main
+        » Ask ASM to do anything
+        ────────────────────────────────────────────────────────────────────────────────
           52 ult
           ? for shortcuts
         ");
