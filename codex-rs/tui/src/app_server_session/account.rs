@@ -99,11 +99,15 @@ impl AppServerSession {
             .model_provider
             .as_deref()
             .unwrap_or(OPENAI_PROVIDER_ID);
+        if provider != session.model_provider_id {
+            // The server default has no account details for a thread using another provider.
+            return Ok(SessionAccount::default());
+        }
         // The default can change between the two reads. Only apply compatible capabilities.
         let auth_mismatch = built_in_model_providers(/*openai_base_url*/ None)
             .get(provider)
             .is_some_and(|info| info.requires_openai_auth != response.requires_openai_auth);
-        if provider != session.model_provider_id || auth_mismatch {
+        if auth_mismatch {
             color_eyre::eyre::bail!(
                 "the server's account details do not match this chat's provider"
             );

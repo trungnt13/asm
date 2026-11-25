@@ -563,10 +563,16 @@ async fn thread_account_uses_only_a_matching_server_default() -> Result<()> {
                 }))))
                 .unwrap();
         });
-        if provider == "openai" {
-            assert!(account?.has_chatgpt_account());
-        } else {
-            assert!(account.is_err());
+        match (provider, default_at_config_read) {
+            ("openai", "openai") => assert!(account?.has_chatgpt_account()),
+            ("amazon-bedrock", "openai") => {
+                let account = account?;
+                assert_eq!(
+                    (account.display, account.plan, account.requires_openai_auth),
+                    (None, None, false)
+                );
+            }
+            _ => assert!(account.is_err()),
         }
     }
     Ok(())
