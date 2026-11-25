@@ -23,6 +23,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tokio::time::timeout;
+use uuid::Uuid;
 
 pub(crate) fn spawn_gemini_stream(
     stream: StreamResponse,
@@ -69,6 +70,7 @@ async fn decode_gemini_stream(
     events: &mpsc::Sender<Result<ResponseEvent, ApiError>>,
 ) -> Result<(), ApiError> {
     let mut stream = stream.bytes.eventsource();
+    let mut provider_id: Option<String> = None;
     let mut response_id = None;
     let mut step: Option<(Value, Option<String>)> = None;
     let mut next_index = 0;
@@ -101,13 +103,25 @@ async fn decode_gemini_stream(
         let mut frame: Value = serde_json::from_str(&frame.data).map_err(|_| malformed())?;
         let interaction = &frame["interaction"];
         let index_matches = frame["index"].as_u64() == Some(next_index);
+        let matches_provider_id = |id: &Value| {
+            id.is_null()
+                || id.as_str().is_some_and(|id| {
+                    !id.is_empty() && provider_id.as_deref().is_none_or(|expected| expected == id)
+                })
+        };
         match frame["event_type"].as_str() {
-            Some("interaction.created") if response_id.is_none() => {
-                let id = interaction["id"]
-                    .as_str()
-                    .filter(|id| !id.is_empty())
-                    .ok_or_else(malformed)?;
-                response_id = Some(id.to_owned());
+            Some("interaction.created")
+                if response_id.is_none()
+                    && interaction.is_object()
+                    && matches_provider_id(&interaction["id"]) =>
+            {
+                provider_id = interaction["id"].as_str().map(str::to_owned);
+                // Stateless Interactions omit the provider ID; ASM still needs a stream ID.
+                response_id = Some(
+                    provider_id
+                        .clone()
+                        .unwrap_or_else(|| format!("gemini_{}", Uuid::new_v4().simple())),
+                );
                 let _ = events
                     .send(Ok(ResponseEvent::Created {
                         response_id: response_id.clone(),
@@ -116,9 +130,7 @@ async fn decode_gemini_stream(
             }
             Some("error") => return Err(stream_error("provider reported a Gemini stream error")),
             _ if response_id.is_none() => return Err(malformed()),
-            Some("interaction.status_update")
-                if frame["interaction_id"].as_str() == response_id.as_deref() =>
-            {
+            Some("interaction.status_update") if matches_provider_id(&frame["interaction_id"]) => {
                 usage = token_usage(&frame["usage"]).or(usage);
             }
             Some("step.start") if step.is_none() && index_matches => {
@@ -232,7 +244,7 @@ async fn decode_gemini_stream(
                 }
             }
             Some("interaction.completed")
-                if interaction["id"].as_str() == response_id.as_deref() && step.is_none() =>
+                if matches_provider_id(&interaction["id"]) && step.is_none() =>
             {
                 usage = token_usage(&interaction["usage"]).or(usage);
                 let end_turn = match interaction["status"].as_str() {
