@@ -849,6 +849,7 @@ impl App {
                             Ok((config, _)) => {
                                 fork_config.model_provider_id = config.model_provider_id;
                                 fork_config.model_providers = config.model_providers;
+                                fork_config.service_tier = service_tier.or(config.service_tier);
                             }
                             Err(err) => {
                                 self.chat_widget.fork_in_progress = false;
@@ -859,7 +860,6 @@ impl App {
                         }
                         fork_config.model = Some(model);
                         fork_config.model_reasoning_effort = effort;
-                        fork_config.service_tier = service_tier;
                         fork_config.ephemeral &= !self.side_threads.contains_key(&thread_id);
                         if let Err(err) = fork_config.apply_external_model_provider() {
                             self.chat_widget.fork_in_progress = false;

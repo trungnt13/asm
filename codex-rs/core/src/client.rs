@@ -33,6 +33,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
+mod fireworks;
 mod response_delivery;
 #[path = "client_tool_metadata.rs"]
 mod tool_metadata;
@@ -1459,7 +1460,13 @@ impl ModelClient {
             }
             None
         } else {
-            Some(create_tools_raw_json_for_responses_api(&prompt.tools)?.into())
+            let tools =
+                if fireworks::uses_function_exec(model_info, self.state.provider.info().wire_api) {
+                    fireworks::project_tools(&prompt.tools)?
+                } else {
+                    create_tools_raw_json_for_responses_api(&prompt.tools)?
+                };
+            Some(tools.into())
         };
         if !prompt.base_instructions.text.is_empty() {
             let mut instructions = ContextualUserFragment::into(BaseInstructionsFragment(
@@ -1538,6 +1545,7 @@ impl ModelClient {
             .filter(|tier| {
                 provider_allows_service_tier(self.state.provider.info(), model_info, tier)
             });
+        let (model, service_tier) = fireworks::route(&model_info.slug, service_tier);
         // Project only the request copy. Reviewer history keeps native IDs for deduplication.
         if self.quotes_guardian_replies() {
             for item in &mut input {
@@ -1548,7 +1556,7 @@ impl ModelClient {
         }
         let client_metadata = responses_metadata.client_metadata(include_internal);
         let request = ResponsesApiRequest {
-            model: model_info.slug.clone(),
+            model,
             input,
             tools,
             tool_choice: "auto".to_string(),
@@ -2320,8 +2328,9 @@ impl ResponsesHttpExecutor<'_> {
             .map(AuthManager::unauthorized_recovery);
         let mut provider_auth_recovery_attempted = false;
         let mut pending_retry = PendingUnauthorizedRetry::default();
-        let chat_completions =
-            self.client.state.provider.info().wire_api == WireApi::ChatCompletions;
+        let wire_api = self.client.state.provider.info().wire_api;
+        let chat_completions = wire_api == WireApi::ChatCompletions;
+        let fireworks_exec = fireworks::uses_function_exec(model_info, wire_api);
         let path = if chat_completions {
             codex_api::CHAT_COMPLETIONS_PATH
         } else {
@@ -2383,12 +2392,17 @@ impl ResponsesHttpExecutor<'_> {
                 .await
             };
 
+            let service_tier = if is_guardian_reviewer(&responses_headers) {
+                None
+            } else {
+                sampling.service_tier.clone()
+            };
             let mut request = self.client.build_responses_request(
                 prompt,
                 model_info,
                 sampling.reasoning_effort.clone(),
                 sampling.reasoning_summary,
-                sampling.service_tier.clone(),
+                service_tier,
                 responses_metadata,
                 include_internal,
             )?;
@@ -2401,9 +2415,6 @@ impl ResponsesHttpExecutor<'_> {
                 client_setup.auth.as_ref(),
                 &responses_headers,
             );
-            if is_guardian_reviewer(&responses_headers) {
-                request.service_tier = None;
-            }
             if !chat_completions
                 && let Some(header_value) = self.client.build_routing_hint_header(
                     client_setup.auth.as_ref(),
@@ -2423,7 +2434,7 @@ impl ResponsesHttpExecutor<'_> {
             )?;
             self.client
                 .validate_required_cyber_access_program(request.access_programs)?;
-            let history_ids =
+            let mut history_ids =
                 inference_trace.stripped_output_ids(request.input.iter().map(Arc::as_ref));
             self.client
                 .prepare_response_items_for_request(&mut request.input);
@@ -2455,6 +2466,14 @@ impl ResponsesHttpExecutor<'_> {
             );
             let inference_trace_attempt = inference_trace.start_attempt();
             inference_trace_attempt.add_request_headers(&mut options.extra_headers);
+            let normalize_fireworks_router_echo =
+                fireworks::uses_ultrafast_router(model_info, &request.model);
+            if fireworks_exec
+                && let Some(input) = fireworks::project_input(&request.input, &request.input)
+            {
+                fireworks::retain_output_ids(&mut history_ids, &input);
+                request.input = input;
+            }
             if let Some(input) = tool_metadata::bounded_input(&request, &request.input) {
                 if let Some(recorder) = &self.client.executed_tool_calls {
                     recorder.invalidate_wire_inventory_loss(
@@ -2501,6 +2520,9 @@ impl ResponsesHttpExecutor<'_> {
                         client: Arc::clone(&self.client.state),
                         interceptors,
                         continuation: None,
+                        normalize_fireworks_exec: fireworks_exec
+                            && prompt.tools.iter().any(fireworks::code_mode_exec_spec),
+                        normalize_fireworks_router_echo,
                     });
                 }
                 Err(ApiError::Transport(unauthorized_transport))
@@ -2576,6 +2598,7 @@ impl ModelClientSession {
     ) -> Result<WebsocketStreamOutcome> {
         let after_prewarm = !warmup && self.websocket_session.last_response_from_untraced_warmup;
         let provider = Arc::clone(&self.client.state.provider);
+        let fireworks_exec = fireworks::uses_function_exec(model_info, provider.info().wire_api);
         let auth_manager = provider.auth_manager();
         let thread_id = self.client.state.thread_id.to_string();
         let kind = if warmup {
@@ -2617,20 +2640,22 @@ impl ModelClientSession {
                 pending_retry,
             )
             .map_err(|error| self.client.state.provider.map_api_error(error))?;
+            let service_tier = if is_guardian_reviewer(&responses_headers) {
+                None
+            } else {
+                sampling.service_tier.clone()
+            };
             let mut request = self.client.build_responses_request(
                 prompt,
                 model_info,
                 sampling.reasoning_effort.clone(),
                 sampling.reasoning_summary,
-                sampling.service_tier.clone(),
+                service_tier,
                 responses_metadata,
                 include_internal,
             )?;
             if self.client.uses_codex_backend(client_setup.auth.as_ref()) {
                 request.request_country = responses_metadata.request_country.clone();
-            }
-            if is_guardian_reviewer(&responses_headers) {
-                request.service_tier = None;
             }
             request.access_programs = cyber_access_program::for_auth(
                 client_setup.auth.as_ref(),
@@ -2765,7 +2790,7 @@ impl ModelClientSession {
                 None => (None, None),
             };
             // The full context captured after a warmup already carries the original IDs.
-            let history_ids = if previous_response_id_from_untraced_warmup {
+            let mut history_ids = if previous_response_id_from_untraced_warmup {
                 Vec::new()
             } else {
                 inference_trace.stripped_output_ids(
@@ -2807,9 +2832,20 @@ impl ModelClientSession {
                 }
             }
             let mut request = Arc::new(request);
+            let input = incremental_items.as_deref().unwrap_or(&request.input);
+            // Continuation compares canonical items; only the selected wire slice is projected.
+            let projected_input = fireworks_exec
+                .then(|| fireworks::project_input(input, &request.input))
+                .flatten();
+            let input = if let Some(projected) = &projected_input {
+                fireworks::retain_output_ids(&mut history_ids, projected);
+                projected.as_slice()
+            } else {
+                input
+            };
             let mut ws_payload = ResponseCreateWsRequest {
                 previous_response_id,
-                input: incremental_items.as_deref().unwrap_or(&request.input),
+                input,
                 generate: if warmup { Some(false) } else { None },
                 client_metadata: response_create_client_metadata(
                     Some(client_metadata),
@@ -2904,7 +2940,13 @@ impl ModelClientSession {
                                     input: &'a [Arc<ResponseItem>],
                                 }
                                 warmup_request
-                                    .map(|r| serde_json::to_vec(&WarmupContext { input: &r.input }))
+                                    .map(|r| {
+                                        let projected = fireworks_exec
+                                            .then(|| fireworks::project_input(&r.input, &r.input))
+                                            .flatten();
+                                        let input = projected.as_deref().unwrap_or(&r.input);
+                                        serde_json::to_vec(&WarmupContext { input })
+                                    })
                                     .transpose()
                             },
                         )
@@ -2921,6 +2963,8 @@ impl ModelClientSession {
                     original_metadata,
                 );
             }
+            let normalize_fireworks_router_echo =
+                fireworks::uses_ultrafast_router(model_info, &request.model);
             self.websocket_session.last_request = Some(request);
             self.websocket_session.last_response_from_untraced_warmup = warmup;
             let stream_result = stream_result.map_err(|err| {
@@ -2941,6 +2985,9 @@ impl ModelClientSession {
                 client: Arc::clone(&self.client.state),
                 interceptors,
                 continuation: Some(last_response_tx),
+                normalize_fireworks_exec: fireworks_exec
+                    && prompt.tools.iter().any(fireworks::code_mode_exec_spec),
+                normalize_fireworks_router_echo,
             };
             self.websocket_session.last_response_rx = Some(last_response_rx);
             return Ok(WebsocketStreamOutcome::Stream(Box::new(stream)));
@@ -3252,6 +3299,8 @@ pub(crate) struct OpenedModelResponse {
     client: Arc<ModelClientState>,
     interceptors: Vec<Box<dyn codex_extension_api::ModelResponseInterceptor>>,
     continuation: Option<oneshot::Sender<LastResponse>>,
+    normalize_fireworks_exec: bool,
+    normalize_fireworks_router_echo: bool,
 }
 
 impl OpenedModelResponse {
@@ -3285,6 +3334,26 @@ impl OpenedModelResponse {
             .boxed()
         } else {
             self.stream.boxed()
+        };
+        let normalize_exec = self.normalize_fireworks_exec;
+        let normalize_router_echo = self.normalize_fireworks_router_echo;
+        let provider_stream = if normalize_exec || normalize_router_echo {
+            futures::stream::try_unfold(provider_stream, move |mut stream| async move {
+                let Some(event) = stream.next().await else {
+                    return Ok(None);
+                };
+                let mut event = event?;
+                if normalize_router_echo {
+                    fireworks::normalize_router_echo(&mut event);
+                }
+                if normalize_exec {
+                    fireworks::normalize_exec_event(&mut event)?;
+                }
+                Ok(Some((event, stream)))
+            })
+            .boxed()
+        } else {
+            provider_stream
         };
         let events = crate::model_request::intercept_stream(provider_stream, self.interceptors);
         let mut stream = map_response_events(
