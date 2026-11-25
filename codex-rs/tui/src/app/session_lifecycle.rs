@@ -1580,7 +1580,9 @@ impl App {
         if let Some((model, effort, service_tier)) = model_selection {
             config.model = Some(model);
             config.model_reasoning_effort = effort;
-            config.service_tier = service_tier;
+            if let Some(service_tier) = service_tier {
+                config.service_tier = Some(service_tier);
+            }
             config.apply_external_model_provider()?;
         }
         let started = crate::boxed_future!(app_server.start_thread_with_session_start_source(

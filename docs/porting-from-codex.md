@@ -209,7 +209,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `06f334aa4b053023c5b4199dde0ba9c004d64820`, 2026-11-25. Subject: Add opt-in shadow intake for Guardian V3 (#63949).
+Last incorporated commit: `8d8de8f693fbbb494583371cc97248287ef93036`, 2026-11-25. Subject: Add flexible spacers to custom statusline layouts (#64009).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 
@@ -248,7 +248,8 @@ Delete every thread-private runtime file (linkage, Cursor configuration, diagnos
 
 - With `load_external_models_json = true`, merge bundled entries into custom `model_catalog_json` in memory. Exact custom IDs retain all metadata overrides. With `false`, retain only the custom catalog. Routing remains bundled and exact-match-only.
 - Bundled `external_models.json` entries can select an existing named `model_provider`. Accept canonical slugs and optional provider/runtime-qualified aliases. Normalize aliases before validation/requests. Persist canonical model/provider identity so alias changes cannot reroute resumed chats. Preserve existing full IDs and managed provider requirements. Do not infer routing from slashes or remote catalog metadata. Keep endpoints/credentials in user provider configuration.
-- DeepSeek V4.1 Flash 1017 selects `fireworks`, alias `fireworks/deepseek-v4.1-flash`, without a profile or custom role. Default its context to 300,000 tokens; allow explicit overrides through 1,000,000. Select direct tools: live checks could not execute Code Mode's custom tool through Fireworks.
+- DeepSeek V4.1 Flash 1017 selects `fireworks`, alias `fireworks/deepseek-v4.1-flash`, without a profile or custom role. Default its context to 300,000 tokens; allow explicit overrides through 1,000,000. Use Code Mode only. On Fireworks Responses, encode `exec` as a function at the wire boundary; keep canonical calls and saved history as Code Mode. Default to Standard and route `ultrafast` through the Ultra-fast router without changing the persisted model.
+- GLM 5.3 selects `fireworks`, alias `fireworks/glm-5.3`, and uses Code Mode only on Responses with Standard as its only catalog tier. Apply ordinary resume admission to saved GLM chats, with no exception for chats saved under a different provider.
 - Gemini 4 Neon selects the configured `gemini` provider. Use `wire_api = "gemini_interactions"`, `base_url = "https://generativelanguage.googleapis.com/v1beta"`, and `env_http_headers = { "x-goog-api-key" = "GEMINI_API_KEY" }` under `[model_providers.gemini]`. Default to direct tools; honor `code_mode` and `code_mode_only` for ASM-owned execution. Keep the Gemini wire path text-only. Always send `store: false`; this disables stored Interactions, not provider abuse-monitoring logs. Replay opaque thought steps only on the Gemini route. Do not send OpenAI credentials or Responses Lite fields.
 - Show picker aliases but retain canonical identity. Native aliases `claude/…` and `cursor/…` retain `claude-code/…` and `cursor-agent/…` IDs. Do not add HTTP bindings or change native model/runtime selection. Picker changes that require a new runtime fork the current context into the selected model. Blank sessions still start fresh. Existing same-provider in-place model changes stay in place.
 - Admit valid bound/native input and resume independently of the global HTTP-provider default. Validate saved/requested identities separately. Overrides cannot exempt unrelated saved chats. Preserve mandatory policy, configuration errors, missing-provider checks, and history/runtime boundaries. Require the current provider definition and valid configuration. Classify routes from in-memory bindings/runtime detection, not discovery. Unbound API models retain upstream saved-provider admission.
@@ -398,6 +399,16 @@ Explicit `cursor-agent/<model>` selects official Cursor ACP (`agent acp`, JSON-R
 - Verified CLI: 2026.10.22-27dcf5f. Revalidate upgrades.
 
 ### Minimal diagnostics
+
+Do not add optional diagnostics or telemetry, or make the change depend on either. For existing diagnostics and telemetry:
+
+1. If they do not interfere with the change, leave them alone.
+2. If a very small change resolves the conflict, make that change.
+3. Otherwise, remove only the diagnostics or telemetry that block the change.
+
+When removing a collector, keep the config and protocol behavior the Codex app needs. If the app needs the collector itself, report the conflict before removing it.
+
+When app behavior could change, verify the affected flow in the Codex app with the candidate backend. Follow the [shared compatibility gate](#shared-compatibility-gate) where it applies.
 
 - Default `diagnostic_log_capture = false`. This startup policy controls Rust stderr/file logs, persistent diagnostics, feedback ring/continuous tags, optional TUI replay, and rollout-trace recorders. `RUST_LOG`, `log_dir`, and recorder environment variables cannot enable disabled capture.
 - To opt in, set `diagnostic_log_capture = true` and restart affected processes. Keep existing filters. Explicit `log_dir` also routes SQLite logs unless managed `sqlite_home` overrides it. Propagate policy to the code-mode helper; inherited helper settings cannot override it. Standalone helpers without user config require explicit opt-in.
