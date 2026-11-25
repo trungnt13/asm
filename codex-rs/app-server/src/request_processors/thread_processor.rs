@@ -17,6 +17,7 @@ use resume_permit::ResumePermit;
 mod thread_resume_account;
 
 use super::persisted_resume_settings::PersistedResumeSettings;
+use super::persisted_resume_settings::latest_legacy_turn_model;
 use super::persisted_resume_settings::latest_persisted_model_settings;
 use super::thread_enrichment::enrich_loaded_threads;
 use super::thread_fork_goal::inherit_thread_goal_snapshot;
@@ -135,6 +136,8 @@ struct ThreadListFilters {
 struct ResumeConfigState {
     history_cwd: Option<PathBuf>,
     workspace_roots: Option<Vec<AbsolutePathBuf>>,
+    saved_provider: Option<String>,
+    saved_model: Option<String>,
     persisted_metadata: Option<ThreadMetadata>,
     persisted_settings: Option<PersistedResumeSettings>,
 }
@@ -4527,9 +4530,35 @@ impl ThreadRequestProcessor {
             && persisted_metadata
                 .as_ref()
                 .is_some_and(|metadata| metadata.reasoning_effort.is_none());
+        let saved_provider = resume_source_thread
+            .as_ref()
+            .map(|thread| thread.model_provider.as_str())
+            .filter(|provider| !provider.is_empty())
+            .or_else(|| {
+                persisted_metadata
+                    .as_ref()
+                    .map(|metadata| metadata.model_provider.as_str())
+            })
+            .or_else(|| match &thread_history {
+                InitialHistory::Resumed(resumed) => {
+                    resumed.history.iter().find_map(|item| match item {
+                        RolloutItem::SessionMeta(meta) => meta.meta.model_provider.as_deref(),
+                        _ => None,
+                    })
+                }
+                _ => None,
+            });
+        let saved_model = persisted_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.model.as_deref())
+            .or_else(|| resume_source_thread.as_ref()?.model.as_deref())
+            .or_else(|| persisted_model_settings.map(|settings| settings.model.as_str()))
+            .or_else(|| latest_legacy_turn_model(&thread_history, saved_provider?));
         let config_state = ResumeConfigState {
             history_cwd: history_cwd.clone(),
             workspace_roots: typesafe_overrides.workspace_roots.clone(),
+            saved_provider: saved_provider.map(str::to_owned),
+            saved_model: saved_model.map(str::to_owned),
             persisted_metadata,
             persisted_settings,
         };
@@ -4542,27 +4571,9 @@ impl ThreadRequestProcessor {
                 let config = self
                     .config_manager
                     .load_for_resume(
-                        resume_source_thread
-                            .as_ref()
-                            .map(|thread| thread.model_provider.as_str())
-                            .filter(|provider| !provider.is_empty())
-                            .or_else(|| {
-                                config_state
-                                    .persisted_metadata
-                                    .as_ref()
-                                    .map(|metadata| metadata.model_provider.as_str())
-                            })
-                            .or_else(|| match &thread_history {
-                                InitialHistory::Resumed(resumed) => {
-                                    resumed.history.iter().find_map(|item| match item {
-                                        RolloutItem::SessionMeta(meta) => {
-                                            meta.meta.model_provider.as_deref()
-                                        }
-                                        _ => None,
-                                    })
-                                }
-                                _ => None,
-                            }),
+                        &self.config_manager.current_cli_overrides(),
+                        config_state.saved_provider.as_deref(),
+                        config_state.saved_model.as_deref(),
                         request_overrides,
                         typesafe_overrides,
                         history_cwd,

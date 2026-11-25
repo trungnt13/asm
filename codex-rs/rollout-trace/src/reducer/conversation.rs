@@ -98,7 +98,7 @@ impl TraceReducer {
         }
         let ObservedJson {
             value: mut payload,
-            missing,
+            mut missing,
         } = self.payload_reader.observed_json(request_payload)?;
         let incremental = payload["previous_response_id"].is_string();
         let input_has_gaps = missing["input"]
@@ -117,6 +117,13 @@ impl TraceReducer {
             );
         };
 
+        if !started.projected_code_mode_outputs.is_empty() {
+            normalize::restore_projected_code_mode_outputs(
+                request_items,
+                &mut missing["input"],
+                &started.projected_code_mode_outputs,
+            )?;
+        }
         // The wire payload stays intact on disk. Resolve accepted history by its native ID,
         // even for two identical named outputs or a trimmed result in a websocket delta.
         for (index, history_id) in &started.stripped_tool_output_ids {

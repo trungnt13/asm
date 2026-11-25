@@ -578,6 +578,7 @@ mod tests {
                 .write_json_payload(RawPayloadKind::PreparedPrompt, &json!({"input": []}))?,
             warmup_context_payload: None,
             stripped_tool_output_ids: Vec::new(),
+            projected_code_mode_outputs: Vec::new(),
             inference_call_id: "inference-1".to_string(),
             thread_id: "thread-root".to_string(),
             codex_turn_id: "turn-1".to_string(),

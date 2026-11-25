@@ -400,6 +400,7 @@ impl TraceReducer {
                 prepared_prompt_payload,
                 warmup_context_payload,
                 stripped_tool_output_ids,
+                projected_code_mode_outputs,
             } => {
                 self.start_inference_call(
                     event.seq,
@@ -414,6 +415,7 @@ impl TraceReducer {
                         prepared_prompt_payload,
                         warmup_context_payload,
                         stripped_tool_output_ids,
+                        projected_code_mode_outputs,
                     },
                 )?;
             }

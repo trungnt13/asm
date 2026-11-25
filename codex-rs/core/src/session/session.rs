@@ -422,6 +422,7 @@ impl SessionConfiguration {
     ) -> StepSettingsConstraints<'_> {
         let permission_profile = self.effective_permission_profile(environments);
         StepSettingsConstraints {
+            model_provider_id: &self.original_config_do_not_use.model_provider_id,
             requirements: self
                 .original_config_do_not_use
                 .config_layer_stack

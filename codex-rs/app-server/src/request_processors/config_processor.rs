@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::config_manager::ConfigManager;
 use crate::config_manager_service::ConfigManagerError;
+use crate::config_manager_service::is_model_provider_config_path;
 use crate::error_code::internal_error;
 use crate::error_code::invalid_request;
 use crate::model_catalog::ModelCatalog;
@@ -118,12 +119,14 @@ impl ConfigRequestProcessor {
         params: ConfigReadParams,
     ) -> Result<ConfigReadResponse, JSONRPCErrorError> {
         let cwd = params.cwd.as_ref().map(PathBuf::from);
-        let config = match self.load_latest_config(cwd).await {
+        let config = match self.config_manager.load_for_config_read(cwd).await {
             Ok(config) => config,
             Err(err) => {
                 // Report layer read/decoding errors before full-config validation errors, as before.
                 self.config_manager.read(params).await.map_err(map_error)?;
-                return Err(err);
+                return Err(internal_error(format!(
+                    "failed to resolve feature override precedence: {err}"
+                )));
             }
         };
         let mut response =
@@ -174,9 +177,14 @@ impl ConfigRequestProcessor {
         &self,
         params: ConfigValueWriteParams,
     ) -> Result<ClientResponsePayload, JSONRPCErrorError> {
-        self.handle_config_mutation_result(self.write_value(params).await)
-            .await
-            .map(ClientResponsePayload::ConfigValueWrite)
+        let invalidate_catalog = is_model_provider_config_path(&params.key_path);
+        let response = self
+            .handle_config_mutation_result(self.write_value(params).await)
+            .await?;
+        if invalidate_catalog {
+            self.model_catalog.invalidate().await;
+        }
+        Ok(ClientResponsePayload::ConfigValueWrite(response))
     }
 
     pub(crate) async fn batch_write(
@@ -195,7 +203,14 @@ impl ConfigRequestProcessor {
                 )
             });
         let should_reload = params.reload_user_config;
+        let invalidate_catalog = params
+            .edits
+            .iter()
+            .any(|edit| is_model_provider_config_path(&edit.key_path));
         let response = self.batch_write_inner(params).await?;
+        if invalidate_catalog {
+            self.model_catalog.invalidate().await;
+        }
         if !session_defaults_only {
             self.handle_config_mutation().await;
             if should_reload {
@@ -247,7 +262,7 @@ impl ConfigRequestProcessor {
             .map_err(map_error);
         let response = self.handle_config_mutation_result(result).await?;
         self.model_catalog
-            .invalidate_if_current_provider(&response.provider.id)
+            .invalidate_if_catalog_provider(&response.provider.id)
             .await;
         Ok(response)
     }

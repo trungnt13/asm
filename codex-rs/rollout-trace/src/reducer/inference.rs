@@ -14,6 +14,7 @@ use crate::model::InferenceCall;
 use crate::model::InferenceCallId;
 use crate::payload::RawPayloadKind;
 use crate::payload::RawPayloadRef;
+use crate::raw_event::ProjectedCodeModeOutput;
 use crate::raw_event::RawEventSeq;
 use crate::raw_event::RawTraceEventPayload;
 
@@ -31,6 +32,7 @@ pub(super) struct StartedInferenceCall {
     pub(super) prepared_prompt_payload: RawPayloadRef,
     pub(super) warmup_context_payload: Option<RawPayloadRef>,
     pub(super) stripped_tool_output_ids: Vec<(usize, String)>,
+    pub(super) projected_code_mode_outputs: Vec<ProjectedCodeModeOutput>,
 }
 
 impl TraceReducer {

@@ -11,6 +11,10 @@ struct Catalog {
 struct Entry {
     model_provider: Option<String>,
     alias: Option<String>,
+    #[serde(default)]
+    preserve_saved_provider_on_resume: bool,
+    #[serde(default)]
+    chat_completions_only_service_tiers: Vec<String>,
     #[serde(flatten)]
     model: ModelInfo,
 }
@@ -58,6 +62,32 @@ pub fn provider_for_model(model: &str) -> Option<&'static str> {
         .iter()
         .find(|entry| entry.model.slug == model)
         .and_then(|entry| entry.model_provider.as_deref())
+}
+
+/// Returns the canonical model ID when its catalog migration preserves the saved provider.
+pub fn model_with_legacy_saved_provider(model: &str, saved_provider: &str) -> Option<&'static str> {
+    CATALOG
+        .models
+        .iter()
+        .find(|entry| {
+            entry.preserve_saved_provider_on_resume
+                && (entry.model.slug == model || entry.alias.as_deref() == Some(model))
+                && entry
+                    .model_provider
+                    .as_deref()
+                    .is_some_and(|bound| bound != saved_provider)
+        })
+        .map(|entry| entry.model.slug.as_str())
+}
+
+pub fn chat_completions_only_service_tiers(model: &str) -> &'static [String] {
+    CATALOG
+        .models
+        .iter()
+        .find(|entry| entry.model.slug == model)
+        .map_or(&[], |entry| {
+            entry.chat_completions_only_service_tiers.as_slice()
+        })
 }
 
 pub fn provider_has_model_bindings(provider: &str) -> bool {

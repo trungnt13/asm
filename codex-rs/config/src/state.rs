@@ -127,6 +127,7 @@ pub struct ConfigLayerEntry {
     pub disabled_reason: Option<String>,
     raw_toml: Option<RawTomlLayer>,
     hooks_config_folder_override: Option<AbsolutePathBuf>,
+    saved_model_route: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -145,6 +146,7 @@ impl ConfigLayerEntry {
             disabled_reason: None,
             raw_toml: None,
             hooks_config_folder_override: None,
+            saved_model_route: false,
         }
     }
 
@@ -165,6 +167,7 @@ impl ConfigLayerEntry {
                 base_dir: raw_toml_base_dir,
             }),
             hooks_config_folder_override: None,
+            saved_model_route: false,
         }
     }
 
@@ -181,6 +184,7 @@ impl ConfigLayerEntry {
             disabled_reason: Some(disabled_reason.into()),
             raw_toml: None,
             hooks_config_folder_override: None,
+            saved_model_route: false,
         }
     }
 
@@ -683,17 +687,63 @@ impl ConfigLayerStack {
     }
 
     /// Adds local session configuration while retaining independently owned runtime snapshots.
-    pub fn with_session_config(mut self, config: TomlValue) -> std::io::Result<Self> {
+    pub fn with_session_config(self, config: TomlValue) -> std::io::Result<Self> {
+        self.with_session_entry(ConfigLayerEntry::new(
+            ConfigLayerSource::SessionFlags,
+            config,
+        ))
+    }
+
+    /// Retains a saved route when the current catalog binds the model elsewhere.
+    pub fn with_saved_model_route(self, model: &str, provider: &str) -> std::io::Result<Self> {
+        let config = toml::toml! {
+            model = (model)
+            model_provider = (provider)
+        };
+        let mut entry =
+            ConfigLayerEntry::new(ConfigLayerSource::SessionFlags, TomlValue::Table(config));
+        entry.saved_model_route = true;
+        self.with_session_entry(entry)
+    }
+
+    pub fn saved_model_route(&self) -> Option<(&str, &str)> {
+        let layer = self.layers_high_to_low().find(|layer| {
+            layer.name == ConfigLayerSource::SessionFlags
+                && (layer.config.get("model").is_some()
+                    || layer.config.get("model_provider").is_some())
+        })?;
+        if !layer.saved_model_route {
+            return None;
+        }
+        Some((
+            layer.config.get("model")?.as_str()?,
+            layer.config.get("model_provider")?.as_str()?,
+        ))
+    }
+
+    /// Retains session-specific provider definitions without pinning definitions from files.
+    pub fn session_model_provider_overrides(&self) -> Option<TomlValue> {
+        let mut merged = TomlValue::Table(Default::default());
+        for providers in self.layers_low_to_high().filter_map(|layer| {
+            (layer.name == ConfigLayerSource::SessionFlags)
+                .then(|| layer.config.get("model_providers"))
+                .flatten()
+        }) {
+            let overlay = TomlValue::Table(
+                [("model_providers".to_owned(), providers.clone())]
+                    .into_iter()
+                    .collect(),
+            );
+            merge_toml_values(&mut merged, &overlay);
+        }
+        merged.as_table_mut()?.remove("model_providers")
+    }
+
+    fn with_session_entry(mut self, entry: ConfigLayerEntry) -> std::io::Result<Self> {
         let index = self.layers.partition_point(|layer| {
             layer.name.precedence() <= ConfigLayerSource::SessionFlags.precedence()
         });
-        self.layers.insert(
-            index,
-            Arc::new(ConfigLayerEntry::new(
-                ConfigLayerSource::SessionFlags,
-                config,
-            )),
-        );
+        self.layers.insert(index, Arc::new(entry));
         validate_enabled_config_layers(self.all_layers_low_to_high())?;
         self.validate_project_mitm_profiles()?;
         Ok(self)
@@ -725,10 +775,10 @@ impl ConfigLayerStack {
             if table.is_empty() {
                 self.layers.remove(index);
             } else {
-                self.layers[index] = Arc::new(ConfigLayerEntry::new(
-                    ConfigLayerSource::SessionFlags,
-                    TomlValue::Table(table),
-                ));
+                let mut entry =
+                    ConfigLayerEntry::new(ConfigLayerSource::SessionFlags, TomlValue::Table(table));
+                entry.saved_model_route = self.layers[index].saved_model_route;
+                self.layers[index] = Arc::new(entry);
             }
         }
         self
@@ -768,10 +818,9 @@ impl ConfigLayerStack {
                 } else if table.remove(key).is_none() {
                     continue;
                 }
-                *layer = Arc::new(ConfigLayerEntry::new(
-                    ConfigLayerSource::SessionFlags,
-                    config,
-                ));
+                let mut entry = ConfigLayerEntry::new(ConfigLayerSource::SessionFlags, config);
+                entry.saved_model_route = layer.saved_model_route;
+                *layer = Arc::new(entry);
             }
         } else {
             return self.with_session_config(TomlValue::Table(

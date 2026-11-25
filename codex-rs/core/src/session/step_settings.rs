@@ -292,6 +292,7 @@ pub(crate) struct StepSettingsUpdate {
 /// Each caller supplies the permissions of the target environment selection.
 pub(crate) struct StepSettingsConstraints<'a> {
     pub(crate) requirements: &'a ConfigRequirements,
+    pub(crate) model_provider_id: &'a str,
     pub(crate) guardian_approval_enabled: bool,
     pub(crate) trusted_guardian_reviewer: bool,
     pub(crate) has_full_disk_write_access: bool,
@@ -373,8 +374,12 @@ impl StepSettings {
                 .can_set(&ApprovalsReviewer::AutoReview)?;
             next.approvals_reviewer = ApprovalsReviewer::AutoReview;
         }
-        if codex_models_manager::provider_for_model(self.collaboration_mode.model())
-            != codex_models_manager::provider_for_model(next.collaboration_mode.model())
+        let previous_model = self.collaboration_mode.model();
+        let next_model = next.collaboration_mode.model();
+        let next_binding = codex_models_manager::provider_for_model(next_model);
+        if previous_model != next_model
+            && (codex_models_manager::provider_for_model(previous_model) != next_binding
+                || next_binding.is_some_and(|provider| provider != constraints.model_provider_id))
         {
             return Err(ConstraintError::InvalidValue {
                 field_name: "Model provider (start a fresh thread to change)",

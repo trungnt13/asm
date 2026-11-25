@@ -1477,6 +1477,7 @@ fn started_inference_attempt(temp: &TempDir) -> anyhow::Result<InferenceTraceAtt
         serde_json::to_vec(&request)?,
         Arc::new(request),
         Vec::new(),
+        Vec::new(),
         || Ok(None),
     );
     // Cancellation tests can start replaying as soon as this helper returns.
@@ -1520,7 +1521,9 @@ async fn prepared_prompt_trace_respects_connector_only_capture() -> anyhow::Resu
         let temp = TempDir::new()?;
         let (writer, attempt) = inference_trace_fixture(&temp)?;
         let prepared = client.prepared_prompt_for_trace(&attempt, &prompt);
-        attempt.record_started(br#"{"input":[]}"#, prepared, Vec::new(), || Ok(None));
+        attempt.record_started(br#"{"input":[]}"#, prepared, Vec::new(), Vec::new(), || {
+            Ok(None)
+        });
         writer.flush()?;
         let rollout = replay_bundle(temp.path())?;
         let payload = rollout
@@ -1759,7 +1762,7 @@ async fn untraced_http_stream_releases_completed_output_before_response_ends() {
         test_session_telemetry(),
         InferenceTraceAttempt::disabled(),
         &test_model_client(SessionSource::Cli).state,
-        /*last_response_tx*/ None,
+        /*continuation*/ None,
         super::ResponseDelivery::default(),
     );
 
@@ -1802,7 +1805,7 @@ async fn incomplete_response_traces_attempted_call_without_streaming_it() -> any
             test_session_telemetry(),
             attempt,
             &test_model_client(SessionSource::Cli).state,
-            /*last_response_tx*/ None,
+            /*continuation*/ None,
             super::ResponseDelivery::default(),
         );
         assert!(stream.next().await.is_some_and(|item| item.event.is_err()));
@@ -1848,7 +1851,7 @@ async fn dropped_response_stream_traces_cancelled_partial_output() -> anyhow::Re
         test_session_telemetry(),
         attempt,
         &test_model_client(SessionSource::Cli).state,
-        /*last_response_tx*/ None,
+        /*continuation*/ None,
         super::ResponseDelivery::default(),
     );
 
@@ -1909,7 +1912,7 @@ async fn response_stream_records_last_model_feedback_ids() {
         test_session_telemetry(),
         InferenceTraceAttempt::disabled(),
         &test_model_client(SessionSource::Cli).state,
-        /*last_response_tx*/ None,
+        /*continuation*/ None,
         super::ResponseDelivery::default(),
     );
 
@@ -2150,7 +2153,7 @@ async fn dropped_backpressured_response_stream_traces_cancelled_partial_output()
         test_session_telemetry(),
         attempt,
         &test_model_client(SessionSource::Cli).state,
-        /*last_response_tx*/ None,
+        /*continuation*/ None,
         super::ResponseDelivery::default(),
     );
 
@@ -2980,6 +2983,7 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
         interceptors: vec![Box::new(ReplaceOutput)],
         continuation: Some(last_response_tx),
         normalize_fireworks_exec: false,
+        normalize_fireworks_router_echo: false,
     }
     .into_raw_stream()?;
     let mut delivered = Vec::new();

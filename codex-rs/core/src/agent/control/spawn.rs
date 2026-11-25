@@ -420,9 +420,6 @@ impl LocalAgentControl {
                 })?;
         }
         config.service_tier = independent_service_tier.unwrap_or_else(|| self.root_service_tier());
-        if let Some(model) = stored_model {
-            config.model = Some(model);
-        }
         if config.model_provider_id != stored_model_provider {
             config.model_provider = config
                 .model_providers
@@ -434,6 +431,12 @@ impl LocalAgentControl {
                     ))
                 })?;
             config.model_provider_id = stored_model_provider;
+        }
+        if let Some(model) = stored_model {
+            config.model =
+                Some(codex_models_manager::canonical_model(&model).map_or(model, str::to_owned));
+            // Child reload builds from parent configuration, not the app-server resume loader.
+            config.try_retain_legacy_model_route()?;
         }
         if !config.subagent_service_tiers.is_empty()
             && initial_history

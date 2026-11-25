@@ -6,8 +6,11 @@ use codex_protocol::DEFAULT_FUNCTION_NAMESPACE;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
 use codex_protocol::models::ContentItem;
+use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
+use codex_rollout_trace::ProjectedCodeModeOutput;
 use codex_tools::FreeformTool;
 use codex_tools::JsonSchema;
 use codex_tools::ResponsesApiTool;
@@ -30,9 +33,15 @@ pub(super) fn route(
     service_tier: Option<String>,
 ) -> Result<(String, Option<String>)> {
     match (model, wire_api, service_tier.as_deref()) {
-        (DEEPSEEK_FLASH, WireApi::Responses, Some("priority")) => Err(CodexErr::InvalidRequest(
-            "Fireworks Priority requires wire_api = \"chat_completions\". Select Standard or Ultra-fast to use Responses.".into(),
-        )),
+        (_, WireApi::Responses, Some(tier))
+            if codex_models_manager::chat_completions_only_service_tiers(model)
+                .iter()
+                .any(|restricted| restricted == tier) =>
+        {
+            Err(CodexErr::InvalidRequest(
+                "Fireworks Priority requires wire_api = \"chat_completions\". Select Standard or Ultra-fast to use Responses.".into(),
+            ))
+        }
         (DEEPSEEK_FLASH, _, Some("ultrafast")) => Ok((DEEPSEEK_FLASH_ULTRAFAST.to_string(), None)),
         _ => Ok((model.to_string(), service_tier)),
     }
@@ -40,6 +49,10 @@ pub(super) fn route(
 
 pub(super) fn uses_function_exec(model: &ModelInfo, wire_api: WireApi) -> bool {
     model.slug == DEEPSEEK_FLASH && wire_api == WireApi::Responses && !model.use_responses_lite
+}
+
+pub(super) fn uses_ultrafast_router(model: &ModelInfo, wire_model: &str) -> bool {
+    model.slug == DEEPSEEK_FLASH && wire_model == DEEPSEEK_FLASH_ULTRAFAST
 }
 
 pub(super) fn code_mode_exec_spec(spec: &ToolSpec) -> bool {
@@ -93,7 +106,8 @@ fn is_exec(name: &str, namespace: Option<&str>) -> bool {
 pub(super) fn project_input(
     input: &[Arc<ResponseItem>],
     history: &[Arc<ResponseItem>],
-) -> Option<Vec<Arc<ResponseItem>>> {
+    trace_projection: bool,
+) -> (Option<Vec<Arc<ResponseItem>>>, Vec<ProjectedCodeModeOutput>) {
     let mut pending_outputs: HashSet<_> = input
         .iter()
         .filter_map(|item| match item.as_ref() {
@@ -129,6 +143,7 @@ pub(super) fn project_input(
     }
 
     let mut projected = None;
+    let mut projected_outputs = Vec::new();
     for (index, item) in input.iter().enumerate() {
         let wire_item = match item.as_ref() {
             ResponseItem::CustomToolCall {
@@ -169,19 +184,51 @@ pub(super) fn project_input(
                     internal_chat_message_metadata_passthrough.clone(),
             }),
             ResponseItem::CustomToolCallOutput {
+                id,
                 call_id,
                 name: Some(name),
                 output,
                 ..
             } if name == PUBLIC_TOOL_NAME && exec_calls.contains(call_id.as_str()) => {
                 // An async notification is not a second result for a completed function call.
-                let text = output.body.to_text().unwrap_or_default();
+                if trace_projection {
+                    projected_outputs.push(ProjectedCodeModeOutput {
+                        index,
+                        call_id: call_id.clone(),
+                        history_id: id.as_ref().map(ToString::to_string),
+                    });
+                }
+                let mut content = vec![ContentItem::InputText {
+                    text: format!("Additional output from {name} ({call_id}):\n"),
+                }];
+                match &output.body {
+                    FunctionCallOutputBody::Text(text) => {
+                        content.push(ContentItem::InputText { text: text.clone() });
+                    }
+                    FunctionCallOutputBody::ContentItems(items) => {
+                        content.extend(items.iter().filter_map(|item| match item {
+                            FunctionCallOutputContentItem::InputText { text } => {
+                                Some(ContentItem::InputText { text: text.clone() })
+                            }
+                            FunctionCallOutputContentItem::InputImage { image, detail } => {
+                                Some(ContentItem::InputImage {
+                                    image: image.clone(),
+                                    detail: *detail,
+                                })
+                            }
+                            FunctionCallOutputContentItem::InputAudio { audio } => {
+                                Some(ContentItem::InputAudio {
+                                    audio: audio.clone(),
+                                })
+                            }
+                            FunctionCallOutputContentItem::EncryptedContent { .. } => None,
+                        }));
+                    }
+                }
                 Some(ResponseItem::Message {
                     id: None,
                     role: "user".to_string(),
-                    content: Arc::new(vec![ContentItem::InputText {
-                        text: format!("Additional output from {name} ({call_id}):\n{text}"),
-                    }]),
+                    content: Arc::new(content),
                     status: None,
                     phase: None,
                     encrypted_content: None,
@@ -201,18 +248,27 @@ pub(super) fn project_input(
             projected.push(Arc::clone(item));
         }
     }
-    projected
+    (projected, projected_outputs)
 }
 
-pub(super) fn normalize_event(
-    mut event: ResponseEvent,
-) -> std::result::Result<ResponseEvent, ApiError> {
-    let (item, completed) = match &mut event {
+pub(super) fn normalize_router_echo(event: &mut ResponseEvent) {
+    if let ResponseEvent::ServerModel(model) = event
+        && model.as_str() == DEEPSEEK_FLASH_ULTRAFAST
+    {
+        *model = DEEPSEEK_FLASH.to_string();
+    }
+}
+
+// Return whether the provider's call had to be repaired for replay.
+pub(super) fn normalize_exec_event(
+    event: &mut ResponseEvent,
+) -> std::result::Result<bool, ApiError> {
+    let (item, completed) = match event {
         ResponseEvent::OutputItemAdded(item) => (item, false),
         ResponseEvent::OutputItemDone(item) => (item, true),
-        _ => return Ok(event),
+        _ => return Ok(false),
     };
-    if let ResponseItem::FunctionCall {
+    let ResponseItem::FunctionCall {
         id,
         name,
         namespace,
@@ -223,33 +279,33 @@ pub(super) fn normalize_event(
         internal_chat_message_metadata_passthrough,
         ..
     } = item
-        && is_exec(name, namespace.as_deref())
-    {
-        // Responses only provides complete JSON arguments in the done item.
-        let input = if completed {
-            let args = arguments
-                .trim_start()
-                .starts_with('{')
-                .then(|| serde_json::from_str::<ExecArguments<String>>(arguments).ok())
-                .flatten()
-                .ok_or_else(|| ApiError::InvalidRequest {
-                    message: "Fireworks returned invalid Code Mode exec arguments; expected an object with one string field named input.".into(),
-                })?;
-            args.input
-        } else {
-            String::new()
-        };
-        *item = ResponseItem::CustomToolCall {
-            id: id.take(),
-            name: std::mem::take(name),
-            namespace: namespace.take(),
-            call_id: std::mem::take(call_id),
-            input,
-            status: status.take(),
-            encrypted_content: encrypted_content.take(),
-            internal_chat_message_metadata_passthrough: internal_chat_message_metadata_passthrough
-                .take(),
-        };
+    else {
+        return Ok(false);
+    };
+    if !is_exec(name, namespace.as_deref()) {
+        return Ok(false);
     }
-    Ok(event)
+    if completed && call_id.trim().is_empty() {
+        return Err(ApiError::InvalidRequest {
+            message: "Fireworks returned a Code Mode exec call without a call ID.".into(),
+        });
+    }
+    // A malformed wrapper contains no usable source. The Code Mode parser rejects
+    // empty input before starting a cell and returns a result for this call ID.
+    let args = (completed && arguments.trim_start().starts_with('{'))
+        .then(|| serde_json::from_str::<ExecArguments<String>>(arguments).ok())
+        .flatten();
+    let repaired = completed && args.is_none();
+    *item = ResponseItem::CustomToolCall {
+        id: id.take(),
+        name: std::mem::take(name),
+        namespace: namespace.take(),
+        call_id: std::mem::take(call_id),
+        input: args.map(|args| args.input).unwrap_or_default(),
+        status: status.take(),
+        encrypted_content: encrypted_content.take(),
+        internal_chat_message_metadata_passthrough: internal_chat_message_metadata_passthrough
+            .take(),
+    };
+    Ok(repaired)
 }

@@ -314,6 +314,7 @@ fn configured_settings() -> StepSettings {
 fn step_settings_constraints(requirements: &ConfigRequirements) -> StepSettingsConstraints<'_> {
     StepSettingsConstraints {
         requirements,
+        model_provider_id: "openai",
         guardian_approval_enabled: false,
         trusted_guardian_reviewer: false,
         has_full_disk_write_access: false,

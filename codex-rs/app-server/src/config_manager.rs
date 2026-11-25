@@ -308,9 +308,38 @@ impl ConfigManager {
         .await
     }
 
+    pub(crate) async fn load_for_config_read(
+        &self,
+        cwd: Option<PathBuf>,
+    ) -> std::io::Result<Config> {
+        // Reading layers (including project trust) must not require a new model route.
+        let overrides = ConfigOverrides {
+            defer_unavailable_model_provider: true,
+            ..Default::default()
+        };
+        if cwd.is_none() {
+            return self.load_non_project_config_with_overrides(overrides).await;
+        }
+        self.load_with_cli_overrides(
+            &self.current_cli_overrides(),
+            /*request_overrides*/ None,
+            overrides,
+            cwd,
+        )
+        .await
+    }
+
     /// Loads system, user, and runtime settings without discovering a project
     /// from the app-server process's working directory.
     pub(crate) async fn load_non_project_config(&self) -> std::io::Result<Config> {
+        self.load_non_project_config_with_overrides(ConfigOverrides::default())
+            .await
+    }
+
+    async fn load_non_project_config_with_overrides(
+        &self,
+        overrides: ConfigOverrides,
+    ) -> std::io::Result<Config> {
         let mcp_ema_cancellation = self.capture_mcp_ema_cancellation();
         let policy_load = self.refresh_application_network_policy().await?;
         let mut config = ConfigBuilder::default()
@@ -322,6 +351,7 @@ impl ConfigManager {
             .cloud_config_bundle(policy_load.cloud_config.clone())
             .thread_config_loader(Arc::clone(&self.thread_config_loader))
             .without_project_context()
+            .harness_overrides(overrides)
             .build()
             .await?;
         self.check_application_policy_load(&policy_load)?;
@@ -486,11 +516,46 @@ impl ConfigManager {
         current: &Config,
     ) -> std::io::Result<()> {
         self.check_thread_model_provider(current).await?;
-        if !model_selects_provider(current.model.as_deref(), &current.model_provider_id) {
+        let saved_route =
+            current
+                .config_layer_stack
+                .saved_model_route()
+                .filter(|(model, provider)| {
+                    current.model.as_deref() == Some(*model)
+                        && current.model_provider_id == *provider
+                });
+        if saved_route.is_none()
+            && !model_selects_provider(current.model.as_deref(), &current.model_provider_id)
+        {
+            return Ok(());
+        }
+        let mut cli_overrides = self.current_cli_overrides();
+        if let Some(providers) = current
+            .config_layer_stack
+            .session_model_provider_overrides()
+        {
+            cli_overrides.push(("model_providers".to_owned(), providers));
+        }
+        let cwd = Some(current.cwd.to_path_buf());
+        if let Some((model, provider)) = saved_route {
+            self.load_for_resume(
+                &cli_overrides,
+                Some(provider),
+                Some(model),
+                /*request_overrides*/ None,
+                ConfigOverrides::default(),
+                cwd,
+            )
+            .await?;
             return Ok(());
         }
         let configured = self
-            .load_latest_config(Some(current.cwd.to_path_buf()))
+            .load_with_cli_overrides(
+                &cli_overrides,
+                /*request_overrides*/ None,
+                ConfigOverrides::default(),
+                cwd,
+            )
             .await?;
         if !configured
             .model_providers
@@ -593,7 +658,9 @@ impl ConfigManager {
     /// Validates saved and requested providers before resume overrides or policy can replace them.
     pub(crate) async fn load_for_resume(
         &self,
+        cli_overrides: &[(String, TomlValue)],
         saved_provider: Option<&str>,
+        saved_model: Option<&str>,
         request_overrides: Option<HashMap<String, serde_json::Value>>,
         mut typesafe_overrides: ConfigOverrides,
         cwd: Option<PathBuf>,
@@ -607,9 +674,21 @@ impl ConfigManager {
         });
         if let Some(saved) = saved_provider {
             typesafe_overrides.model_provider = Some(saved.to_owned());
+            if let Some(model) = saved_model.and_then(|model| {
+                codex_models_manager::model_with_legacy_saved_provider(model, saved)
+            }) {
+                typesafe_overrides.persisted_model = Some(model.to_owned());
+                if typesafe_overrides.model.is_none()
+                    && !request_overrides
+                        .as_ref()
+                        .is_some_and(|overrides| overrides.contains_key("model"))
+                {
+                    typesafe_overrides.model = Some(model.to_owned());
+                }
+            }
         }
         self.load_with_validation(
-            &self.current_cli_overrides(),
+            cli_overrides,
             request_overrides,
             typesafe_overrides,
             cwd,
@@ -700,15 +779,21 @@ impl ConfigManager {
             .iter()
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect::<Vec<_>>();
+        let mut typesafe_overrides = ConfigOverrides {
+            cwd: Some(cwd.to_path_buf()),
+            default_permissions: Some(permission_profile),
+            codex_linux_sandbox_exe: self.arg0_paths.codex_linux_sandbox_exe.clone(),
+            ..Default::default()
+        };
+        if let Some((model, provider)) = thread_config.config_layer_stack.saved_model_route() {
+            typesafe_overrides.model = Some(model.to_owned());
+            typesafe_overrides.persisted_model = Some(model.to_owned());
+            typesafe_overrides.model_provider = Some(provider.to_owned());
+        }
         self.load_with_cli_overrides(
             &overrides,
             /*request_overrides*/ None,
-            ConfigOverrides {
-                cwd: Some(cwd.to_path_buf()),
-                default_permissions: Some(permission_profile),
-                codex_linux_sandbox_exe: self.arg0_paths.codex_linux_sandbox_exe.clone(),
-                ..Default::default()
-            },
+            typesafe_overrides,
             Some(cwd.to_path_buf()),
         )
         .await

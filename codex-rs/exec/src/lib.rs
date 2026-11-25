@@ -638,7 +638,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         None // No model specified, will use the default.
     };
 
-    let overrides = ConfigOverrides {
+    let mut overrides = ConfigOverrides {
         model,
         review_model: None,
         approval_policy: dangerously_bypass_approvals_and_sandbox.then_some(AskForApproval::Never),
@@ -648,6 +648,8 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         default_permissions: None,
         persisted_permission_profile_id: None,
         persisted_permission_profile: None,
+        persisted_model: None,
+        defer_unavailable_model_provider: matches!(command, Some(ExecCommand::Resume(_))),
         cwd: resolved_cwd,
         workspace_roots: None,
         model_provider: model_provider.clone(),
@@ -666,6 +668,21 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         additional_writable_roots: add_dir,
     };
 
+    // Resume only asks to change a route when the user explicitly supplied it.
+    if overrides.defer_unavailable_model_provider {
+        for (key, value) in cli_kv_overrides.iter().rev() {
+            let setting = match key.as_str() {
+                "model" => &mut overrides.model,
+                "model_provider" => &mut overrides.model_provider,
+                _ => continue,
+            };
+            if setting.is_none()
+                && let Some(value) = value.as_str()
+            {
+                *setting = Some(value.to_owned());
+            }
+        }
+    }
     let mut config = ConfigBuilder::default()
         .codex_home(codex_home.to_path_buf())
         .cli_overrides(cli_kv_overrides.clone())
@@ -1738,8 +1755,8 @@ fn thread_resume_params_from_config(
     } = inherited_thread_permissions(config, overrides)?;
     Ok(ThreadResumeParams {
         thread_id,
-        model: config.model.clone(),
-        model_provider: Some(config.model_provider_id.clone()),
+        model: overrides.model.clone(),
+        model_provider: overrides.model_provider.clone(),
         cwd: (overrides.cwd.is_some() || runtime_workspace_roots.is_some())
             .then(|| config.cwd.to_string_lossy().into_owned()),
         runtime_workspace_roots,

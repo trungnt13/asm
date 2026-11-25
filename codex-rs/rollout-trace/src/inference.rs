@@ -24,6 +24,7 @@ use crate::model::AgentThreadId;
 use crate::model::CodexTurnId;
 use crate::model::InferenceCallId;
 use crate::payload::RawPayloadKind;
+use crate::raw_event::ProjectedCodeModeOutput;
 use crate::raw_event::RawTraceEventContext;
 use crate::raw_event::RawTraceEventPayload;
 use crate::writer::TraceWriter;
@@ -203,14 +204,18 @@ impl InferenceTraceAttempt {
         headers.insert(INFERENCE_CALL_ID_HEADER, inference_call_id);
     }
 
-    /// Captures the transport's encoded JSON and the immutable Core prompt that produced it.
-    /// A continuation from an unrecorded warmup also supplies its full formatted context.
+    /// Captures the outgoing JSON and the Core prompt that produced it.
+    /// For an unrecorded warmup, replay uses the full context and its projection positions.
     pub fn record_started<P: Serialize + Send + Sync + 'static>(
         &self,
         outgoing: impl AsRef<[u8]> + Send + 'static,
         prepared_prompt: Arc<P>,
         stripped_tool_output_ids: Vec<(usize, String)>,
-        warmup_context: impl FnOnce() -> serde_json::Result<Option<Vec<u8>>> + Send + 'static,
+        projected_code_mode_outputs: Vec<ProjectedCodeModeOutput>,
+        warmup_context: impl FnOnce() -> serde_json::Result<
+            Option<(Vec<u8>, Vec<ProjectedCodeModeOutput>)>,
+        > + Send
+        + 'static,
     ) {
         let InferenceTraceAttemptState::Enabled(attempt) = &self.state else {
             return;
@@ -230,9 +235,14 @@ impl InferenceTraceAttempt {
                     RawPayloadKind::PreparedPrompt,
                     &serde_json::to_vec(prepared_prompt.as_ref())?,
                 )?;
-                let warmup_context_payload = warmup_context()?
-                    .map(|bytes| bundle.write_body(RawPayloadKind::WarmupContext, &bytes))
-                    .transpose()?;
+                let (warmup_context_payload, projected_code_mode_outputs) = match warmup_context()?
+                {
+                    Some((bytes, projections)) => (
+                        Some(bundle.write_body(RawPayloadKind::WarmupContext, &bytes)?),
+                        projections,
+                    ),
+                    None => (None, projected_code_mode_outputs),
+                };
                 Ok(RawTraceEventPayload::InferenceStarted {
                     inference_call_id,
                     thread_id,
@@ -241,6 +251,7 @@ impl InferenceTraceAttempt {
                     provider_name,
                     request_payload,
                     stripped_tool_output_ids,
+                    projected_code_mode_outputs,
                     prepared_prompt_payload,
                     warmup_context_payload,
                 })
@@ -503,6 +514,7 @@ mod tests {
         attempt.record_started(
             serde_json::to_vec(&request)?,
             Arc::new(request),
+            Vec::new(),
             Vec::new(),
             || Ok(None),
         );

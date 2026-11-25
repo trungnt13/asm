@@ -1,7 +1,62 @@
 use super::Config;
+use codex_model_provider_info::WireApi;
+use codex_models_manager::chat_completions_only_service_tiers;
 use std::io;
 
 impl Config {
+    /// Lists tiers to hide when a catalog model's provider cannot serve them.
+    pub fn unavailable_catalog_service_tiers(&self, model: &str) -> &'static [String] {
+        let model = codex_models_manager::canonical_model(model).unwrap_or(model);
+        let restricted = chat_completions_only_service_tiers(model);
+        if restricted.is_empty() {
+            return restricted;
+        }
+        // The catalog can show models bound to a provider other than the active one.
+        let provider = match codex_models_manager::provider_for_model(model) {
+            Some(id) if id != self.model_provider_id => self.model_providers.get(id),
+            _ => Some(&self.model_provider),
+        };
+        if provider.is_some_and(|provider| provider.wire_api == WireApi::ChatCompletions) {
+            &[]
+        } else {
+            restricted
+        }
+    }
+
+    pub(crate) fn retains_saved_model_route(&self) -> bool {
+        self.config_layer_stack
+            .saved_model_route()
+            .is_some_and(|(model, provider)| {
+                self.model.as_deref() == Some(model) && self.model_provider_id == provider
+            })
+    }
+
+    pub(crate) fn try_retain_legacy_model_route(&mut self) -> io::Result<bool> {
+        let provider = self.model_provider_id.as_str();
+        let Some(model) = self.model.as_deref().and_then(|model| {
+            codex_models_manager::model_with_legacy_saved_provider(model, provider)
+        }) else {
+            return Ok(false);
+        };
+        if let Some(required) = self.config_layer_stack.required_model_provider()
+            && required != provider
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "Saved model provider `{provider}` conflicts with required provider `{required}`"
+                ),
+            ));
+        }
+        if !self.retains_saved_model_route() {
+            self.config_layer_stack = self
+                .config_layer_stack
+                .clone()
+                .with_saved_model_route(model, provider)?;
+        }
+        Ok(true)
+    }
+
     pub(crate) fn validate_external_subagent_model(&self) -> io::Result<()> {
         let provider = self.model_provider_id.as_str();
         if codex_models_manager::provider_has_model_bindings(provider)

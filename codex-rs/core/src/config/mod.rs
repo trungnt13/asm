@@ -2328,13 +2328,19 @@ impl Config {
         let config_layer_stack =
             Self::layer_stack_preserving_session(session_layers, refreshed_layers)?;
         let cfg = config_toml_from_layers(&config_layer_stack).await?;
+        let mut overrides = ConfigOverrides {
+            cwd: Some(cwd),
+            ..Default::default()
+        };
+        if let Some((model, provider)) = config_layer_stack.saved_model_route() {
+            overrides.model = Some(model.to_owned());
+            overrides.persisted_model = Some(model.to_owned());
+            overrides.model_provider = Some(provider.to_owned());
+        }
         Self::load_config_with_layer_stack(
             LOCAL_FS.as_ref(),
             cfg,
-            ConfigOverrides {
-                cwd: Some(cwd),
-                ..Default::default()
-            },
+            overrides,
             codex_home,
             config_layer_stack,
         )
@@ -2951,6 +2957,10 @@ pub struct ConfigOverrides {
     /// read-only permissions recovered from older history. Explicit overrides
     /// and current requirements take priority.
     pub persisted_permission_profile: Option<PermissionProfile>,
+    /// Saved model identity used to preserve an unchanged resume route.
+    pub persisted_model: Option<String>,
+    /// Allows thread lookup before resolving an unavailable catalog binding.
+    pub defer_unavailable_model_provider: bool,
     pub model_provider: Option<String>,
     pub service_tier: Option<Option<String>>,
     pub codex_self_exe: Option<PathBuf>,
@@ -3791,6 +3801,8 @@ impl Config {
             default_permissions: default_permissions_override,
             persisted_permission_profile_id,
             persisted_permission_profile,
+            persisted_model,
+            defer_unavailable_model_provider,
             model_provider,
             service_tier: service_tier_override,
             codex_self_exe,
@@ -4394,7 +4406,17 @@ impl Config {
             apply_default_gcp_auth(provider, &resolved_cwd);
         }
 
-        let model_provider_id = config_layer_stack.required_model_provider().map(str::to_string)
+        let required_model_provider = config_layer_stack.required_model_provider();
+        if persisted_model.is_some()
+            && let (Some(saved), Some(required)) = (model_provider.as_deref(), required_model_provider)
+            && saved != required
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("Saved model provider `{saved}` conflicts with required provider `{required}`"),
+            ));
+        }
+        let model_provider_id = required_model_provider.map(str::to_string)
             .or(model_provider)
             .or(cfg.model_provider)
             .unwrap_or_else(|| "openai".to_string());
@@ -4577,7 +4599,9 @@ impl Config {
 
         let forced_login_method = cfg.forced_login_method;
 
-        let model = model.or(cfg.model);
+        let model = model.or(cfg.model).map(|model| {
+            codex_models_manager::canonical_model(&model).map_or(model, str::to_owned)
+        });
         let notices = cfg.notice.unwrap_or_default();
         let uses_native_runtime = model
             .as_deref()
@@ -5331,7 +5355,22 @@ impl Config {
             tracing::warn!("{message}");
             config.startup_warnings.push(message.to_string());
         }
-        config.apply_external_model_provider()?;
+        let defer_model_binding = defer_unavailable_model_provider
+            && config.model.as_deref().and_then(codex_models_manager::provider_for_model)
+                .is_some_and(|provider| {
+                    !config.model_providers.contains_key(provider)
+                        || config.config_layer_stack.required_model_provider()
+                            .is_some_and(|required| required != provider)
+                });
+        if defer_model_binding || config.retains_saved_model_route() {
+            return Ok(config);
+        }
+        if persisted_model.is_none()
+            || config.model != persisted_model
+            || !config.try_retain_legacy_model_route()?
+        {
+            config.apply_external_model_provider()?;
+        }
         Ok(config)
         }
         .boxed()

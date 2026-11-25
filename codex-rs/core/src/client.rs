@@ -496,6 +496,11 @@ struct LastResponse {
     items_added: Vec<ResponseItem>,
 }
 
+struct LastResponseRecorder {
+    sender: oneshot::Sender<LastResponse>,
+    invalidated: Option<Arc<AtomicBool>>,
+}
+
 struct WebsocketContinuation {
     response_id: String,
     items: Vec<Arc<ResponseItem>>,
@@ -2470,9 +2475,18 @@ impl ResponsesHttpExecutor<'_> {
             );
             let inference_trace_attempt = inference_trace.start_attempt();
             inference_trace_attempt.add_request_headers(&mut options.extra_headers);
-            if fireworks_exec
-                && let Some(input) = fireworks::project_input(&request.input, &request.input)
-            {
+            let normalize_fireworks_router_echo =
+                fireworks::uses_ultrafast_router(model_info, &request.model);
+            let (projected_input, projected_code_mode_outputs) = fireworks_exec
+                .then(|| {
+                    fireworks::project_input(
+                        &request.input,
+                        &request.input,
+                        inference_trace_attempt.is_enabled(),
+                    )
+                })
+                .unwrap_or_default();
+            if let Some(input) = projected_input {
                 request.input = input;
             }
             if let Some(input) = tool_metadata::bounded_input(&request, &request.input) {
@@ -2499,6 +2513,7 @@ impl ResponsesHttpExecutor<'_> {
                     self.client
                         .prepared_prompt_for_trace(&inference_trace_attempt, prompt),
                     history_ids,
+                    projected_code_mode_outputs,
                     || Ok(None),
                 );
             };
@@ -2523,6 +2538,7 @@ impl ResponsesHttpExecutor<'_> {
                         continuation: None,
                         normalize_fireworks_exec: fireworks_exec
                             && prompt.tools.iter().any(fireworks::code_mode_exec_spec),
+                        normalize_fireworks_router_echo,
                     });
                 }
                 Err(ApiError::Transport(unauthorized_transport))
@@ -2834,9 +2850,15 @@ impl ModelClientSession {
             let mut request = Arc::new(request);
             let input = incremental_items.as_deref().unwrap_or(&request.input);
             // Continuation compares canonical items; only the selected wire slice is projected.
-            let projected_input = fireworks_exec
-                .then(|| fireworks::project_input(input, &request.input))
-                .flatten();
+            let (projected_input, projected_code_mode_outputs) = fireworks_exec
+                .then(|| {
+                    fireworks::project_input(
+                        input,
+                        &request.input,
+                        inference_trace_attempt.is_enabled(),
+                    )
+                })
+                .unwrap_or_default();
             let mut ws_payload = ResponseCreateWsRequest {
                 previous_response_id,
                 input: projected_input.as_deref().unwrap_or(input),
@@ -2928,6 +2950,7 @@ impl ModelClientSession {
                             self.client
                                 .prepared_prompt_for_trace(&inference_trace_attempt, prompt),
                             history_ids,
+                            projected_code_mode_outputs,
                             move || {
                                 #[derive(serde::Serialize)]
                                 struct WarmupContext<'a> {
@@ -2935,11 +2958,20 @@ impl ModelClientSession {
                                 }
                                 warmup_request
                                     .map(|r| {
-                                        let projected = fireworks_exec
-                                            .then(|| fireworks::project_input(&r.input, &r.input))
-                                            .flatten();
+                                        let (projected, projected_code_mode_outputs) =
+                                            fireworks_exec
+                                                .then(|| {
+                                                    fireworks::project_input(
+                                                        &r.input, &r.input,
+                                                        /*trace_projection*/ true,
+                                                    )
+                                                })
+                                                .unwrap_or_default();
                                         let input = projected.as_deref().unwrap_or(&r.input);
-                                        serde_json::to_vec(&WarmupContext { input })
+                                        Ok((
+                                            serde_json::to_vec(&WarmupContext { input })?,
+                                            projected_code_mode_outputs,
+                                        ))
                                     })
                                     .transpose()
                             },
@@ -2957,6 +2989,8 @@ impl ModelClientSession {
                     original_metadata,
                 );
             }
+            let normalize_fireworks_router_echo =
+                fireworks::uses_ultrafast_router(model_info, &request.model);
             self.websocket_session.last_request = Some(request);
             self.websocket_session.last_response_from_untraced_warmup = warmup;
             let stream_result = stream_result.map_err(|err| {
@@ -2979,6 +3013,7 @@ impl ModelClientSession {
                 continuation: Some(last_response_tx),
                 normalize_fireworks_exec: fireworks_exec
                     && prompt.tools.iter().any(fireworks::code_mode_exec_spec),
+                normalize_fireworks_router_echo,
             };
             self.websocket_session.last_response_rx = Some(last_response_rx);
             return Ok(WebsocketStreamOutcome::Stream(Box::new(stream)));
@@ -3291,6 +3326,7 @@ pub(crate) struct OpenedModelResponse {
     interceptors: Vec<Box<dyn codex_extension_api::ModelResponseInterceptor>>,
     continuation: Option<oneshot::Sender<LastResponse>>,
     normalize_fireworks_exec: bool,
+    normalize_fireworks_router_echo: bool,
 }
 
 impl OpenedModelResponse {
@@ -3325,14 +3361,36 @@ impl OpenedModelResponse {
         } else {
             self.stream.boxed()
         };
-        let provider_stream = if self.normalize_fireworks_exec {
-            // A buffered completion must not seed continuation after a rejected tool call.
-            futures::stream::try_unfold(provider_stream, |mut stream| async move {
-                let Some(event) = stream.next().await else {
-                    return Ok(None);
-                };
-                Ok(Some((fireworks::normalize_event(event?)?, stream)))
-            })
+        let invalidated = (self.normalize_fireworks_exec && self.continuation.is_some())
+            .then(|| Arc::new(AtomicBool::new(false)));
+        let continuation = self.continuation.map(|sender| LastResponseRecorder {
+            sender,
+            invalidated: invalidated.clone(),
+        });
+        let normalize_exec = self.normalize_fireworks_exec;
+        let normalize_router_echo = self.normalize_fireworks_router_echo;
+        let provider_stream = if normalize_exec || normalize_router_echo {
+            futures::stream::try_unfold(
+                (provider_stream, invalidated),
+                move |(mut stream, invalidated)| async move {
+                    let Some(event) = stream.next().await else {
+                        return Ok(None);
+                    };
+                    let mut event = event?;
+                    if normalize_router_echo {
+                        fireworks::normalize_router_echo(&mut event);
+                    }
+                    if normalize_exec
+                        && fireworks::normalize_exec_event(&mut event)?
+                        && let Some(invalidated) = &invalidated
+                    {
+                        // The next request must replay the repaired call, not the provider's
+                        // malformed arguments. Keep the socket and normal completion accounting.
+                        invalidated.store(true, Ordering::Relaxed);
+                    }
+                    Ok(Some((event, (stream, invalidated))))
+                },
+            )
             .boxed()
         } else {
             provider_stream
@@ -3344,7 +3402,7 @@ impl OpenedModelResponse {
             self.telemetry,
             self.trace,
             &self.client,
-            self.continuation,
+            continuation,
             delivery,
         );
         stream.interrupt = interrupt;
@@ -3359,7 +3417,7 @@ fn map_response_events<S>(
     session_telemetry: SessionTelemetry,
     inference_trace_attempt: InferenceTraceAttempt,
     client: &ModelClientState,
-    mut last_response_tx: Option<oneshot::Sender<LastResponse>>,
+    mut continuation: Option<LastResponseRecorder>,
     mut delivery: ResponseDelivery,
 ) -> SamplingStream
 where
@@ -3378,7 +3436,7 @@ where
     tokio::spawn(async move {
         let mut logged_error = false;
         let collect_output_items =
-            last_response_tx.is_some() || inference_trace_attempt.needs_output_items();
+            continuation.is_some() || inference_trace_attempt.needs_output_items();
         let mut items_added: Vec<ResponseItem> = Vec::new();
         let mut active_item_id: Option<ResponseItemId> = None;
         let (request_start, mut ttft_ms) = (Instant::now(), None);
@@ -3448,8 +3506,12 @@ where
                         &token_usage,
                         &items_added,
                     );
-                    if let Some(sender) = last_response_tx.take() {
-                        let _ = sender.send(LastResponse {
+                    if let Some(continuation) = continuation.take()
+                        && !continuation
+                            .invalidated
+                            .is_some_and(|invalidated| invalidated.load(Ordering::Relaxed))
+                    {
+                        let _ = continuation.sender.send(LastResponse {
                             response_id: response_id.clone(),
                             items_added,
                         });

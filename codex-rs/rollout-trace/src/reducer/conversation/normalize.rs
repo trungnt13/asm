@@ -3,6 +3,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use anyhow::ensure;
 use codex_code_mode::PUBLIC_TOOL_NAME;
 use codex_protocol::DEFAULT_FUNCTION_NAMESPACE;
 use codex_protocol::models::AgentMessageInputContent;
@@ -21,6 +22,7 @@ use crate::model::ConversationPart;
 use crate::model::ConversationRole;
 use crate::model::TokenUsage;
 use crate::payload::RawPayloadRef;
+use crate::raw_event::ProjectedCodeModeOutput;
 use crate::shard::PayloadReader;
 
 /// Conversation fields parsed from one Responses item before trace identity.
@@ -49,6 +51,62 @@ impl NormalizedConversationItem {
                     | ConversationItemKind::CustomToolCallOutput
             )
     }
+}
+
+pub(super) fn restore_projected_code_mode_outputs(
+    request_items: &mut [Value],
+    missing: &mut Value,
+    projections: &[ProjectedCodeModeOutput],
+) -> Result<()> {
+    for ProjectedCodeModeOutput {
+        index,
+        call_id,
+        history_id,
+    } in projections
+    {
+        let index = *index;
+        let item = request_items
+            .get_mut(index)
+            .context("projected Code Mode output index outside request")?;
+        if missing[index].is_string() {
+            continue;
+        }
+        ensure!(
+            item["type"] == "message" && item["role"] == "user" && item["id"].is_null(),
+            "projected Code Mode output does not refer to an ID-less user message at input {index}"
+        );
+        let content = item["content"]
+            .as_array_mut()
+            .filter(|content| {
+                content
+                    .first()
+                    .is_some_and(|part| part["type"] == "input_text")
+            })
+            .context("projected Code Mode output has no text header")?;
+        // Only the adapter's position mapping identifies outputs. User text cannot do so.
+        content.remove(/*index*/ 0);
+        let output = std::mem::take(content);
+        *item = serde_json::json!({
+            "type": "custom_tool_call_output",
+            "name": PUBLIC_TOOL_NAME,
+            "call_id": call_id,
+        });
+        item["output"] = Value::Array(output);
+        if let Some(history_id) = history_id {
+            item["id"] = Value::String(history_id.clone());
+        }
+        if let Some(missing_item) = missing.get_mut(index).and_then(Value::as_object_mut)
+            && let Some(mut missing_content) = missing_item.remove("content")
+        {
+            if let Some(parts) = missing_content.as_array_mut()
+                && !parts.is_empty()
+            {
+                parts.remove(/*index*/ 0);
+            }
+            missing_item.insert("output".to_string(), missing_content);
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn restore_projected_exec<'a>(
@@ -113,6 +171,7 @@ pub(super) fn restore_projected_exec<'a>(
         };
         if is_function_exec(item)
             && let Some(arguments) = item["arguments"].as_str()
+            && arguments.trim_start().starts_with('{')
             && let Ok(arguments) = serde_json::from_str::<ProjectedExecArguments>(arguments)
             && arguments.input == source
         {

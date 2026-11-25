@@ -268,6 +268,7 @@ fn disabled_thread_context_accepts_trace_calls_without_writing() -> anyhow::Resu
         serde_json::to_vec(&input)?,
         std::sync::Arc::new(input),
         Vec::new(),
+        Vec::new(),
         || Ok(None),
     );
     let token_usage: Option<codex_protocol::protocol::TokenUsage> = None;

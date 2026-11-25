@@ -7,6 +7,7 @@ use super::SectionTransition;
 use super::WorldStateHash;
 use super::WorldStateSection;
 use super::WorldStateUpdate;
+use crate::config::Config;
 use crate::context::ContextualUserFragment;
 use crate::context::environment_context::push_xml_escaped_text;
 use codex_protocol::models::ContentItem;
@@ -33,8 +34,9 @@ impl ModelCatalogState {
     pub(crate) fn new(
         models: &[ModelPreset],
         multi_agent_version: MultiAgentVersion,
-        configured: Option<&[String]>,
+        config: &Config,
     ) -> Self {
+        let configured = config.multi_agent_v2.subagent_model_list.as_deref();
         let mut catalog = String::new();
         let mut models = match crate::agent::model_catalog::advertised_models(
             models,
@@ -82,9 +84,15 @@ impl ModelCatalogState {
                 }
                 line.push('.');
             }
-            if !model.service_tiers.is_empty() {
+            let restricted = config.unavailable_catalog_service_tiers(&model.model);
+            let mut service_tiers = model
+                .service_tiers
+                .iter()
+                .filter(|tier| !restricted.contains(&tier.id))
+                .peekable();
+            if service_tiers.peek().is_some() {
                 line.push_str(" Service tiers: ");
-                for (index, tier) in model.service_tiers.iter().enumerate() {
+                for (index, tier) in service_tiers.enumerate() {
                     if index > 0 {
                         line.push_str(", ");
                     }

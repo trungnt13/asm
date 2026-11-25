@@ -521,6 +521,7 @@ impl Session {
         };
         let constraints = StepSettingsConstraints {
             requirements: &requirements,
+            model_provider_id: &turn_context.config.model_provider_id,
             guardian_approval_enabled: self.features.enabled(Feature::GuardianApproval),
             trusted_guardian_reviewer,
             has_full_disk_write_access: any_environment_has_full_disk_write(
@@ -572,6 +573,7 @@ impl Session {
             .requirements();
         settings.revalidate(&StepSettingsConstraints {
             requirements,
+            model_provider_id: &configuration.original_config_do_not_use.model_provider_id,
             guardian_approval_enabled: self.features.enabled(Feature::GuardianApproval),
             trusted_guardian_reviewer: configuration.trusted_guardian_reviewer,
             has_full_disk_write_access: any_environment_has_full_disk_write(
