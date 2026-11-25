@@ -3192,7 +3192,7 @@ fn answer_moderation_preserves_the_display_instruction() {
         json!({"version":1, "mode":"block", "reason":{"kind":"protection","protectionType":"omnimod"}}),
         json!({"version":1, "mode":"block", "reason":{"kind":"cyber","trustedAccess":false}}),
     ] {
-        let stored = json!({"moderated": !display.is_null(), "display": display});
+        let mut stored = json!({"moderated": !display.is_null(), "display": display});
         let mut with_extra_fields = stored.clone();
         if let Some(object) = with_extra_fields["display"].as_object_mut() {
             object.insert("additionalV1Field".into(), json!(true));
@@ -3201,10 +3201,30 @@ fn answer_moderation_preserves_the_display_instruction() {
             with_extra_fields,
         )
         .unwrap();
+        stored["promptWellbeingResults"] = JsonValue::Null;
         assert_eq!(
             serde_json::to_value(AgentMessageModeration::from(core)).unwrap(),
             stored
         );
+    }
+}
+
+#[test]
+fn prompt_wellbeing_results_round_trip_with_or_without_display() {
+    for display in [
+        json!({"version": 1, "mode": "show", "trustedContacts": "check"}),
+        JsonValue::Null,
+    ] {
+        let stored = json!({
+            "moderated": true,
+            "display": display,
+            "promptWellbeingResults": [{"inputItemId":"msg_input_1","labels":[],"scores":{"U-S4":0.1}}]
+        });
+        let core: codex_protocol::items::AgentMessageModeration =
+            serde_json::from_value(stored.clone()).unwrap();
+        let decision: AgentMessageModeration =
+            serde_json::from_value(serde_json::to_value(core).unwrap()).unwrap();
+        assert_eq!(serde_json::to_value(decision).unwrap(), stored);
     }
 }
 
@@ -3336,6 +3356,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
 
     let agent_item_with_phase = TurnItem::AgentMessage(AgentMessageItem {
         moderation: Some(codex_protocol::items::AgentMessageModeration {
+            prompt_wellbeing_results: None,
             moderated: true,
             display: None,
         }),
@@ -3361,6 +3382,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
         ThreadItemPayload::from(agent_item_with_phase),
         ThreadItemPayload::AgentMessage {
             moderation: Some(AgentMessageModeration {
+                prompt_wellbeing_results: None,
                 moderated: true,
                 display: None
             }),

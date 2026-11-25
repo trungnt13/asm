@@ -141,6 +141,7 @@ impl ChatWidget {
             frame_requester: frame_requester.clone(),
             codex_op_target,
             bottom_pane,
+            bidi_layout: false,
             transcript: TranscriptState::new(active_cell),
             raw_output_mode: local_settings.tui.raw_output_mode,
             config,

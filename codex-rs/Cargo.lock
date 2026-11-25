@@ -1853,9 +1853,9 @@ dependencies = [
 
 [[package]]
 name = "clipboard-win"
-version = "5.4.1"
+version = "5.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bde03770d3df201d4fb868f2c9c59e66a3e4e2bd06692a0fe701e7103c7e84d4"
+checksum = "052af7878466feccda12ba7a6a67d019d712f296809559b47c12c8cc196d3a9a"
 dependencies = [
  "error-code",
 ]
@@ -2381,6 +2381,8 @@ dependencies = [
  "codex-state",
  "codex-uds",
  "codex-utils-absolute-path",
+ "codex-utils-home-dir",
+ "codex-utils-path",
  "codex-utils-rustls-provider",
  "codex-websocket-auth",
  "codex-websocket-client",
@@ -2389,6 +2391,7 @@ dependencies = [
  "gethostname",
  "httpdate",
  "libc",
+ "openssl-sys",
  "owo-colors",
  "pretty_assertions",
  "rand 0.9.3",
@@ -5298,7 +5301,6 @@ dependencies = [
  "bitflags 2.13.1",
  "codex-attachment-store",
  "codex-code-mode",
- "codex-connectors",
  "codex-extension-items",
  "codex-features",
  "codex-file-system",
@@ -5330,6 +5332,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "clap",
+ "clipboard-win",
  "codex-ansi-escape",
  "codex-api",
  "codex-app-server-client",
@@ -5398,6 +5401,7 @@ dependencies = [
  "dunce",
  "futures",
  "http 1.4.0",
+ "icu_properties",
  "image",
  "insta",
  "itertools 0.14.0",
@@ -5714,14 +5718,10 @@ dependencies = [
 name = "codex-utils-plugins"
 version = "0.173.1-alpha.5"
 dependencies = [
- "codex-exec-server",
  "codex-exec-server-protocol",
  "codex-utils-absolute-path",
- "codex-utils-path-uri",
- "serde",
  "serde_json",
  "tempfile",
- "tokio",
 ]
 
 [[package]]

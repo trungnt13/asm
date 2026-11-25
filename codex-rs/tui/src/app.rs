@@ -931,6 +931,7 @@ impl App {
                 self.agents_overview.workspace.divider_drag_viewport = None;
             }
         }
+        self.transcript_view.bidi_layout = tui.terminal.bidi_layout;
         self.transcript_view.agent_links = self
             .side_retention_enabled(tui)
             .then(|| app_server.backend_id());
@@ -1608,6 +1609,7 @@ impl App {
     }
 
     fn render_chat_widget_frame(&mut self, tui: &mut tui::Tui, screen_size: Size) -> Result<Rect> {
+        self.chat_widget.bidi_layout = tui.terminal.bidi_layout;
         self.chat_widget
             .set_sparkle_terminal_focus(tui.is_terminal_focused());
         if tui.is_owned_screen() {

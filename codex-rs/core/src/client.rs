@@ -417,6 +417,9 @@ impl RequestRouteTelemetry {
     }
 }
 
+/// Installed on the reviewer using the reviewed thread’s MAv2 review settings.
+pub(crate) struct QuoteGuardianReplies;
+
 /// A session-scoped client for model-provider API calls.
 ///
 /// This holds configuration and state that should be shared across turns within a Codex session
@@ -430,6 +433,7 @@ impl RequestRouteTelemetry {
 /// call site.
 #[derive(Debug, Clone)]
 pub struct ModelClient {
+    quote_guardian_replies: bool,
     usage_attribution_policy: UsageAttributionPolicy,
     state: Arc<ModelClientState>,
     agent_identity_policy: AgentIdentityAuthPolicy,
@@ -827,6 +831,7 @@ impl ModelClient {
             && !crate::guardian::is_basic_session_source(&session_source)
             && !memory_consolidation;
         Self {
+            quote_guardian_replies: false,
             state: Arc::new(ModelClientState {
                 thread_id,
                 context_ids,
@@ -1533,6 +1538,14 @@ impl ModelClient {
             .filter(|tier| {
                 provider_allows_service_tier(self.state.provider.info(), model_info, tier)
             });
+        // Project only the request copy. Reviewer history keeps native IDs for deduplication.
+        if self.quotes_guardian_replies() {
+            for item in &mut input {
+                if let Some(output) = codex_guardian_context::subagent_reply_output(item) {
+                    *item = Arc::new(output);
+                }
+            }
+        }
         let client_metadata = responses_metadata.client_metadata(include_internal);
         let request = ResponsesApiRequest {
             model: model_info.slug.clone(),
@@ -1683,6 +1696,16 @@ impl ModelClient {
             .filter(|config| config.model == model && self.uses_codex_backend(auth))
             .map(|config| config.headers.clone())
             .unwrap_or_default()
+    }
+
+    pub(crate) fn with_guardian_reply_rendering(mut self, enabled: bool) -> Self {
+        self.quote_guardian_replies =
+            enabled && crate::guardian::is_basic_session_source(&self.state.session_source);
+        self
+    }
+
+    pub(crate) fn quotes_guardian_replies(&self) -> bool {
+        self.quote_guardian_replies
     }
 
     fn uses_codex_backend(&self, auth: Option<&CodexAuth>) -> bool {
