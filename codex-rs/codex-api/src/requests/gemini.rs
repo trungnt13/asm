@@ -105,10 +105,14 @@ fn project_steps(request: &ResponsesApiRequest) -> Result<(String, Vec<Value>), 
                         }
                         continue;
                     }
-                    "developer" | "system" => json!({
-                        "type": "user_input",
-                        "content": format!("ASM instructions:\n{}", parts.into_iter().map(String::as_str).collect::<Vec<_>>().join("\n")),
-                    }),
+                    "developer" | "system" => text_user_input(format!(
+                        "ASM instructions:\n{}",
+                        parts
+                            .into_iter()
+                            .map(String::as_str)
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )),
                     role @ ("assistant" | "user") => {
                         let kind = if role == "assistant" {
                             "model_output"
@@ -215,9 +219,10 @@ fn project_steps(request: &ResponsesApiRequest) -> Result<(String, Vec<Value>), 
                 name: Some(name),
                 output,
                 ..
-            } => {
-                json!({"type":"user_input", "content":format!("Additional output from {name}:\n{}", tool_result_text(&output.body)?)})
-            }
+            } => text_user_input(format!(
+                "Additional output from {name}:\n{}",
+                tool_result_text(&output.body)?,
+            )),
             ResponseItem::AgentMessage {
                 author,
                 recipient,
@@ -227,7 +232,9 @@ fn project_steps(request: &ResponsesApiRequest) -> Result<(String, Vec<Value>), 
                 let text = plaintext_agent_message_content(content).ok_or_else(|| {
                     invalid_request("Gemini Interactions requires a plaintext agent message")
                 })?;
-                json!({"type":"user_input", "content": format!("Agent message from {author} to {recipient}:\n{text}")})
+                text_user_input(format!(
+                    "Agent message from {author} to {recipient}:\n{text}"
+                ))
             }
             _ => {
                 return Err(invalid_request(
@@ -245,6 +252,10 @@ fn project_steps(request: &ResponsesApiRequest) -> Result<(String, Vec<Value>), 
         return Err(invalid_request("missing Gemini tool results"));
     }
     Ok((instructions, steps))
+}
+
+fn text_user_input(text: String) -> Value {
+    json!({"type": "user_input", "content": [{"type": "text", "text": text}]})
 }
 
 fn invalid_request(message: &str) -> ApiError {

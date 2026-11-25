@@ -348,7 +348,8 @@ fn token_usage(usage: &Value) -> Option<TokenUsage> {
         cached_input_tokens: usage["total_cached_tokens"].as_i64().unwrap_or_default(),
         // Gemini reports visible output and thought tokens separately.
         output_tokens: usage["total_output_tokens"]
-            .as_i64()?
+            .as_i64()
+            .unwrap_or_default()
             .saturating_add(reasoning_output_tokens),
         reasoning_output_tokens,
         total_tokens: usage["total_tokens"].as_i64()?,
