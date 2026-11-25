@@ -2979,6 +2979,7 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
         client: Arc::clone(&test_model_client(SessionSource::Cli).state),
         interceptors: vec![Box::new(ReplaceOutput)],
         continuation: Some(last_response_tx),
+        normalize_fireworks_exec: false,
     }
     .into_raw_stream()?;
     let mut delivered = Vec::new();
