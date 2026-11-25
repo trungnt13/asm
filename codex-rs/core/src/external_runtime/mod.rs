@@ -62,7 +62,6 @@ use crate::session::InputQueueEntry;
 use crate::session::SubmittedAdditionalContext;
 use crate::session::TurnInput;
 use crate::session::session::Session;
-use crate::session::turn::merge_submitted_context;
 use crate::session::turn_context::TurnContext;
 use crate::state::TaskKind;
 use crate::tasks::SessionTaskResult;
@@ -370,11 +369,7 @@ async fn run_conversation(
         }
         let needs_pending_input = input.is_empty();
         if let Some(context) = turn.extension_data.remove::<SubmittedAdditionalContext>() {
-            let mut items = merge_submitted_context(session, turn, &context)
-                .await
-                .into_iter()
-                .map(TurnInput::ResponseItem)
-                .collect::<Vec<_>>();
+            let mut items = context::submitted_additional_context(session, turn, &context);
             items.append(input);
             *input = items;
         }
@@ -388,7 +383,7 @@ async fn run_conversation(
                 .input_queue
                 .get_pending_input(&session.active_turn)
                 .await;
-            input.extend(materialize_native_inputs(session, turn, pending).await);
+            input.extend(materialize_native_inputs(session, turn, pending));
         }
         if page_context != codex_config::PageContextPolicy::Inherit {
             let history = session.clone_history().await;
@@ -961,7 +956,7 @@ async fn run_conversation(
                         if reply.is_closed() { continue; }
                         if let Some(turn_state) = &turn_state {
                             let pending = session.input_queue.take_current_turn_mail(turn_state).await;
-                            let mut pending = materialize_native_inputs(session, turn, pending).await;
+                            let mut pending = materialize_native_inputs(session, turn, pending);
                             if input::prepare_input(&mut pending)? > 0 {
                                 session.send_event(turn, EventMsg::Warning(WarningEvent { message: "Encrypted ASM input was ignored; the user prompt is preserved.".to_owned() })).await;
                             }
@@ -1060,11 +1055,11 @@ async fn run_conversation(
         if pending.is_empty() {
             return Ok(last_message);
         }
-        *input = materialize_native_inputs(session, turn, pending).await;
+        *input = materialize_native_inputs(session, turn, pending);
     }
 }
 
-async fn materialize_native_inputs(
+fn materialize_native_inputs(
     session: &Session,
     turn: &TurnContext,
     entries: Vec<InputQueueEntry>,
@@ -1072,12 +1067,9 @@ async fn materialize_native_inputs(
     let mut inputs = Vec::with_capacity(entries.len());
     for entry in entries {
         if let Some(context) = entry.additional_context {
-            inputs.extend(
-                merge_submitted_context(session, turn, &context)
-                    .await
-                    .into_iter()
-                    .map(TurnInput::ResponseItem),
-            );
+            inputs.extend(context::submitted_additional_context(
+                session, turn, &context,
+            ));
         }
         inputs.push(entry.input);
     }

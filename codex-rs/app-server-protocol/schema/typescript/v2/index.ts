@@ -13,6 +13,7 @@ export type { AccountTokenUsageDailyBucket } from "./AccountTokenUsageDailyBucke
 export type { AccountTokenUsageSummary } from "./AccountTokenUsageSummary";
 export type { AccountUpdateReason } from "./AccountUpdateReason";
 export type { AccountUpdatedNotification } from "./AccountUpdatedNotification";
+export type { AccountVoiceOption } from "./AccountVoiceOption";
 export type { ActivePermissionProfile } from "./ActivePermissionProfile";
 export type { AddCreditsNudgeCreditType } from "./AddCreditsNudgeCreditType";
 export type { AddCreditsNudgeEmailStatus } from "./AddCreditsNudgeEmailStatus";
@@ -142,10 +143,12 @@ export type { DesktopOnboardingEntrypoint } from "./DesktopOnboardingEntrypoint"
 export type { DynamicToolCallOutputContentItem } from "./DynamicToolCallOutputContentItem";
 export type { DynamicToolCallParams } from "./DynamicToolCallParams";
 export type { DynamicToolCallResponse } from "./DynamicToolCallResponse";
+export type { DynamicToolCallResult } from "./DynamicToolCallResult";
 export type { DynamicToolCallStatus } from "./DynamicToolCallStatus";
 export type { DynamicToolFunctionSpec } from "./DynamicToolFunctionSpec";
 export type { DynamicToolNamespaceSpec } from "./DynamicToolNamespaceSpec";
 export type { DynamicToolNamespaceTool } from "./DynamicToolNamespaceTool";
+export type { DynamicToolResultFormat } from "./DynamicToolResultFormat";
 export type { DynamicToolSpec } from "./DynamicToolSpec";
 export type { EnvironmentConnectionNotification } from "./EnvironmentConnectionNotification";
 export type { EnvironmentSkillsParams } from "./EnvironmentSkillsParams";

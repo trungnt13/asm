@@ -130,6 +130,7 @@ async fn call_tool(
     execute(
         server.request_handle(),
         DynamicToolCallParams {
+            supported_result_format: None,
             thread_id: source.to_string(),
             turn_id: "persisted-turn".to_string(),
             call_id: "call-1".to_string(),
@@ -569,6 +570,7 @@ async fn task_management_tools_use_existing_app_server_operations() -> color_eyr
     let same_name = execute(
         server.request_handle(),
         DynamicToolCallParams {
+            supported_result_format: None,
             thread_id: source.clone(),
             turn_id: "persisted-turn".to_string(),
             call_id: "rename-same".to_string(),
@@ -601,6 +603,7 @@ async fn task_management_tools_use_existing_app_server_operations() -> color_eyr
     let blocked = execute(
         server.request_handle(),
         DynamicToolCallParams {
+            supported_result_format: None,
             thread_id: source.clone(),
             turn_id: "persisted-turn".to_string(),
             call_id: "rename-blocked".to_string(),

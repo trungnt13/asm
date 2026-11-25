@@ -5,6 +5,7 @@ use crate::EvidenceCursor;
 use anyhow::Context;
 use board_host::PausedClockHost;
 use board_host::board_host;
+use codex_core::guardian_review::PendingReviewWrites;
 use codex_history::CodexHarnessMetadata;
 use codex_history::HistoryInitialization;
 use codex_history::ResponseItemEnvelope;
@@ -37,6 +38,112 @@ use tokio::sync::mpsc::error::TryRecvError;
 #[path = "../tests/common/board_host.rs"]
 mod board_host;
 
+#[test_case::test_case(false; "caller cancelled before recorder admission")]
+#[test_case::test_case(true; "caller cancelled with projection blocked")]
+#[tokio::test]
+async fn initial_cutoff_and_retry_wait_for_live_revocation(
+    during_projection: bool,
+) -> anyhow::Result<()> {
+    core_test_support::skip_if_no_network!(Ok(()));
+    let server = start_mock_server().await;
+    let test = test_codex()
+        .with_thread_extension(PendingReviewWrites::default())
+        .with_history_mode(ThreadHistoryMode::Paginated)
+        .build_with_auto_env(&server)
+        .await?;
+    test.codex
+        .inject_response_items(vec![user_message_item("Approve the release.")])
+        .await?;
+    let root = test.session_configured.thread_id;
+    let history = &test.thread_store;
+    let cursor = EvidenceCursor::from_now(history.as_ref(), root).await?;
+    let writes = test
+        .codex
+        .thread_extension_data()
+        .get::<PendingReviewWrites>()
+        .context("root write tracker")?;
+    let (evidence, mut writer) = RootEvidence::new(
+        Default::default(),
+        history.clone(),
+        cursor.clone(),
+        writes.clone(),
+    );
+    let before = test.codex.guardian_authorization_version().await;
+
+    // A local flush holds the writer lock while awaiting the recorder task.
+    // Leave it suspended so the next instruction becomes live before its append.
+    let mut flush = Box::pin(tokio::task::unconstrained(history.flush_thread(root)));
+    assert!(futures::poll!(&mut flush).is_pending());
+    // Start a group that has already checked for pending writes. Reviews
+    // arriving after the revocation must not inherit this group's result.
+    let mut batches = NamedTraceEvents::subscribe("guardian_v3.cutoff_batch");
+    let mut earlier = Box::pin(evidence.capture_cutoff());
+    assert!(futures::poll!(&mut earlier).is_pending());
+    batches.next().await?;
+    let mut revoke = Box::pin(
+        test.codex
+            .inject_response_items_for_turn(vec![user_message_item("Stop the release.")]),
+    );
+    tokio::select! {
+        result = &mut revoke => anyhow::bail!("revocation finished before releasing the writer: {result:?}"),
+        result = tokio::time::timeout(Duration::from_secs(/*secs*/ 10), async {
+            while test.codex.guardian_authorization_version().await == before {
+                tokio::task::yield_now().await;
+            }
+        }) => result?,
+    }
+    let initial = evidence.capture_cutoff();
+    let retry = evidence.request_catch_up();
+    tokio::pin!(initial, retry);
+    // Exercise a shared capture before admission and a lone retry during projection.
+    if !during_projection {
+        assert!(futures::poll!(&mut initial).is_pending());
+    }
+    assert!(futures::poll!(&mut retry).is_pending());
+
+    if during_projection {
+        assert!(test.codex.state_db().is_some());
+        let db = codex_state::open_thread_history_db(test.config.sqlite_config()).await?;
+        let lock = db.begin_with("BEGIN IMMEDIATE").await?;
+        flush.await?;
+        // Read the complete canonical record without flushing or waiting for SQLite.
+        tokio::select! {
+            result = &mut revoke => anyhow::bail!("revocation finished with projection blocked: {result:?}"),
+            result = tokio::time::timeout(Duration::from_secs(/*secs*/ 10), async {
+                while cursor.capture(history.as_ref()).await?.records().is_empty() {
+                    tokio::task::yield_now().await;
+                }
+                anyhow::Ok(())
+            }) => result??,
+        }
+        drop(revoke);
+        assert!(writes.wait().now_or_never().is_none());
+        lock.rollback().await?;
+    } else {
+        drop(revoke);
+        assert!(writes.wait().now_or_never().is_none());
+        flush.await?;
+    }
+    let routed = retry.await?;
+    let cutoff = initial.await?;
+    let capture = writer.try_recv()?;
+    let [record] = capture.snapshot.records() else {
+        anyhow::bail!("expected the revocation");
+    };
+    assert_eq!(
+        serde_json::to_value(record)?["original"]["payload"]["content"][0]["text"],
+        "Stop the release."
+    );
+    assert_eq!(capture.snapshot.cutoff(), cutoff);
+    capture.finish();
+    assert_eq!(routed.await?, cutoff);
+    earlier.await?;
+    batches.next().await?;
+    assert!(batches.next().now_or_never().is_none());
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn skips_a_partial_delivery_once_across_wakes_and_catch_up() -> anyhow::Result<()> {
     core_test_support::skip_if_no_network!(Ok(()));
@@ -54,7 +161,12 @@ async fn skips_a_partial_delivery_once_across_wakes_and_catch_up() -> anyhow::Re
         HistoryInitialization::New,
     )
     .await?;
-    let (evidence, mut writer) = RootEvidence::new(Default::default(), history.clone(), cursor);
+    let (evidence, mut writer) = RootEvidence::new(
+        Default::default(),
+        history.clone(),
+        cursor,
+        Default::default(),
+    );
 
     // The initial rollout header advances the writer even without evidence to route.
     history
@@ -168,7 +280,12 @@ async fn retries_unavailable_history_and_remembers_rejected_evidence() -> anyhow
         .await?;
     let cursor = EvidenceCursor::from_now(history.as_ref(), root).await?;
     let delivered = cursor.position();
-    let (evidence, _writer) = RootEvidence::new(Default::default(), history.clone(), cursor);
+    let (evidence, _writer) = RootEvidence::new(
+        Default::default(),
+        history.clone(),
+        cursor,
+        Default::default(),
+    );
 
     let path = test
         .session_configured
@@ -178,8 +295,20 @@ async fn retries_unavailable_history_and_remembers_rejected_evidence() -> anyhow
     let hidden = path.with_extension("unavailable");
     tokio::fs::rename(path, &hidden).await?;
     let unavailable = evidence.enqueue(/*cutoff*/ None).await;
+    let mut batches = NamedTraceEvents::subscribe("guardian_v3.cutoff_batch");
+    let (initial, retry) = tokio::join!(evidence.capture_cutoff(), evidence.request_catch_up());
     tokio::fs::rename(hidden, path).await?;
     assert!(unavailable.is_err());
+    assert_eq!(
+        initial
+            .err()
+            .context("expected a failed capture")?
+            .to_string(),
+        retry.err().context("expected a failed retry")?.to_string()
+    );
+    batches.next().await?;
+    assert!(batches.next().now_or_never().is_none());
+    assert_eq!(evidence.capture_cutoff().await?, delivered);
     evidence.enqueue(/*cutoff*/ None).await?;
 
     history
@@ -217,6 +346,72 @@ async fn retries_unavailable_history_and_remembers_rejected_evidence() -> anyhow
     Ok(())
 }
 
+#[tokio::test]
+async fn retries_share_a_queued_cutoff_and_skip_the_tail_read_when_alone() -> anyhow::Result<()> {
+    core_test_support::skip_if_no_network!(Ok(()));
+    let server = start_mock_server().await;
+    let test = test_codex()
+        .with_history_mode(ThreadHistoryMode::Paginated)
+        .build_with_auto_env(&server)
+        .await?;
+    let root = test.session_configured.thread_id;
+    let history = &test.thread_store;
+    history
+        .persist_thread(root, PersistContext::Standard)
+        .await?;
+    let (evidence, mut writer) = RootEvidence::new(
+        Default::default(),
+        history.clone(),
+        EvidenceCursor::start(root),
+        Default::default(),
+    );
+    let mut batches = NamedTraceEvents::subscribe("guardian_v3.cutoff_batch");
+
+    // Queue all three before the worker runs on this current-thread runtime.
+    let mut cancelled = Box::pin(evidence.capture_cutoff());
+    let mut initial = Box::pin(evidence.capture_cutoff());
+    let mut retry = Box::pin(evidence.request_catch_up());
+    assert!(futures::poll!(&mut cancelled).is_pending());
+    assert!(futures::poll!(&mut initial).is_pending());
+    assert!(futures::poll!(&mut retry).is_pending());
+    batches.next().await?;
+    drop(cancelled);
+
+    // A caller arriving after the flush starts needs another capture even at the same tail.
+    let late = evidence.capture_cutoff().await?;
+    let bound = initial.await?;
+    // Only the next, lone retry should see this revocation.
+    test.codex
+        .inject_response_items_for_turn(vec![user_message_item("Stop the release.")])
+        .await?;
+    let routed = retry.await?;
+    writer.try_recv()?.finish();
+    assert_eq!(routed.await?, bound);
+    assert_eq!(late, bound);
+    batches.next().await?;
+    assert!(batches.next().now_or_never().is_none());
+
+    // A caller that cancels while queued must not force a tail read for the retry.
+    let mut cancelled = Box::pin(evidence.capture_cutoff());
+    assert!(futures::poll!(&mut cancelled).is_pending());
+    drop(cancelled);
+    let routed = evidence.request_catch_up().await?;
+    let capture = writer.try_recv()?;
+    let [record] = capture.snapshot.records() else {
+        anyhow::bail!("expected the revocation");
+    };
+    assert_eq!(
+        serde_json::to_value(record)?["original"]["payload"]["content"][0]["text"],
+        "Stop the release."
+    );
+    let end = capture.snapshot.cutoff();
+    capture.finish();
+    assert_eq!(routed.await?, end);
+    assert!(batches.next().now_or_never().is_none());
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
 #[test_case::test_case(false; "on_disk")]
 #[test_case::test_case(true; "in_memory")]
 #[tokio::test]
@@ -242,6 +437,7 @@ async fn catch_up_waits_for_committed_delivery_and_allows_later_posts(
     };
     std::fs::write(home.path().join("config.toml"), settings)?;
     let test = test_codex()
+        .with_thread_extension(PendingReviewWrites::default())
         .with_home(home)
         .with_history_mode(ThreadHistoryMode::Paginated)
         .with_model_info_override("gpt-5.6-luna", |_| {})

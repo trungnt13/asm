@@ -206,7 +206,6 @@ mod pager_overlay;
 mod projectless;
 pub(crate) mod public_widgets;
 mod render;
-mod resize_reflow_cap;
 mod resume_permissions;
 mod resume_picker;
 mod screen_reader;
@@ -244,9 +243,11 @@ mod system_motion;
 mod task_mentions;
 mod temporary_structured_request;
 mod terminal_capabilities;
+pub use terminal_capabilities::interactive_terminal_warning;
+pub use terminal_capabilities::stdout_supports_color;
 mod terminal_hyperlinks;
 mod terminal_palette;
-mod terminal_probe;
+use terminal_capabilities::terminal_probe;
 mod terminal_size_telemetry;
 mod terminal_title;
 mod terminal_visualization_instructions;
@@ -2199,7 +2200,7 @@ async fn run_ratatui_app(
     let use_alt_screen = determine_alt_screen_mode(
         cli.no_alt_screen,
         config.tui_alternate_screen,
-        tui.terminal_app_over_ssh,
+        tui.prefer_inline_screen,
     );
     let mode = crate::transcript_mode::TranscriptMode::resolve(
         config.tui_fullscreen_transcript,
@@ -2541,7 +2542,7 @@ impl Drop for TerminalRestoreGuard {
 fn determine_alt_screen_mode(
     no_alt_screen: bool,
     tui_alternate_screen: AltScreenMode,
-    terminal_app_over_ssh: bool,
+    prefer_inline_screen: bool,
 ) -> bool {
     if no_alt_screen {
         return false;
@@ -2550,7 +2551,7 @@ fn determine_alt_screen_mode(
     match tui_alternate_screen {
         AltScreenMode::Always => true,
         AltScreenMode::Never => false,
-        AltScreenMode::Auto => !terminal_app_over_ssh,
+        AltScreenMode::Auto => !prefer_inline_screen,
     }
 }
 

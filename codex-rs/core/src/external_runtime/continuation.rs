@@ -260,7 +260,7 @@ pub(super) async fn run(
         .get_pending_input(&session.active_turn)
         .await;
     if !pending.is_empty() {
-        let mut pending = super::materialize_native_inputs(session, turn, pending).await;
+        let mut pending = super::materialize_native_inputs(session, turn, pending);
         return super::run_conversation(session, turn, &mut pending, cancellation).await;
     }
     Ok(last_message)
@@ -317,7 +317,7 @@ pub(super) async fn submit_steering(
         }
         return Ok(false);
     }
-    let mut pending = super::materialize_native_inputs(session, turn, pending).await;
+    let mut pending = super::materialize_native_inputs(session, turn, pending);
     if page_context != codex_config::PageContextPolicy::Inherit {
         let history = session.clone_history().await;
         super::input::filter_page_context(&mut pending, page_context, history.raw_items());

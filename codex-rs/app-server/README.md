@@ -275,6 +275,46 @@ Clients that used `"detached"` should call `thread/start` and pass the new threa
 to `review/start`. To keep the original conversation history with custom review
 instructions, use `thread/fork` followed by `turn/start`.
 
+## Recorded Guardian reviews (experimental)
+
+On an idle thread, `thread/guardianReview` assesses the supplied `toolCall`
+without appending or executing it. To review an archived worker's action,
+start a dedicated ephemeral thread and load the worker's history with
+`thread/inject_items`. Supply the action and parent messages in the review request.
+
+```json
+{
+  "method": "thread/guardianReview",
+  "id": 1,
+  "params": {
+    "threadId": "<ephemeral-thread-id>",
+    "toolCall": {
+      "type": "function_call",
+      "name": "exec_command",
+      "call_id": "pending",
+      "arguments": "{\"cmd\":\"git ls-files\"}"
+    },
+    "rootEvidence": {
+      "messages": [{ "role": "user", "text": "List the tracked files." }],
+      "missingUserInstructions": false,
+      "missingAssistantContext": true
+    }
+  }
+}
+```
+
+Supply bounded root messages in order with role `user` or `assistant`.
+Set both omission flags from the source. The server renders the native root
+section alongside the worker transcript. Send the evidence on every review.
+The reviewer can keep its private history when the evidence is unchanged.
+Changing or omitting the evidence invalidates that history. Parent messages
+never enter the worker history. Check for both
+`usedRootEvidence: true` and the expected `callId` before using the result.
+Older servers may ignore the parent evidence and review only the injected history.
+The result measures the supplied recording under the thread's current policy,
+tool catalog and environment. It grants no permission to execute the call.
+Direct client input to V2 workers remains restricted.
+
 # Thread removal
 
 `thread/archive` and `thread/delete` reject attempts to remove a live internal
@@ -652,6 +692,8 @@ return `null`. The ID belongs to the same account snapshot as the rest of the
 response. Clients should also accept an absent field from older app servers.
 PAT sessions continue to return no bearer token from `getAuthStatus`.
 
+The experimental `account/voiceSettings/read` method returns the selected ChatGPT voice and the available voice IDs and display names. Pass an ID as `{ "voice": "juniper" }` to `account/voiceSettings/write` to save it. Both methods use the connected app-server's ChatGPT account, including when the client connects to a remote host.
+
 # Selected workspace routing
 
 `account/securitySetup/read` returns an optional backend-owned security reminder for the saved ChatGPT login. A returned notice includes its account and user IDs; clients must discard it after an account change and validate its copy and action URL before rendering. Ineligible, unavailable, and timed-out reads return `notice: null`. Older app-servers may not support this optional read.
@@ -814,9 +856,16 @@ the app server. If a required configuration server uses OAuth and needs a new
 grant, the command exits with an error whose `data` contains
 `"reason": "configServer"` and `"action": "configServerLogin"`.
 
-When the action is `configServerLogin`, start `codex app-server --startup-oauth`.
+To share OAuth discovery across startup and sign-in, start
+`codex app-server --startup-oauth` and send
+`{"id":0,"method":"configRequirements/read"}`. The result is the usual
+requirements response with an additional `appServerVersion` field. The helper
+performs the same validation and reports the same errors as
+`--print-startup-config`.
+
 This dedicated stdio connection accepts one JSON request per line without an
 initialize handshake. Each reply echoes the string or integer request ID.
+If the read reports `configServerLogin`, keep the connection open.
 
 1. After the user chooses Sign in, send
    `{"id":1,"method":"account/gatewayOAuth/login","params":{"target":{"kind":"configServer"}}}`.
@@ -829,8 +878,11 @@ initialize handshake. Each reply echoes the string or integer request ID.
    success, or an error on failure. To cancel, send
    `{"id":2,"method":"account/gatewayOAuth/cancel"}`. Closing stdin also ends the
    pending attempt.
-4. On success, close the pipe and rerun `--print-startup-config`. Continue startup
-   only with the validated requirements.
+4. On success, send `configRequirements/read` again on the same pipe. The
+   helper reloads policy with the saved credentials and reuses OAuth discovery
+   if the server and proxy settings still match. Close the pipe and continue
+   only after validating the requirements. Older clients can still use the
+   one-shot command before and after sign-in.
 
 # Item history anchors
 

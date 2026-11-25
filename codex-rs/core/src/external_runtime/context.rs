@@ -1,18 +1,58 @@
-use codex_protocol::models::ResponseItem;
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::Context;
 use codex_async_utils::OrCancelExt;
+use codex_features::Feature;
+use codex_protocol::models::ResponseItem;
 use tokio_util::sync::CancellationToken;
 
 use crate::context::ContextualUserFragment;
 use crate::context::DeveloperInstructions;
+use crate::context::world_state::AdditionalContextState;
+use crate::context::world_state::WorldState;
+use crate::session::SubmittedAdditionalContext;
 use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::session::turn;
 use crate::session::turn_context::TurnContext;
+
+impl Session {
+    pub(crate) fn render_native_additional_context(
+        &self,
+        section: AdditionalContextState,
+    ) -> Vec<TurnInput> {
+        let updates = {
+            let mut baseline = self
+                .external_runtime
+                .additional_context_baseline
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let (snapshot, updates) =
+                WorldState::render_section(section, baseline.as_ref(), std::iter::empty());
+            *baseline = Some(snapshot);
+            updates
+        };
+        self.annotated_additional_context_updates(updates)
+            .map(TurnInput::ResponseItem)
+            .collect()
+    }
+}
+
+pub(super) fn submitted_additional_context(
+    session: &Session,
+    turn: &TurnContext,
+    context: &SubmittedAdditionalContext,
+) -> Vec<TurnInput> {
+    let section = AdditionalContextState::new(
+        &context.0,
+        session.enabled(Feature::UntrustedAsToolOutput),
+        &turn.session_telemetry,
+        &session.context_ids,
+    );
+    session.render_native_additional_context(section)
+}
 
 pub(super) struct PreparedContext {
     pub(super) step: Arc<StepContext>,
