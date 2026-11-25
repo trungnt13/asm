@@ -49,13 +49,11 @@ const ORDINARY_EFFORTS: [ReasoningEffort; 7] = [
 ];
 pub(super) struct System1Baseline(pub(super) Option<ReasoningEffort>);
 
-const RUBRIC: &str = "Start from task_baseline_effort, not last_effort. Keep the baseline unless concrete evidence warrants a change. Judge the whole next response: what must this model decide, produce, or verify?
+const RUBRIC_START: &str = "Start from task_baseline_effort, not last_effort. Keep the baseline unless concrete evidence warrants a change. Judge the whole next response: what must this model decide, produce, or verify?\n\n";
+const TURN_START_GUIDANCE: &str = "Weigh the reasoning needed to understand the request, resolve ambiguity, identify constraints, and choose an approach. Count that work even if the first visible action is a simple tool call. Match effort to the complexity and consequences of those decisions; a clear, trivial request can use the lowest sufficient effort.";
+const TOOL_RESULT_GUIDANCE: &str = "Choose effort for this response, not for the whole task. Read the latest evidence first and identify the next unfinished action. If the next response only executes an unambiguous action, such as opening the file named by a tool result, or reports an already verified result, choose the lowest sufficient offered level even if the overall task is hard or the previous effort was higher. If the latest result provides the evidence needed to answer, do not mistake the completed retrieval for the next action. When the answer depends on reconciling conflicting constraints or comparing plausible outcomes under uncertainty, use an offered level suited to substantive analysis, not the direct-execution level.";
 
-When turn_phase is initial, weigh the reasoning needed to understand the request, resolve ambiguity, identify constraints, and choose an approach. Count that work even if the first visible action is a simple tool call. Match effort to the complexity and consequences of those decisions; a clear, trivial request can use the lowest sufficient effort.
-
-When turn_phase is follow_up, first determine what the latest evidence makes possible. Continue from completed actions rather than restarting the task. Use the lowest sufficient level if the next response just executes a settled action or reports an already verified result. Do not budget for work that must wait for another action's result. Once the needed evidence has arrived, use a choice appropriate for the interpretation now required. If unresolved trade-offs or uncertainty could change the answer, do not treat that response as direct execution or reporting; budget for the reasoning to resolve it.
-
-Raise effort when deeper reasoning is likely to materially improve the outcome. Consider whether the model must distinguish plausible causes, reconcile interacting constraints, or catch a subtle, consequential error. Move directly to the offered level that fits; do not escalate just because a higher level exists.
+const RUBRIC_END: &str = "\n\nRaise effort when deeper reasoning is likely to materially improve the outcome. Consider whether the model must distinguish plausible causes, reconcile interacting constraints, or catch a subtle, consequential error. Move directly to the offered level that fits; do not escalate just because a higher level exists.
 
 Separate missing information from difficult reasoning. Retrieving a known fact may be easy; deciding what to retrieve or what it proves may be hard. A clear instruction does not imply an easy response.
 
@@ -762,20 +760,11 @@ impl Session {
                                     )
                                     .map(|effort| effort.to_string())
                                     .unwrap_or_else(|| "unspecified".to_string());
-                                let previous_step =
-                                    turn.extension_data.get::<System1ModelStepStarted>();
-                                let last_effort = previous_step
-                                    .as_ref()
-                                    .and_then(|step| step.0.as_ref())
-                                    .map(ToString::to_string)
+                                let last_effort = turn
+                                    .extension_data
+                                    .get::<System1ModelStepStarted>()
+                                    .and_then(|step| step.0.as_ref().map(ToString::to_string))
                                     .unwrap_or_else(|| "unspecified".to_string());
-                                let (phase, rubric) = match config.rubric_instructions.as_deref() {
-                                    Some(rubric) => ("", rubric),
-                                    None if previous_step.is_none() => {
-                                        ("turn_phase: initial\n", RUBRIC)
-                                    }
-                                    None => ("turn_phase: follow_up\n", RUBRIC),
-                                };
                                 let current_model = serde_json::json!(expected.model_info.slug);
                                 let description = expected
                                     .model_info
@@ -791,9 +780,20 @@ impl Session {
                                     &description
                                         [..description.floor_char_boundary(/*index*/ 1024)]
                                 );
-                                format!(
-                                    "Model: {current_model} - {description}\ntask_baseline_effort: {baseline}\nlast_effort: {last_effort}\n{phase}\n{rubric}"
-                                )
+                                let mut instructions = format!(
+                                    "Model: {current_model} - {description}\ntask_baseline_effort: {baseline}\nlast_effort: {last_effort}\n\n"
+                                );
+                                if let Some(rubric) = config.rubric_instructions.as_deref() {
+                                    instructions.push_str(rubric);
+                                } else {
+                                    instructions.push_str(RUBRIC_START);
+                                    instructions.push_str(match trigger {
+                                        System1Trigger::TurnStart => TURN_START_GUIDANCE,
+                                        System1Trigger::ToolResult => TOOL_RESULT_GUIDANCE,
+                                    });
+                                    instructions.push_str(RUBRIC_END);
+                                }
+                                instructions
                             },
                             choices: allowed
                                 .iter()
