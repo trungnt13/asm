@@ -436,10 +436,9 @@ allowed_agent_roles = ["reviewer"]
     );
     let base_input = HostSkillsLoadInput::new(codex_home_path, Vec::new(), config_layer_stack);
     for role in [None, Some("reviewer"), Some("other")] {
+        let access = FileSystemEnvironmentAccessor::unrestricted(&LOCAL_FS);
         let input = base_input.clone().with_agent_role(role.map(str::to_string));
-        let snapshot = service
-            .snapshot_for_config(&input, Some(Arc::clone(&LOCAL_FS)))
-            .await;
+        let snapshot = service.snapshot_for_config(&input, Some(&access)).await;
         let turn_store = ExtensionData::new("scoped-turn");
         turn_store.insert(snapshot);
         let fragments = prepared_turn_input(
@@ -447,7 +446,7 @@ allowed_agent_roles = ["reviewer"]
             TurnInputContext {
                 step_store: &ExtensionData::new("scoped-step"),
                 turn_id: "scoped-turn".to_string(),
-                user_input: vec![UserInput::Text {
+                user_input: &[UserInput::Text {
                     text: "$demo".to_string(),
                     text_elements: Vec::new(),
                 }],
