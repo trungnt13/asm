@@ -1734,7 +1734,6 @@ async fn new_context_tool_skips_auto_compact_fallback() -> Result<()> {
         max_context_tokens: config.skill_max_context_tokens,
         bundled_skills_enabled: config.bundled_skills_enabled(),
         cloud_skill_enabled: config.cloud_skill_enabled,
-        shadow_selection_enabled: config.features.enabled(Feature::SkillSearch),
     });
     let backend_url = format!("{}/backend-api/codex", server.uri());
     let test = test_codex()

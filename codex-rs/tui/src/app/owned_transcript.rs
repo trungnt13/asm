@@ -330,14 +330,15 @@ impl App {
         self.conversation_frame.sidebar_input =
             self.sidebar().map(sidebar::SidebarPane::input_state);
         let divider = self.conversation_frame.divider_area();
-        if self.divider_drag.is_some_and(|drag| {
-            divider.is_none()
-                || !drag.matches(content, self)
-                || !self.conversation_focus_available(tui)
-        }) {
+        if self
+            .divider_drag
+            .is_some_and(|drag| !drag.valid(viewport, self, tui))
+        {
             self.divider_drag = None;
         }
         let highlight_divider = self.pane_resize.is_some() || tui.link_hover.sidebar_divider;
+        let highlight_center =
+            tui.link_hover.shape == tui::PointerShape::Resize && !tui.link_hover.sidebar_divider;
         let pointer = tui
             .link_hover
             .mouse
@@ -434,6 +435,9 @@ impl App {
                                 frames: &frames,
                                 keymap: &self.keymap,
                                 resize_hint,
+                                resize_preview: self
+                                    .divider_drag
+                                    .is_some_and(super::side_pane::DividerDrag::is_live_preview),
                                 image_protocol: sidebar_image_protocol,
                             },
                         ) && focused
@@ -631,7 +635,12 @@ impl App {
             }
             self.conversation_frame.sidebar_targets = std::mem::take(&mut sidebar_targets);
             if let Some(divider) = divider {
-                side_pane::paint_divider(frame, divider.x, self.divider_drag, highlight_divider);
+                side_pane::paint_divider(
+                    frame,
+                    divider.x,
+                    self.divider_drag.filter(|drag| !drag.is_center()),
+                    highlight_divider,
+                );
             }
             self.conversation_frame.close_buttons = Default::default();
             if let Some(close) = self.sidebar().and_then(|pane| pane.close.as_ref()) {
@@ -659,6 +668,14 @@ impl App {
             }
             if let Some(center) = center {
                 self.paint_command_center(frame, center, available, &frames);
+                if available.is_some() {
+                    side_pane::paint_divider(
+                        frame,
+                        center.right(),
+                        self.divider_drag.filter(|drag| drag.is_center()),
+                        highlight_center,
+                    );
+                }
             }
             self.paint_centered_dialog(frame);
         })?;
@@ -1517,7 +1534,7 @@ impl App {
                 if resume_following {
                     match result {
                         Ok(crate::clipboard_copy::CopyStatus::Confirmed) => {
-                            self.transcript_view.jump_to_latest();
+                            self.transcript_view.finish_select_copy();
                         }
                         Ok(crate::clipboard_copy::CopyStatus::Pending(id)) => {
                             if let Some(key) = select_exit_key {

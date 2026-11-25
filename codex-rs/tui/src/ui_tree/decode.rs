@@ -1,6 +1,6 @@
 //! Enforce the input byte limit before parsing and the UI tree limits after deserialization.
 
-use super::MAX_GAP;
+use super::MAX_SAFE_INTEGER;
 use super::MAX_TEXT_BYTES;
 use super::UiNode;
 use super::UiTree;
@@ -30,6 +30,7 @@ impl std::str::FromStr for UiTree {
                 return Err(Self::Err::custom("UI tree exceeds 256 non-null nodes"));
             }
             match node {
+                UiNode::Spacer { .. } => {}
                 UiNode::String(text) => {
                     text_bytes += text.len();
                     if text_bytes > MAX_TEXT_BYTES {
@@ -43,6 +44,7 @@ impl std::str::FromStr for UiTree {
                 | UiNode::Underline { children }
                 | UiNode::Link { children, .. }
                 | UiNode::Row { children, .. }
+                | UiNode::Box { children, .. }
                 | UiNode::Col { children, .. } => {
                     pending.extend(children.iter().flatten().map(|child| (child, depth + 1)));
                 }
@@ -71,9 +73,17 @@ pub(super) fn present_token<'de, D: Deserializer<'de>, T: DeserializeOwned>(
     token(d).map(Some)
 }
 
+pub(super) fn max_lines<'de, D: Deserializer<'de>>(de: D) -> Result<Option<u64>, D::Error> {
+    let lines = u64::deserialize(de)?;
+    if !(1..=MAX_SAFE_INTEGER).contains(&lines) {
+        return Err(D::Error::custom("maxLines must be a positive safe integer"));
+    }
+    Ok(Some(lines))
+}
+
 pub(super) fn gap<'de, D: Deserializer<'de>>(de: D) -> Result<u64, D::Error> {
     let gap = u64::deserialize(de)?;
-    if gap > MAX_GAP {
+    if gap > MAX_SAFE_INTEGER {
         return Err(D::Error::custom("gap exceeds the maximum safe integer"));
     }
     Ok(gap)
