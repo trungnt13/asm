@@ -460,7 +460,9 @@ xhigh_effort_description = "Distinguishing plausible causes, reconciling interac
 max_effort_description = "Exceptionally difficult problems requiring the maximum supported reasoning budget."
 ```
 
-If configured, replace the built-in rubric with unchanged `rubric_instructions`. In both backends, prefix decision instructions with trusted baseline context, separate from evidence:
+Before the first ordinary model step, the built-in rubric weighs the reasoning needed to understand the request and choose an approach, even if the first action is simple. Keep trivial requests at proportionately low effort. On later steps, budget for the next response only. Use less effort for a settled tool call; account for analysis that depends on its result once that result is available.
+
+Send a trusted `turn_phase` (`initial` before the first ordinary model step, `follow_up` thereafter) only with the built-in rubric. A configured `rubric_instructions` replaces it and keeps its existing instruction prefix. In both backends, prefix decision instructions with trusted baseline context, separate from evidence:
 
 - Use the trusted task baseline as the anchor. Refresh it on accepted manual changes to the baseline, never adaptive selections. Supply `task_baseline_effort` and `last_effort`; the latter is the effective effort captured for the previous ordinary model step in this turn. Report absent values as `unspecified`; do not substitute the model default.
 - Use the header `Model: "<name>" - "<description>"` with both values JSON-quoted. Trim descriptions to 1024 UTF-8 bytes at character boundaries. Use `unavailable` for missing, blank, or fallback metadata. Keep the decision-service model and warmup unchanged.
