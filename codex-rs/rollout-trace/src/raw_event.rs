@@ -73,17 +73,6 @@ pub enum RawToolCallRequester {
     },
 }
 
-/// Identifies a Code Mode output rendered as a provider user message.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectedCodeModeOutput {
-    /// Position in the replay input, including any provider-added prefix items.
-    pub index: usize,
-    pub call_id: String,
-    /// ID still present before projection; request preparation can strip it earlier.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub history_id: Option<String>,
-}
-
 /// Typed payload for a raw trace event.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
@@ -148,9 +137,6 @@ pub enum RawTraceEventPayload {
         /// History IDs removed from tool outputs on the wire, indexed within this request input.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         stripped_tool_output_ids: Vec<(usize, String)>,
-        /// Named outputs rewritten in the input used for replay.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        projected_code_mode_outputs: Vec<ProjectedCodeModeOutput>,
     },
     InferenceCompleted {
         inference_call_id: InferenceCallId,

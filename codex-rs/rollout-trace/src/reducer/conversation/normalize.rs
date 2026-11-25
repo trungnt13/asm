@@ -3,16 +3,12 @@
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
-use anyhow::ensure;
-use codex_code_mode::PUBLIC_TOOL_NAME;
-use codex_protocol::DEFAULT_FUNCTION_NAMESPACE;
 use codex_protocol::models::AgentMessageInputContent;
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::Digest;
 use sha2::Sha256;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 
 use crate::model::AgentMessageMetadata;
 use crate::model::ConversationBody;
@@ -22,8 +18,6 @@ use crate::model::ConversationPart;
 use crate::model::ConversationRole;
 use crate::model::TokenUsage;
 use crate::payload::RawPayloadRef;
-use crate::raw_event::ProjectedCodeModeOutput;
-use crate::shard::PayloadReader;
 
 /// Conversation fields parsed from one Responses item before trace identity.
 ///
@@ -51,155 +45,6 @@ impl NormalizedConversationItem {
                     | ConversationItemKind::CustomToolCallOutput
             )
     }
-}
-
-pub(super) fn restore_projected_code_mode_outputs(
-    request_items: &mut [Value],
-    missing: &mut Value,
-    projections: &[ProjectedCodeModeOutput],
-) -> Result<()> {
-    for ProjectedCodeModeOutput {
-        index,
-        call_id,
-        history_id,
-    } in projections
-    {
-        let index = *index;
-        let item = request_items
-            .get_mut(index)
-            .context("projected Code Mode output index outside request")?;
-        if missing[index].is_string() {
-            continue;
-        }
-        ensure!(
-            item["type"] == "message" && item["role"] == "user" && item["id"].is_null(),
-            "projected Code Mode output does not refer to an ID-less user message at input {index}"
-        );
-        let content = item["content"]
-            .as_array_mut()
-            .filter(|content| {
-                content
-                    .first()
-                    .is_some_and(|part| part["type"] == "input_text")
-            })
-            .context("projected Code Mode output has no text header")?;
-        // Only the adapter's position mapping identifies outputs. User text cannot do so.
-        content.remove(/*index*/ 0);
-        let output = std::mem::take(content);
-        *item = serde_json::json!({
-            "type": "custom_tool_call_output",
-            "name": PUBLIC_TOOL_NAME,
-            "call_id": call_id,
-        });
-        item["output"] = Value::Array(output);
-        if let Some(history_id) = history_id {
-            item["id"] = Value::String(history_id.clone());
-        }
-        if let Some(missing_item) = missing.get_mut(index).and_then(Value::as_object_mut)
-            && let Some(mut missing_content) = missing_item.remove("content")
-        {
-            if let Some(parts) = missing_content.as_array_mut()
-                && !parts.is_empty()
-            {
-                parts.remove(/*index*/ 0);
-            }
-            missing_item.insert("output".to_string(), missing_content);
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn restore_projected_exec<'a>(
-    payload_reader: &mut PayloadReader,
-    request_items: &mut [Value],
-    prepared_prompt_payload: &RawPayloadRef,
-    incremental: bool,
-    input_has_gaps: bool,
-    recorded_exec_source: impl Fn(&str) -> Option<&'a str>,
-) -> Result<()> {
-    let has_wire_exec = request_items.iter().any(is_function_exec);
-    if !has_wire_exec && !(input_has_gaps && request_items.iter().any(is_anonymous_function_output))
-    {
-        // An output-only delta can use the already recorded cell as evidence without
-        // opening the full prepared prompt. Ordinary function outputs stay unchanged.
-        if incremental {
-            for item in request_items {
-                if is_anonymous_function_output(item)
-                    && item["call_id"]
-                        .as_str()
-                        .and_then(&recorded_exec_source)
-                        .is_some()
-                {
-                    item["type"] = Value::from("custom_tool_call_output");
-                }
-            }
-        }
-        return Ok(());
-    }
-
-    // Verify the wrapper against the canonical source, not the provider or function name alone.
-    let prepared = payload_reader.observed_json(prepared_prompt_payload)?.value;
-    let prepared_items = prepared["input"].as_array().into_iter().flatten();
-    let exec_sources: HashMap<_, _> = prepared_items
-        .clone()
-        .filter(|item| {
-            item["type"] == "custom_tool_call"
-                && item["name"] == PUBLIC_TOOL_NAME
-                && matches!(
-                    item["namespace"].as_str(),
-                    None | Some("") | Some(DEFAULT_FUNCTION_NAMESPACE)
-                )
-        })
-        .filter_map(|item| Some((item["call_id"].as_str()?, item["input"].as_str()?)))
-        .collect();
-    let prepared_outputs: std::collections::HashSet<_> = if input_has_gaps {
-        prepared_items
-            .filter(|item| item["type"] == "custom_tool_call_output" && item["name"].is_null())
-            .filter_map(|item| item["call_id"].as_str())
-            .collect()
-    } else {
-        Default::default()
-    };
-
-    for item in request_items {
-        let Some(call_id) = item["call_id"].as_str() else {
-            continue;
-        };
-        let recorded = recorded_exec_source(call_id);
-        let Some(source) = exec_sources.get(call_id).copied().or(recorded) else {
-            continue;
-        };
-        if is_function_exec(item)
-            && let Some(arguments) = item["arguments"].as_str()
-            && arguments.trim_start().starts_with('{')
-            && let Ok(arguments) = serde_json::from_str::<ProjectedExecArguments>(arguments)
-            && arguments.input == source
-        {
-            item["type"] = Value::from("custom_tool_call");
-            item["input"] = Value::String(arguments.input);
-        } else if is_anonymous_function_output(item)
-            && (has_wire_exec || recorded.is_some() || prepared_outputs.contains(call_id))
-        {
-            item["type"] = Value::from("custom_tool_call_output");
-        }
-    }
-    Ok(())
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ProjectedExecArguments {
-    input: String,
-}
-
-fn is_function_exec(item: &Value) -> bool {
-    item["type"] == "function_call"
-        && item["name"] == PUBLIC_TOOL_NAME
-        && item["namespace"].is_null()
-}
-
-fn is_anonymous_function_output(item: &Value) -> bool {
-    item["type"] == "function_call_output" && item["name"].is_null() && item["namespace"].is_null()
 }
 
 pub(super) fn normalize_model_items(
@@ -666,7 +511,7 @@ fn custom_tool_call_body(item: &Value, raw_payload: &RawPayloadRef) -> Conversat
     let Some(input) = item.get("input").and_then(Value::as_str) else {
         return json_body(item, raw_payload);
     };
-    if item.get("name").and_then(Value::as_str) == Some(PUBLIC_TOOL_NAME) {
+    if item.get("name").and_then(Value::as_str) == Some("exec") {
         ConversationBody {
             parts: vec![ConversationPart::Code {
                 language: "javascript".to_string(),

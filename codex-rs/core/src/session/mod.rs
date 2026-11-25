@@ -1179,22 +1179,13 @@ impl Session {
         {
             service_tier = Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string());
         }
-        if let Some(service_tier) = service_tier.as_deref() {
-            if requested_child_tier {
-                crate::agent::child_config::validate_requested_service_tier(
-                    &config,
-                    &model_info,
-                    service_tier,
-                )
-                .map_err(CodexErr::InvalidRequest)?;
-            } else if spawn_service_tier_override.is_some() {
-                crate::agent::child_config::validate_service_tier_wire_api(
-                    &config,
-                    &model_info.slug,
-                    service_tier,
-                )
-                .map_err(CodexErr::InvalidRequest)?;
-            }
+        if requested_child_tier && let Some(service_tier) = service_tier.as_deref() {
+            crate::agent::child_config::validate_requested_service_tier(
+                &config,
+                &model_info,
+                service_tier,
+            )
+            .map_err(CodexErr::InvalidRequest)?;
         }
         if !uses_native_runtime
             && thread_extension_init.get::<crate::handoff::PortableHistory>().is_some()

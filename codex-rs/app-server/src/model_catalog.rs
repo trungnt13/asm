@@ -13,7 +13,6 @@ use codex_model_provider_info::WireApi;
 use codex_models_manager::ModelOrigin;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
-use codex_models_manager::provider_has_model_bindings;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelPreset;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -71,10 +70,9 @@ impl ModelCatalog {
         self.state.lock().await.needs_reload = true;
     }
 
-    pub(crate) async fn invalidate_if_catalog_provider(&self, provider_id: &str) {
+    pub(crate) async fn invalidate_if_current_provider(&self, provider_id: &str) {
         let mut state = self.state.lock().await;
-        if state.config.model_provider_id == provider_id || provider_has_model_bindings(provider_id)
-        {
+        if state.config.model_provider_id == provider_id {
             state.needs_reload = true;
         }
     }
@@ -172,22 +170,6 @@ impl ModelCatalog {
             .map(|entry| Arc::unwrap_or_clone(entry.model))
             .collect();
         let mut presets = models_manager.build_available_models(models);
-        for preset in &mut presets {
-            let restricted_tiers = config.unavailable_catalog_service_tiers(&preset.model);
-            if restricted_tiers.is_empty() {
-                continue;
-            }
-            preset
-                .service_tiers
-                .retain(|tier| !restricted_tiers.contains(&tier.id));
-            if preset
-                .default_service_tier
-                .as_ref()
-                .is_some_and(|tier| restricted_tiers.contains(tier))
-            {
-                preset.default_service_tier = None;
-            }
-        }
         if config.model_provider.wire_api == WireApi::ChatCompletions {
             for preset in &mut presets {
                 preset.input_modalities = vec![InputModality::Text];

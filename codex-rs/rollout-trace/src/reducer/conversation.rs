@@ -15,7 +15,6 @@ use serde_json::Value;
 
 use self::normalize::NormalizedConversationItem;
 use super::TraceReducer;
-use super::inference::StartedInferenceCall;
 use crate::model::CompactionId;
 use crate::model::ConversationBody;
 use crate::model::ConversationItem;
@@ -83,27 +82,19 @@ impl TraceReducer {
     pub(super) fn reduce_inference_request(
         &mut self,
         wall_time_unix_ms: i64,
-        started: &StartedInferenceCall,
+        inference_call_id: &InferenceCallId,
+        thread_id: &str,
+        codex_turn_id: &str,
+        request_payload: &RawPayloadRef,
+        stripped_tool_output_ids: Vec<(usize, String)>,
     ) -> Result<Vec<ConversationItemId>> {
-        let inference_call_id = &started.inference_call_id;
-        let thread_id = started.thread_id.as_str();
-        let codex_turn_id = started.codex_turn_id.as_str();
-        // A warmup has no inference row to follow. Use the full formatted context.
-        let request_payload = started
-            .warmup_context_payload
-            .as_ref()
-            .unwrap_or(&started.request_payload);
         if !request_payload.capture.is_complete() {
             return Ok(Vec::new());
         }
         let ObservedJson {
             value: mut payload,
-            mut missing,
+            missing,
         } = self.payload_reader.observed_json(request_payload)?;
-        let incremental = payload["previous_response_id"].is_string();
-        let input_has_gaps = missing["input"]
-            .as_array()
-            .is_some_and(|slots| slots.iter().any(Value::is_string));
         let Some(input) = payload.get_mut("input") else {
             bail!(
                 "inference request payload {} did not contain input",
@@ -117,17 +108,9 @@ impl TraceReducer {
             );
         };
 
-        if !started.projected_code_mode_outputs.is_empty() {
-            normalize::restore_projected_code_mode_outputs(
-                request_items,
-                &mut missing["input"],
-                &started.projected_code_mode_outputs,
-            )?;
-        }
         // The wire payload stays intact on disk. Resolve accepted history by its native ID,
         // even for two identical named outputs or a trimmed result in a websocket delta.
-        for (index, history_id) in &started.stripped_tool_output_ids {
-            let index = *index;
+        for (index, history_id) in stripped_tool_output_ids {
             let item = request_items
                 .get_mut(index)
                 .context("stripped tool output index outside request")?;
@@ -144,30 +127,8 @@ impl TraceReducer {
                     "stripped tool output ID does not refer to an ID-less output at input {index}"
                 );
             }
-            item["id"] = Value::String(history_id.clone());
+            item["id"] = Value::String(history_id);
         }
-        let code_cells = &self.rollout.code_cells;
-        let conversation = &self.rollout.conversation_items;
-        normalize::restore_projected_exec(
-            &mut self.payload_reader,
-            request_items,
-            &started.prepared_prompt_payload,
-            incremental,
-            input_has_gaps,
-            |call_id| {
-                if code_cells.is_empty() {
-                    return None;
-                }
-                let cell = code_cells
-                    .get(&Self::reduced_code_cell_id_for_model_visible_call(call_id))
-                    .filter(|cell| cell.thread_id == thread_id)?;
-                let item = conversation.get(&cell.source_item_id)?;
-                let [ConversationPart::Code { source, .. }] = item.body.parts.as_slice() else {
-                    return None;
-                };
-                Some(source.as_str())
-            },
-        )?;
         let items =
             normalize::normalize_model_items(request_items, request_payload, &missing["input"])?;
 

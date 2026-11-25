@@ -11,8 +11,6 @@ use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
 use codex_features::Feature;
-use codex_model_provider_info::WireApi;
-use codex_models_manager::chat_completions_only_service_tiers;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::config_types::ServiceTier;
@@ -157,20 +155,17 @@ pub(crate) async fn prepare_agent_spawn_config(
         let requested_tier = ServiceTier::from_request_value(&requested_tier)
             .map(|tier| tier.request_value().to_string())
             .unwrap_or(requested_tier);
+        // A provider-bound model can switch catalogs. Validate against that catalog at startup.
         if requested_tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE
+            && config.model_provider_id == turn.config.model_provider_id
             && let Some(model) = config.model.as_deref()
         {
-            if config.model_provider_id == turn.config.model_provider_id {
-                let model_info = session
-                    .services
-                    .models_manager
-                    .get_model_info(model, &config.to_models_manager_config())
-                    .await;
-                validate_requested_service_tier(&config, &model_info, &requested_tier)?;
-            } else {
-                // The destination catalog is validated at startup, but the wire API is known now.
-                validate_service_tier_wire_api(&config, model, &requested_tier)?;
-            }
+            let model_info = session
+                .services
+                .models_manager
+                .get_model_info(model, &config.to_models_manager_config())
+                .await;
+            validate_requested_service_tier(&config, &model_info, &requested_tier)?;
         }
         Some(requested_tier)
     } else {
@@ -388,18 +383,15 @@ pub(crate) fn validate_requested_service_tier(
     model: &ModelInfo,
     service_tier: &str,
 ) -> Result<(), String> {
-    if service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE {
-        return Ok(());
-    }
-    validate_service_tier_wire_api(config, &model.slug, service_tier)?;
-    if !crate::external_runtime::is_native_model(&model.slug)
-        && config.features.service_tier_enabled(service_tier)
-        && model.supports_service_tier(service_tier)
-        && crate::client_common::provider_allows_service_tier(
-            &config.model_provider,
-            model,
-            service_tier,
-        )
+    if service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
+        || (!crate::external_runtime::is_native_model(&model.slug)
+            && config.features.service_tier_enabled(service_tier)
+            && model.supports_service_tier(service_tier)
+            && crate::client_common::provider_allows_service_tier(
+                &config.model_provider,
+                model,
+                service_tier,
+            ))
     {
         return Ok(());
     }
@@ -463,8 +455,7 @@ pub(crate) fn select_subagent_service_tier(
     let configured_tier =
         matching_subagent_service_tier(config, &model_info.slug, reasoning_effort);
     let Some(configured_tier) = configured_tier else {
-        return Ok(inherited_service_tier
-            .filter(|tier| service_tier_allowed_by_wire_api(config, &model_info.slug, tier)));
+        return Ok(inherited_service_tier);
     };
     if configured_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE {
         return Ok(Some(configured_tier.clone()));
@@ -473,7 +464,6 @@ pub(crate) fn select_subagent_service_tier(
         Some(tier) => tier.request_value(),
         None => configured_tier,
     };
-    validate_service_tier_wire_api(config, &model_info.slug, normalized_tier)?;
     if normalized_tier != ServiceTier::Flex.request_value()
         && !config.features.enabled(Feature::FastMode)
     {
@@ -489,26 +479,6 @@ pub(crate) fn select_subagent_service_tier(
         ));
     }
     Ok(Some(normalized_tier.to_string()))
-}
-
-pub(crate) fn validate_service_tier_wire_api(
-    config: &Config,
-    model: &str,
-    service_tier: &str,
-) -> Result<(), String> {
-    if !service_tier_allowed_by_wire_api(config, model, service_tier) {
-        return Err(format!(
-            "Service tier `{service_tier}` for model `{model}` requires wire_api = \"chat_completions\"."
-        ));
-    }
-    Ok(())
-}
-
-fn service_tier_allowed_by_wire_api(config: &Config, model: &str, service_tier: &str) -> bool {
-    config.model_provider.wire_api == WireApi::ChatCompletions
-        || !chat_completions_only_service_tiers(model)
-            .iter()
-            .any(|tier| tier == service_tier)
 }
 
 pub(crate) fn matching_subagent_service_tier<'a>(

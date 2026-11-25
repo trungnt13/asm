@@ -49,7 +49,6 @@ pub use payload::RawPayloadId;
 pub use payload::RawPayloadKind;
 /// Reference to a raw request/response/log payload stored in the bundle.
 pub use payload::RawPayloadRef;
-pub use raw_event::ProjectedCodeModeOutput;
 /// Monotonic sequence number assigned by the raw trace writer.
 pub use raw_event::RawEventSeq;
 /// Runtime requester observed before semantic reduction.

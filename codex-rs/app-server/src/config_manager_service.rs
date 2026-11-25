@@ -656,11 +656,6 @@ fn writable_key_path(
     Ok(segments)
 }
 
-pub(super) fn is_model_provider_config_path(path: &str) -> bool {
-    parse_key_path(path)
-        .is_ok_and(|segments| segments.first().is_some_and(|key| key == "model_providers"))
-}
-
 fn parse_key_path(path: &str) -> Result<Vec<String>, String> {
     if path.trim().is_empty() {
         return Err("keyPath must not be empty".to_string());

@@ -8,7 +8,6 @@ pub mod model_info;
 pub mod model_presets;
 mod originator;
 pub use external_models::canonical_model;
-pub use external_models::chat_completions_only_service_tiers;
 pub use external_models::model_alias;
 pub use external_models::provider_for_model;
 pub use external_models::provider_has_model_bindings;

@@ -3,14 +3,11 @@ use codex_api::ResponseEvent;
 use codex_code_mode::PUBLIC_TOOL_NAME;
 use codex_model_provider_info::WireApi;
 use codex_protocol::DEFAULT_FUNCTION_NAMESPACE;
-use codex_protocol::error::CodexErr;
-use codex_protocol::error::Result;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
-use codex_rollout_trace::ProjectedCodeModeOutput;
 use codex_tools::FreeformTool;
 use codex_tools::JsonSchema;
 use codex_tools::ResponsesApiTool;
@@ -27,28 +24,18 @@ const DEEPSEEK_FLASH: &str = "accounts/fireworks/models/deepseek-v4p1-flash-1017
 const DEEPSEEK_FLASH_ULTRAFAST: &str =
     "accounts/fireworks/routers/deepseek-v4p1-flash-1017-ultrafast";
 
-pub(super) fn route(
-    model: &str,
-    wire_api: WireApi,
-    service_tier: Option<String>,
-) -> Result<(String, Option<String>)> {
-    match (model, wire_api, service_tier.as_deref()) {
-        (_, WireApi::Responses, Some(tier))
-            if codex_models_manager::chat_completions_only_service_tiers(model)
-                .iter()
-                .any(|restricted| restricted == tier) =>
-        {
-            Err(CodexErr::InvalidRequest(
-                "Fireworks Priority requires wire_api = \"chat_completions\". Select Standard or Ultra-fast to use Responses.".into(),
-            ))
-        }
-        (DEEPSEEK_FLASH, _, Some("ultrafast")) => Ok((DEEPSEEK_FLASH_ULTRAFAST.to_string(), None)),
-        _ => Ok((model.to_string(), service_tier)),
+pub(super) fn route(model: &str, service_tier: Option<String>) -> (String, Option<String>) {
+    if model == DEEPSEEK_FLASH && service_tier.as_deref() == Some("ultrafast") {
+        (DEEPSEEK_FLASH_ULTRAFAST.to_string(), None)
+    } else {
+        (model.to_string(), service_tier)
     }
 }
 
 pub(super) fn uses_function_exec(model: &ModelInfo, wire_api: WireApi) -> bool {
-    model.slug == DEEPSEEK_FLASH && wire_api == WireApi::Responses && !model.use_responses_lite
+    wire_api == WireApi::Responses
+        && !model.use_responses_lite
+        && codex_models_manager::provider_for_model(&model.slug) == Some("fireworks")
 }
 
 pub(super) fn uses_ultrafast_router(model: &ModelInfo, wire_model: &str) -> bool {
@@ -106,8 +93,7 @@ fn is_exec(name: &str, namespace: Option<&str>) -> bool {
 pub(super) fn project_input(
     input: &[Arc<ResponseItem>],
     history: &[Arc<ResponseItem>],
-    trace_projection: bool,
-) -> (Option<Vec<Arc<ResponseItem>>>, Vec<ProjectedCodeModeOutput>) {
+) -> Option<Vec<Arc<ResponseItem>>> {
     let mut pending_outputs: HashSet<_> = input
         .iter()
         .filter_map(|item| match item.as_ref() {
@@ -143,7 +129,6 @@ pub(super) fn project_input(
     }
 
     let mut projected = None;
-    let mut projected_outputs = Vec::new();
     for (index, item) in input.iter().enumerate() {
         let wire_item = match item.as_ref() {
             ResponseItem::CustomToolCall {
@@ -184,20 +169,12 @@ pub(super) fn project_input(
                     internal_chat_message_metadata_passthrough.clone(),
             }),
             ResponseItem::CustomToolCallOutput {
-                id,
                 call_id,
                 name: Some(name),
                 output,
                 ..
             } if name == PUBLIC_TOOL_NAME && exec_calls.contains(call_id.as_str()) => {
                 // An async notification is not a second result for a completed function call.
-                if trace_projection {
-                    projected_outputs.push(ProjectedCodeModeOutput {
-                        index,
-                        call_id: call_id.clone(),
-                        history_id: id.as_ref().map(ToString::to_string),
-                    });
-                }
                 let mut content = vec![ContentItem::InputText {
                     text: format!("Additional output from {name} ({call_id}):\n"),
                 }];
@@ -248,25 +225,27 @@ pub(super) fn project_input(
             projected.push(Arc::clone(item));
         }
     }
-    (projected, projected_outputs)
+    projected
+}
+
+pub(super) fn retain_output_ids(ids: &mut Vec<(usize, String)>, input: &[Arc<ResponseItem>]) {
+    // Async notifications become messages, so their tool-output IDs no longer apply on the wire.
+    ids.retain(|(index, _)| !matches!(input[*index].as_ref(), ResponseItem::Message { .. }));
 }
 
 pub(super) fn normalize_router_echo(event: &mut ResponseEvent) {
     if let ResponseEvent::ServerModel(model) = event
-        && model.as_str() == DEEPSEEK_FLASH_ULTRAFAST
+        && model.eq_ignore_ascii_case(DEEPSEEK_FLASH_ULTRAFAST)
     {
         *model = DEEPSEEK_FLASH.to_string();
     }
 }
 
-// Return whether the provider's call had to be repaired for replay.
-pub(super) fn normalize_exec_event(
-    event: &mut ResponseEvent,
-) -> std::result::Result<bool, ApiError> {
+pub(super) fn normalize_exec_event(event: &mut ResponseEvent) -> Result<(), ApiError> {
     let (item, completed) = match event {
         ResponseEvent::OutputItemAdded(item) => (item, false),
         ResponseEvent::OutputItemDone(item) => (item, true),
-        _ => return Ok(false),
+        _ => return Ok(()),
     };
     let ResponseItem::FunctionCall {
         id,
@@ -280,32 +259,40 @@ pub(super) fn normalize_exec_event(
         ..
     } = item
     else {
-        return Ok(false);
+        return Ok(());
     };
     if !is_exec(name, namespace.as_deref()) {
-        return Ok(false);
+        return Ok(());
     }
     if completed && call_id.trim().is_empty() {
         return Err(ApiError::InvalidRequest {
             message: "Fireworks returned a Code Mode exec call without a call ID.".into(),
         });
     }
-    // A malformed wrapper contains no usable source. The Code Mode parser rejects
-    // empty input before starting a cell and returns a result for this call ID.
-    let args = (completed && arguments.trim_start().starts_with('{'))
-        .then(|| serde_json::from_str::<ExecArguments<String>>(arguments).ok())
-        .flatten();
-    let repaired = completed && args.is_none();
+    let input = if completed {
+        // Keep malformed calls intact so a function error can answer the original call ID.
+        let Some(args) = arguments
+            .trim_start()
+            .starts_with('{')
+            .then(|| serde_json::from_str::<ExecArguments<String>>(arguments).ok())
+            .flatten()
+        else {
+            return Ok(());
+        };
+        args.input
+    } else {
+        String::new()
+    };
     *item = ResponseItem::CustomToolCall {
         id: id.take(),
         name: std::mem::take(name),
         namespace: namespace.take(),
         call_id: std::mem::take(call_id),
-        input: args.map(|args| args.input).unwrap_or_default(),
+        input,
         status: status.take(),
         encrypted_content: encrypted_content.take(),
         internal_chat_message_metadata_passthrough: internal_chat_message_metadata_passthrough
             .take(),
     };
-    Ok(repaired)
+    Ok(())
 }

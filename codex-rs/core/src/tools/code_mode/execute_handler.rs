@@ -238,6 +238,9 @@ impl CodeModeExecuteHandler {
                 )
                 .await
                 .map(boxed_tool_output),
+            ToolPayload::Function { .. } => Err(FunctionCallError::RespondToModel(format!(
+                "Invalid {PUBLIC_TOOL_NAME} arguments: pass the JavaScript source in a single string field named input."
+            ))),
             _ => Err(FunctionCallError::RespondToModel(format!(
                 "{PUBLIC_TOOL_NAME} expects raw JavaScript source text"
             ))),
@@ -253,6 +256,11 @@ impl CodeModeExecuteHandler {
 
 impl CoreToolRuntime for CodeModeExecuteHandler {
     fn matches_kind(&self, payload: &ToolPayload) -> bool {
-        matches!(payload, ToolPayload::Custom { .. })
+        // The Responses adapter leaves malformed exec calls as functions so the error
+        // is returned as a function output for the original call ID.
+        matches!(
+            payload,
+            ToolPayload::Custom { .. } | ToolPayload::Function { .. }
+        )
     }
 }

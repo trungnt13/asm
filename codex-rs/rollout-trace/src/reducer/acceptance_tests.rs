@@ -351,7 +351,6 @@ fn capped_tool_output_keeps_the_next_stripped_id_in_its_original_slot() -> anyho
             .write_json_payload(RawPayloadKind::PreparedPrompt, &request)?,
         warmup_context_payload: None,
         stripped_tool_output_ids: vec![(0, "large".into()), (1, "small".into())],
-        projected_code_mode_outputs: Vec::new(),
     })?;
     let state = replay_bundle(temp.path())?;
     let ids = &state.inference_calls["sample"].request_item_ids;
@@ -413,7 +412,6 @@ fn injected_outputs_keep_their_request_positions_and_native_ids() -> anyhow::Res
                 .write_json_payload(RawPayloadKind::PreparedPrompt, &request)?,
             warmup_context_payload: None,
             stripped_tool_output_ids,
-            projected_code_mode_outputs: Vec::new(),
         })?;
         if !accept_first {
             accept()?;

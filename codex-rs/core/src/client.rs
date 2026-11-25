@@ -496,11 +496,6 @@ struct LastResponse {
     items_added: Vec<ResponseItem>,
 }
 
-struct LastResponseRecorder {
-    sender: oneshot::Sender<LastResponse>,
-    invalidated: Option<Arc<AtomicBool>>,
-}
-
 struct WebsocketContinuation {
     response_id: String,
     items: Vec<Arc<ResponseItem>>,
@@ -1550,11 +1545,7 @@ impl ModelClient {
             .filter(|tier| {
                 provider_allows_service_tier(self.state.provider.info(), model_info, tier)
             });
-        let (model, service_tier) = fireworks::route(
-            &model_info.slug,
-            self.state.provider.info().wire_api,
-            service_tier,
-        )?;
+        let (model, service_tier) = fireworks::route(&model_info.slug, service_tier);
         // Project only the request copy. Reviewer history keeps native IDs for deduplication.
         if self.quotes_guardian_replies() {
             for item in &mut input {
@@ -2443,7 +2434,7 @@ impl ResponsesHttpExecutor<'_> {
             )?;
             self.client
                 .validate_required_cyber_access_program(request.access_programs)?;
-            let history_ids =
+            let mut history_ids =
                 inference_trace.stripped_output_ids(request.input.iter().map(Arc::as_ref));
             self.client
                 .prepare_response_items_for_request(&mut request.input);
@@ -2477,16 +2468,10 @@ impl ResponsesHttpExecutor<'_> {
             inference_trace_attempt.add_request_headers(&mut options.extra_headers);
             let normalize_fireworks_router_echo =
                 fireworks::uses_ultrafast_router(model_info, &request.model);
-            let (projected_input, projected_code_mode_outputs) = fireworks_exec
-                .then(|| {
-                    fireworks::project_input(
-                        &request.input,
-                        &request.input,
-                        inference_trace_attempt.is_enabled(),
-                    )
-                })
-                .unwrap_or_default();
-            if let Some(input) = projected_input {
+            if fireworks_exec
+                && let Some(input) = fireworks::project_input(&request.input, &request.input)
+            {
+                fireworks::retain_output_ids(&mut history_ids, &input);
                 request.input = input;
             }
             if let Some(input) = tool_metadata::bounded_input(&request, &request.input) {
@@ -2513,7 +2498,6 @@ impl ResponsesHttpExecutor<'_> {
                     self.client
                         .prepared_prompt_for_trace(&inference_trace_attempt, prompt),
                     history_ids,
-                    projected_code_mode_outputs,
                     || Ok(None),
                 );
             };
@@ -2806,7 +2790,7 @@ impl ModelClientSession {
                 None => (None, None),
             };
             // The full context captured after a warmup already carries the original IDs.
-            let history_ids = if previous_response_id_from_untraced_warmup {
+            let mut history_ids = if previous_response_id_from_untraced_warmup {
                 Vec::new()
             } else {
                 inference_trace.stripped_output_ids(
@@ -2850,18 +2834,18 @@ impl ModelClientSession {
             let mut request = Arc::new(request);
             let input = incremental_items.as_deref().unwrap_or(&request.input);
             // Continuation compares canonical items; only the selected wire slice is projected.
-            let (projected_input, projected_code_mode_outputs) = fireworks_exec
-                .then(|| {
-                    fireworks::project_input(
-                        input,
-                        &request.input,
-                        inference_trace_attempt.is_enabled(),
-                    )
-                })
-                .unwrap_or_default();
+            let projected_input = fireworks_exec
+                .then(|| fireworks::project_input(input, &request.input))
+                .flatten();
+            let input = if let Some(projected) = &projected_input {
+                fireworks::retain_output_ids(&mut history_ids, projected);
+                projected.as_slice()
+            } else {
+                input
+            };
             let mut ws_payload = ResponseCreateWsRequest {
                 previous_response_id,
-                input: projected_input.as_deref().unwrap_or(input),
+                input,
                 generate: if warmup { Some(false) } else { None },
                 client_metadata: response_create_client_metadata(
                     Some(client_metadata),
@@ -2950,7 +2934,6 @@ impl ModelClientSession {
                             self.client
                                 .prepared_prompt_for_trace(&inference_trace_attempt, prompt),
                             history_ids,
-                            projected_code_mode_outputs,
                             move || {
                                 #[derive(serde::Serialize)]
                                 struct WarmupContext<'a> {
@@ -2958,20 +2941,11 @@ impl ModelClientSession {
                                 }
                                 warmup_request
                                     .map(|r| {
-                                        let (projected, projected_code_mode_outputs) =
-                                            fireworks_exec
-                                                .then(|| {
-                                                    fireworks::project_input(
-                                                        &r.input, &r.input,
-                                                        /*trace_projection*/ true,
-                                                    )
-                                                })
-                                                .unwrap_or_default();
+                                        let projected = fireworks_exec
+                                            .then(|| fireworks::project_input(&r.input, &r.input))
+                                            .flatten();
                                         let input = projected.as_deref().unwrap_or(&r.input);
-                                        Ok((
-                                            serde_json::to_vec(&WarmupContext { input })?,
-                                            projected_code_mode_outputs,
-                                        ))
+                                        serde_json::to_vec(&WarmupContext { input })
                                     })
                                     .transpose()
                             },
@@ -3361,36 +3335,22 @@ impl OpenedModelResponse {
         } else {
             self.stream.boxed()
         };
-        let invalidated = (self.normalize_fireworks_exec && self.continuation.is_some())
-            .then(|| Arc::new(AtomicBool::new(false)));
-        let continuation = self.continuation.map(|sender| LastResponseRecorder {
-            sender,
-            invalidated: invalidated.clone(),
-        });
         let normalize_exec = self.normalize_fireworks_exec;
         let normalize_router_echo = self.normalize_fireworks_router_echo;
         let provider_stream = if normalize_exec || normalize_router_echo {
-            futures::stream::try_unfold(
-                (provider_stream, invalidated),
-                move |(mut stream, invalidated)| async move {
-                    let Some(event) = stream.next().await else {
-                        return Ok(None);
-                    };
-                    let mut event = event?;
-                    if normalize_router_echo {
-                        fireworks::normalize_router_echo(&mut event);
-                    }
-                    if normalize_exec
-                        && fireworks::normalize_exec_event(&mut event)?
-                        && let Some(invalidated) = &invalidated
-                    {
-                        // The next request must replay the repaired call, not the provider's
-                        // malformed arguments. Keep the socket and normal completion accounting.
-                        invalidated.store(true, Ordering::Relaxed);
-                    }
-                    Ok(Some((event, (stream, invalidated))))
-                },
-            )
+            futures::stream::try_unfold(provider_stream, move |mut stream| async move {
+                let Some(event) = stream.next().await else {
+                    return Ok(None);
+                };
+                let mut event = event?;
+                if normalize_router_echo {
+                    fireworks::normalize_router_echo(&mut event);
+                }
+                if normalize_exec {
+                    fireworks::normalize_exec_event(&mut event)?;
+                }
+                Ok(Some((event, stream)))
+            })
             .boxed()
         } else {
             provider_stream
@@ -3402,7 +3362,7 @@ impl OpenedModelResponse {
             self.telemetry,
             self.trace,
             &self.client,
-            continuation,
+            self.continuation,
             delivery,
         );
         stream.interrupt = interrupt;
@@ -3417,7 +3377,7 @@ fn map_response_events<S>(
     session_telemetry: SessionTelemetry,
     inference_trace_attempt: InferenceTraceAttempt,
     client: &ModelClientState,
-    mut continuation: Option<LastResponseRecorder>,
+    mut last_response_tx: Option<oneshot::Sender<LastResponse>>,
     mut delivery: ResponseDelivery,
 ) -> SamplingStream
 where
@@ -3436,7 +3396,7 @@ where
     tokio::spawn(async move {
         let mut logged_error = false;
         let collect_output_items =
-            continuation.is_some() || inference_trace_attempt.needs_output_items();
+            last_response_tx.is_some() || inference_trace_attempt.needs_output_items();
         let mut items_added: Vec<ResponseItem> = Vec::new();
         let mut active_item_id: Option<ResponseItemId> = None;
         let (request_start, mut ttft_ms) = (Instant::now(), None);
@@ -3506,12 +3466,8 @@ where
                         &token_usage,
                         &items_added,
                     );
-                    if let Some(continuation) = continuation.take()
-                        && !continuation
-                            .invalidated
-                            .is_some_and(|invalidated| invalidated.load(Ordering::Relaxed))
-                    {
-                        let _ = continuation.sender.send(LastResponse {
+                    if let Some(sender) = last_response_tx.take() {
+                        let _ = sender.send(LastResponse {
                             response_id: response_id.clone(),
                             items_added,
                         });

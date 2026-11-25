@@ -11,8 +11,6 @@ struct Catalog {
 struct Entry {
     model_provider: Option<String>,
     alias: Option<String>,
-    #[serde(default)]
-    chat_completions_only_service_tiers: Vec<String>,
     #[serde(flatten)]
     model: ModelInfo,
 }
@@ -60,16 +58,6 @@ pub fn provider_for_model(model: &str) -> Option<&'static str> {
         .iter()
         .find(|entry| entry.model.slug == model)
         .and_then(|entry| entry.model_provider.as_deref())
-}
-
-pub fn chat_completions_only_service_tiers(model: &str) -> &'static [String] {
-    CATALOG
-        .models
-        .iter()
-        .find(|entry| entry.model.slug == model)
-        .map_or(&[], |entry| {
-            entry.chat_completions_only_service_tiers.as_slice()
-        })
 }
 
 pub fn provider_has_model_bindings(provider: &str) -> bool {
