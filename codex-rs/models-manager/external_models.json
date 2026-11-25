@@ -440,7 +440,6 @@
       "node_repl_disabled": true,
       "model_provider": "gemini",
       "input_modalities": ["text"],
-      "tool_mode": "direct",
       "context_window": 272000,
       "max_context_window": 983040
     }

@@ -32,6 +32,7 @@ use codex_file_system::EnvironmentAccess;
 use codex_file_system::FileSystemEnvironmentAccessor;
 use codex_file_system::FileSystemSandboxContext;
 use codex_model_provider::SharedModelProvider;
+use codex_model_provider_info::WireApi;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
@@ -1635,8 +1636,9 @@ impl Session {
                 .await;
         }
 
-        if let Some(message) =
-            unsupported_code_mode_warning(tc.model_info(), tc.config.features.get())
+        if tc.provider.info().wire_api != WireApi::GeminiInteractions
+            && let Some(message) =
+                unsupported_code_mode_warning(tc.model_info(), tc.config.features.get())
         {
             self.send_event(tc, EventMsg::Warning(WarningEvent { message }))
                 .await;

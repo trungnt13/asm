@@ -210,11 +210,15 @@ fn project_steps(request: &ResponsesApiRequest) -> Result<(String, Vec<Value>), 
                 continue;
             }
             ResponseItem::CustomToolCallOutput {
+                call_id,
                 name: Some(name),
                 output,
                 ..
-            }
-            | ResponseItem::FunctionCallOutput {
+            } => text_user_input(format!(
+                "Additional output from {name} ({call_id}):\n{}",
+                tool_result_text(&output.body)?,
+            )),
+            ResponseItem::FunctionCallOutput {
                 call_id: None,
                 name: Some(name),
                 output,

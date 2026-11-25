@@ -60,14 +60,12 @@ pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig)
     }
     if config.chat_completions || config.gemini_interactions {
         model.input_modalities = vec![InputModality::Text];
-        model.tool_mode = Some(if config.gemini_interactions {
-            ToolMode::Direct
-        } else {
-            ToolMode::CodeModeOnly
-        });
         model.use_responses_lite = false;
         model.supports_search_tool = false;
         model.supports_reasoning_effort_updates = false;
+    }
+    if config.chat_completions {
+        model.tool_mode = Some(ToolMode::CodeModeOnly);
     }
     if config.gemini_interactions {
         model.apply_patch_tool_type = None;
