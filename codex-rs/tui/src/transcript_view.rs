@@ -28,6 +28,7 @@ mod turn_details;
 mod turn_groups;
 mod turn_tip;
 
+use crate::terminal_hyperlinks::bidi;
 use std::sync::Arc;
 
 use crate::chatwidget::ActiveCellTranscriptKey;
@@ -98,6 +99,7 @@ struct VisibleRow {
 /// Shared scrolling and interaction state for compact and detailed transcript presentations.
 pub(crate) struct TranscriptView {
     pub(crate) image_protocol: Option<crate::pets::ImageProtocol>,
+    pub(crate) bidi_layout: bool,
     pub(crate) agent_links: Option<crate::backend_id::BackendId>,
     pub(crate) document_links: bool,
     pub(crate) mouse_scroll_speed: f64,
@@ -147,6 +149,7 @@ impl Default for TranscriptView {
     fn default() -> Self {
         Self {
             image_protocol: None,
+            bidi_layout: false,
             agent_links: None,
             document_links: false,
             mouse_scroll_speed: 1.0,
@@ -534,8 +537,10 @@ impl TranscriptView {
         if self.detailed {
             self.sync_live_tail(width, /*key*/ None, lines);
         } else if let Some(row) = summary {
+            let bidi_layout = self.bidi_layout;
             self.sync_live_layout(width, /*key*/ None, |width| {
-                Some(row.layout(width, expanded, auxiliary.to_vec()))
+                let lines = bidi::session_lines(auxiliary.to_vec(), bidi_layout);
+                Some(row.layout(width, expanded, lines))
             });
         } else {
             self.sync_live_activity_tail(width, /*key*/ None, expanded && disclose, |width| {
@@ -580,8 +585,10 @@ impl TranscriptView {
         key: Option<ActiveCellTranscriptKey>,
         lines: impl FnOnce(u16) -> Option<Vec<HyperlinkLine>>,
     ) -> bool {
+        let bidi_layout = self.bidi_layout;
         self.sync_live_layout(width, key, |width| {
-            lines(width).map(|lines| TextLayout::new(lines, width))
+            lines(width)
+                .map(|lines| TextLayout::new(bidi::session_lines(lines, bidi_layout), width))
         })
     }
 
@@ -596,8 +603,10 @@ impl TranscriptView {
             .disclosure
             .keymap
             .primary_hint(crate::keymap::KeymapContext::Global, "open_transcript");
+        let bidi_layout = self.bidi_layout;
         self.sync_live_layout(width, key, |width| {
-            lines(width).map(|lines| layout::activity_layout(lines, width, expanded, shortcut))
+            lines(width)
+                .map(|lines| layout::activity_layout(lines, width, expanded, bidi_layout, shortcut))
         })
     }
 

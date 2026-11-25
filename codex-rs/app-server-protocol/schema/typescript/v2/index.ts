@@ -427,6 +427,7 @@ export type { ProjectChangeType } from "./ProjectChangeType";
 export type { ProjectChangedNotification } from "./ProjectChangedNotification";
 export type { ProjectRoot } from "./ProjectRoot";
 export type { ProjectSortKey } from "./ProjectSortKey";
+export type { PromptWellbeingResult } from "./PromptWellbeingResult";
 export type { ProviderSettings } from "./ProviderSettings";
 export type { ProviderSettingsPatch } from "./ProviderSettingsPatch";
 export type { QueuedSubmission } from "./QueuedSubmission";

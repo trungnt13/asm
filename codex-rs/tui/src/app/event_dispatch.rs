@@ -2378,7 +2378,7 @@ impl App {
                 match result {
                 Ok(response) => {
                     let rate_limit_reset_credits = response.rate_limit_reset_credits.clone();
-                    let snapshots = if accepted
+                    let snapshots = if accepted && self.chat_widget.uses_account_quota()
                     {
                         self.chat_widget.apply_usage_notice_read(request_id);
                         self.chat_widget.update_backend_banner(&response);
@@ -2425,8 +2425,9 @@ impl App {
                             tui.frame_requester().schedule_frame();
                         }
                         RateLimitRefreshOrigin::StatusCommand { request_id } => {
-                            self.chat_widget
-                                .finish_status_rate_limit_refresh(request_id, snapshots);
+                            if self.chat_widget.finish_status_rate_limit_refresh(request_id, snapshots) {
+                                self.refresh_status_history(tui)?;
+                            }
                         }
                         RateLimitRefreshOrigin::UsageMenu { request_id } => {
                             self.chat_widget.finish_usage_menu_rate_limit_refresh(
@@ -2476,8 +2477,9 @@ impl App {
                             );
                         }
                         RateLimitRefreshOrigin::StatusCommand { request_id } => {
-                            self.chat_widget
-                                .finish_status_rate_limit_refresh(request_id, Vec::new());
+                            if self.chat_widget.finish_status_rate_limit_refresh(request_id, Vec::new()) {
+                                self.refresh_status_history(tui)?;
+                            }
                         }
                         RateLimitRefreshOrigin::UsageMenu { request_id } => {
                             self.chat_widget.finish_usage_menu_rate_limit_refresh(
@@ -3813,6 +3815,7 @@ impl App {
             AppEvent::DiscoverSidebarAgents(root) => {
                 if self.primary_thread_id == Some(root) && !self.reconnect.offline {
                     self.refresh_agent_picker_threads(app_server, root);
+                    tui.frame_requester().schedule_frame();
                 }
             }
             AppEvent::AgentPickerThreadsLoaded {

@@ -713,11 +713,7 @@ impl UnifiedExecProcessManager {
                 .refresh_process_state(process_id, &process, retention)
                 .await
             {
-                ProcessStatus::Alive {
-                    exit_code,
-                    process_id,
-                    ..
-                } => (Some(process_id), exit_code),
+                ProcessStatus::Alive { process_id, .. } => (Some(process_id), None),
                 ProcessStatus::Exited { exit_code, entry } => {
                     entry.process.cancellation_token().cancel();
                     if let Err(message) = finish_deferred_network_approval_after_process_exit(
@@ -1063,10 +1059,9 @@ impl UnifiedExecProcessManager {
             .await;
         let (process_id, exit_code, event_call_id) = match status {
             ProcessStatus::Alive {
-                exit_code,
                 call_id,
                 process_id,
-            } => (Some(process_id), exit_code, call_id),
+            } => (Some(process_id), None, call_id),
             ProcessStatus::Exited { exit_code, entry } => {
                 entry.process.cancellation_token().cancel();
                 let call_id = entry.call_id.clone();
@@ -1136,7 +1131,6 @@ impl UnifiedExecProcessManager {
             return ProcessStatus::Unknown;
         };
 
-        let exit_code = entry.process.exit_code();
         let process_id = entry.process_id;
 
         if entry.process.has_exited() {
@@ -1153,7 +1147,6 @@ impl UnifiedExecProcessManager {
                         .map_or(true, |buffer| buffer.pending.total_bytes() > 0))
             {
                 return ProcessStatus::Alive {
-                    exit_code: None,
                     call_id: entry.call_id.clone(),
                     process_id,
                 };
@@ -1162,12 +1155,11 @@ impl UnifiedExecProcessManager {
                 return ProcessStatus::Unknown;
             };
             ProcessStatus::Exited {
-                exit_code,
+                exit_code: entry.process.exit_code(),
                 entry: Box::new(entry),
             }
         } else {
             ProcessStatus::Alive {
-                exit_code,
                 call_id: entry.call_id.clone(),
                 process_id,
             }
@@ -1846,7 +1838,6 @@ enum OutputRetention {
 
 enum ProcessStatus {
     Alive {
-        exit_code: Option<i32>,
         call_id: String,
         process_id: i32,
     },

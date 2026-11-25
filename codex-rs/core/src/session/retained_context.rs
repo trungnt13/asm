@@ -12,7 +12,7 @@ use std::task::Poll;
 
 use crate::context::ContextualUserFragment;
 use crate::context::UserGoalUpdate;
-use crate::guardian_review::ReviewWrite;
+use crate::context_manager::ContextManager;
 use codex_history::CodexHarnessMetadata;
 use codex_history::ResponseItemEnvelope;
 use codex_history::RetainedContextEvent;
@@ -238,15 +238,13 @@ impl Session {
         let guard = thread_settings::acquire_owned_persistence_lock(self).await;
         let write = {
             let mut state = self.state.lock().await;
-            let (recorded, write) = ReviewWrite::record(
-                self.pending_review_writes.as_deref(),
-                &mut state.history,
-                |history| history.record_retained_context_for_persistence(&mut event),
-            );
+            let (recorded, write) = self.record_review_evidence(&mut state.history, |history| {
+                history.record_retained_context_for_persistence(&mut event)
+            });
             if !recorded {
                 return None;
             }
-            write.and_then(|write| self.track_review_write(write))
+            write
         };
         let item = RolloutItem::RetainedContext(event);
         if let Some(write) = write {
@@ -256,13 +254,24 @@ impl Session {
         None
     }
 
-    /// Under the state lock, enroll this append in the same shutdown drain as
-    /// confirmed Code Mode deliveries. A closed session cannot admit more work.
-    pub(super) fn track_review_write(
+    /// Only opted-in roots retain changed evidence through cancellation.
+    /// Enroll it in the session's shutdown drain before releasing the history lock.
+    pub(super) fn record_review_evidence<T>(
         &self,
-        write: ReviewWrite,
-    ) -> Option<(ReviewWrite, TaskTrackerToken)> {
-        self.track_code_mode_message().map(|token| (write, token))
+        history: &mut ContextManager,
+        record: impl FnOnce(&mut ContextManager) -> T,
+    ) -> (T, Option<TaskTrackerToken>) {
+        if !self.preserve_review_writes {
+            return (record(history), None);
+        }
+        let before = history.guardian_revisions();
+        let recorded = record(history);
+        let token = if before != history.guardian_revisions() {
+            self.track_code_mode_message()
+        } else {
+            None
+        };
+        (recorded, token)
     }
 
     /// Call before yielding after admission. Start in caller order, then let the
@@ -270,7 +279,7 @@ impl Session {
     pub(super) fn start_review_write(
         &self,
         items: Vec<RolloutItem>,
-        (write, token): (ReviewWrite, TaskTrackerToken),
+        token: TaskTrackerToken,
         settings: Option<OwnedSemaphorePermit>,
     ) -> Option<JoinHandle<()>> {
         let live_thread = self.live_thread().cloned();
@@ -286,7 +295,6 @@ impl Session {
                 &runtime,
                 thread_id,
                 &items,
-                Some(write),
             )
             .await;
         });
@@ -351,11 +359,9 @@ impl Session {
                 retained_source: None,
                 acceptance_order: state.history.reserve_input_order(),
             };
-            let (_, write) = ReviewWrite::record(
-                session.pending_review_writes.as_deref(),
-                &mut state.history,
-                |history| history.record_retained_context_for_persistence(&mut event),
-            );
+            state
+                .history
+                .record_retained_context_for_persistence(&mut event);
             let mut pending = session
                 .code_mode_message_tasks
                 .pending_persistence
@@ -363,7 +369,7 @@ impl Session {
                 .unwrap_or_else(PoisonError::into_inner);
             pending.retain(|recording| recording.has_changed().is_ok());
             pending.push(pending_recording);
-            (event, boundary, write)
+            (event, boundary)
         });
         // Poll while still at the confirmed MCP response boundary. A free state lock
         // reserves the order now; a busy lock queues this reservation ahead of a
@@ -376,14 +382,14 @@ impl Session {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .spawn(async move {
-                let (event, _boundary, write) = match reservation {
+                let (event, _boundary) = match reservation {
                     Poll::Ready(reservation) => reservation,
                     Poll::Pending => reserve.await,
                 };
                 let _guard = thread_settings::acquire_persistence_lock(&persistence_session).await;
                 // A distinct delivery still belongs in the rollout when the live window is full.
                 persistence_session
-                    .persist_rollout_items_with_ack(&[RolloutItem::RetainedContext(event)], write)
+                    .persist_rollout_items(&[RolloutItem::RetainedContext(event)])
                     .await;
                 drop(recorded);
             });

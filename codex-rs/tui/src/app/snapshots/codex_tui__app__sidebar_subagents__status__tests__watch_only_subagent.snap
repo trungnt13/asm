@@ -1,20 +1,20 @@
 ---
 source: tui/src/app/sidebar_agent_status_tests.rs
-expression: "crate::chatwidget::tests::helpers::normalize_agent_center_snapshot(screen.replace(&child.to_string(),\n\"[agent id]\"))"
+expression: "crate::chatwidget::tests::helpers::normalize_agent_center_snapshot(screen.replace(&child.to_string(),\n\"[agent id]\").replace(env!(\"CARGO_PKG_VERSION\"), \"<VERSION>\"))"
 ---
                                                                                                                        │ reviewer      ×                                         +
-  >_ ASM (v<VERSION>)                                                                                           │esc back to agents · Watch only
+  >_ ASM (v<VERSION>)                                                                                            │esc back to agents · Watch only
      /tmp/project                                                                                                      │
                                                                                                                        │  >_ ASM (v<VERSION>)
-  To get started, describe a task or try one of these commands:                                                        │     /
+• Started `/root/reviewer`                                                                                             │     /
                                                                                                                        │
-  /init - create an AGENTS.md file with instructions for ASM                                                           │
-  /status - show current session configuration                                                                         │› Review result
-  /permissions - choose what ASM is allowed to do                                                                      │
-  /model - choose what model and reasoning effort to use                                                               │
-  /review - review any changes and find issues                                                                         │• Agent thread [agent id] could
+                                                                                                                       │
+                                                                                                                       │› Review result
+                                                                                                                       │
+                                                                                                                       │
+                                                                                                                       │• Agent thread [agent id] could
                                                                                                                        │not be resumed live. Replaying saved transcript.
-• Started `/root/reviewer`                                                                                             │
+                                                                                                                       │
                                                                                                                        │
                                                                                                                        │
                                                                                                                        │
