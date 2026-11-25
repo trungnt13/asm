@@ -7,10 +7,12 @@ use crate::error::ApiError;
 use crate::provider::Provider;
 use crate::requests::Compression;
 use crate::requests::chat::build_chat_request;
+use crate::requests::gemini::build_gemini_request;
 use crate::requests::headers::build_session_headers;
 use crate::requests::headers::insert_header;
 use crate::requests::headers::subagent_header;
 use crate::sse::chat::spawn_chat_stream;
+use crate::sse::gemini::spawn_gemini_stream;
 use crate::sse::spawn_response_stream;
 use crate::telemetry::SseTelemetry;
 use codex_client::EncodedJsonBody;
@@ -28,6 +30,12 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tracing::instrument;
+
+#[derive(Clone, Copy)]
+enum FunctionApi {
+    Chat,
+    Gemini,
+}
 
 pub struct ResponsesClient<T: HttpTransport> {
     session: EndpointSession<T>,
@@ -71,27 +79,56 @@ impl<T: HttpTransport> ResponsesClient<T> {
         extra_headers: HeaderMap,
         on_encoded: impl FnOnce(&bytes::Bytes),
     ) -> Result<ResponseStream, ApiError> {
-        let (request, tool_names) = build_chat_request(request)?;
+        self.stream_function_request(FunctionApi::Chat, request, extra_headers, on_encoded)
+            .await
+    }
+
+    #[instrument(skip_all)]
+    pub async fn stream_gemini_request(
+        &self,
+        request: &ResponsesApiRequest,
+        extra_headers: HeaderMap,
+        on_encoded: impl FnOnce(&bytes::Bytes),
+    ) -> Result<ResponseStream, ApiError> {
+        self.stream_function_request(FunctionApi::Gemini, request, extra_headers, on_encoded)
+            .await
+    }
+
+    async fn stream_function_request(
+        &self,
+        api: FunctionApi,
+        request: &ResponsesApiRequest,
+        mut extra_headers: HeaderMap,
+        on_encoded: impl FnOnce(&bytes::Bytes),
+    ) -> Result<ResponseStream, ApiError> {
+        let ((request, tool_names), path) = match api {
+            FunctionApi::Chat => (build_chat_request(request)?, crate::CHAT_COMPLETIONS_PATH),
+            FunctionApi::Gemini => {
+                extra_headers.insert("api-revision", HeaderValue::from_static("2026-05-20"));
+                (
+                    build_gemini_request(request)?,
+                    crate::GEMINI_INTERACTIONS_PATH,
+                )
+            }
+        };
         let body = EncodedJsonBody::encode(&request)
-            .map_err(|err| ApiError::Stream(format!("failed to encode chat request: {err}")))?;
+            .map_err(|err| ApiError::Stream(format!("failed to encode function request: {err}")))?;
         on_encoded(body.shared_bytes());
         let (stream, request_started_at) = self
             .session
-            .stream_encoded_json_with(
-                Method::POST,
-                crate::CHAT_COMPLETIONS_PATH,
-                extra_headers,
-                Some(body),
-                |req| {
-                    req.headers.insert(
-                        http::header::ACCEPT,
-                        HeaderValue::from_static("text/event-stream"),
-                    );
-                },
-            )
+            .stream_encoded_json_with(Method::POST, path, extra_headers, Some(body), |req| {
+                req.headers.insert(
+                    http::header::ACCEPT,
+                    HeaderValue::from_static("text/event-stream"),
+                );
+            })
             .await?;
 
-        Ok(spawn_chat_stream(
+        let spawn_stream = match api {
+            FunctionApi::Chat => spawn_chat_stream,
+            FunctionApi::Gemini => spawn_gemini_stream,
+        };
+        Ok(spawn_stream(
             stream,
             self.session.provider().stream_idle_timeout,
             tool_names,

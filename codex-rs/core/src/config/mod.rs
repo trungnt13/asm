@@ -2015,6 +2015,7 @@ impl Config {
     pub fn to_models_manager_config(&self) -> ModelsManagerConfig {
         ModelsManagerConfig {
             chat_completions: self.model_provider.wire_api == WireApi::ChatCompletions,
+            gemini_interactions: self.model_provider.wire_api == WireApi::GeminiInteractions,
             model_context_window: self.model_context_window,
             model_auto_compact_token_limit: self.model_auto_compact_token_limit,
             tool_output_token_limit: self.tool_output_token_limit,

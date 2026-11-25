@@ -1390,8 +1390,7 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
     }
 
     if features.enabled(Feature::ViewImage)
-        && turn_context.provider.info().wire_api
-            != codex_model_provider_info::WireApi::ChatCompletions
+        && turn_context.provider.info().wire_api == codex_model_provider_info::WireApi::Responses
     {
         let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
         registry.add(ViewImageHandler::new(ViewImageToolOptions {

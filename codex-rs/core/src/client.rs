@@ -1426,11 +1426,18 @@ impl ModelClient {
             // for sampling and compaction without changing the persisted transcript.
             crate::session::multi_agents::remove_collaboration_role_instructions(&mut input);
         }
+        let gemini = self.state.provider.info().wire_api == WireApi::GeminiInteractions;
         if !self.reasoning_effort_override_enabled(model_info) {
             // Unsupported models and disabled overrides must also accept saved history.
             // Filter only the request copy; persisted history remains unchanged.
-            input.retain(|item| !matches!(**item, ResponseItem::ConfigurationUpdate { .. }));
+            input.retain(|item| {
+                !matches!(**item, ResponseItem::ConfigurationUpdate { .. })
+                    && (gemini || !codex_api::is_gemini_thought(item))
+            });
         } else {
+            if !gemini {
+                input.retain(|item| !codex_api::is_gemini_thought(item));
+            }
             input.dedup_by(|next, previous| {
                 if matches!(**next, ResponseItem::ConfigurationUpdate { .. })
                     && matches!(**previous, ResponseItem::ConfigurationUpdate { .. })
@@ -2320,12 +2327,12 @@ impl ResponsesHttpExecutor<'_> {
             .map(AuthManager::unauthorized_recovery);
         let mut provider_auth_recovery_attempted = false;
         let mut pending_retry = PendingUnauthorizedRetry::default();
-        let chat_completions =
-            self.client.state.provider.info().wire_api == WireApi::ChatCompletions;
-        let path = if chat_completions {
-            codex_api::CHAT_COMPLETIONS_PATH
-        } else {
-            codex_api::RESPONSES_PATH
+        let wire_api = self.client.state.provider.info().wire_api;
+        let responses_api = wire_api == WireApi::Responses;
+        let path = match wire_api {
+            WireApi::Responses => codex_api::RESPONSES_PATH,
+            WireApi::ChatCompletions => codex_api::CHAT_COMPLETIONS_PATH,
+            WireApi::GeminiInteractions => codex_api::GEMINI_INTERACTIONS_PATH,
         };
         loop {
             let client_setup = self
@@ -2337,13 +2344,13 @@ impl ResponsesHttpExecutor<'_> {
             }) {
                 return Err(CodexErr::TurnAborted);
             }
-            let include_internal = !chat_completions
+            let include_internal = responses_api
                 && self
                     .client
                     .state
                     .provider
                     .include_internal_metadata(&client_setup.api_provider);
-            let responses_headers = if chat_completions {
+            let responses_headers = if !responses_api {
                 ApiHeaderMap::new()
             } else {
                 self.client
@@ -2371,7 +2378,7 @@ impl ResponsesHttpExecutor<'_> {
                 self.client.state.auth_env_telemetry.clone(),
             );
             let compression = self.responses_request_compression(client_setup.auth.as_ref());
-            let mut options = if chat_completions {
+            let mut options = if !responses_api {
                 ApiResponsesOptions::default()
             } else {
                 self.build_responses_options(
@@ -2404,7 +2411,7 @@ impl ResponsesHttpExecutor<'_> {
             if is_guardian_reviewer(&responses_headers) {
                 request.service_tier = None;
             }
-            if !chat_completions
+            if responses_api
                 && let Some(header_value) = self.client.build_routing_hint_header(
                     client_setup.auth.as_ref(),
                     &responses_headers,
@@ -2482,14 +2489,22 @@ impl ResponsesHttpExecutor<'_> {
                     || Ok(None),
                 );
             };
-            let stream_result = if chat_completions {
-                client
-                    .stream_chat_request(&request, options.extra_headers, on_encoded)
-                    .await
-            } else {
-                client
-                    .stream_request_with_observer(request, options, on_encoded)
-                    .await
+            let stream_result = match wire_api {
+                WireApi::Responses => {
+                    client
+                        .stream_request_with_observer(request, options, on_encoded)
+                        .await
+                }
+                WireApi::ChatCompletions => {
+                    client
+                        .stream_chat_request(&request, options.extra_headers, on_encoded)
+                        .await
+                }
+                WireApi::GeminiInteractions => {
+                    client
+                        .stream_gemini_request(&request, options.extra_headers, on_encoded)
+                        .await
+                }
             };
 
             match stream_result {

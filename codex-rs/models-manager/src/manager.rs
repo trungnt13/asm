@@ -530,6 +530,21 @@ impl OpenAiModelsManager {
 }
 
 impl StaticModelsManager {
+    /// Use local catalog entries bound to a provider without probing a remote endpoint.
+    pub fn for_bundled_provider(provider: &str) -> Self {
+        let models = crate::external_models::models()
+            .filter(|model| {
+                crate::external_models::provider_for_model(&model.slug) == Some(provider)
+            })
+            .cloned()
+            .collect();
+        Self::new(
+            /*auth_manager*/ None,
+            ModelsResponse { models },
+            ModelOrigin::Bundled,
+        )
+    }
+
     /// Construct a static model manager with the source of its supplied catalog.
     pub fn new(
         auth_manager: Option<Arc<AuthManager>>,

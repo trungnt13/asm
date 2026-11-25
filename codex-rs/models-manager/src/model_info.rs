@@ -58,12 +58,22 @@ pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig)
                 }),
         );
     }
-    if config.chat_completions {
+    if config.chat_completions || config.gemini_interactions {
         model.input_modalities = vec![InputModality::Text];
-        model.tool_mode = Some(ToolMode::CodeModeOnly);
+        model.tool_mode = Some(if config.gemini_interactions {
+            ToolMode::Direct
+        } else {
+            ToolMode::CodeModeOnly
+        });
         model.use_responses_lite = false;
         model.supports_search_tool = false;
         model.supports_reasoning_effort_updates = false;
+    }
+    if config.gemini_interactions {
+        model.apply_patch_tool_type = None;
+        model.node_repl_disabled = true;
+        model.supports_experimental_context = false;
+        model.supports_reasoning_summary_parameter = false;
     }
     if let Some(auto_compact_token_limit) = config.model_auto_compact_token_limit {
         model.auto_compact_token_limit = Some(auto_compact_token_limit);

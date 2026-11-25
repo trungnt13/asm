@@ -1,4 +1,6 @@
 use super::Config;
+use codex_model_provider_info::GEMINI_PROVIDER_ID;
+use codex_model_provider_info::WireApi;
 use std::io;
 
 impl Config {
@@ -49,6 +51,11 @@ impl Config {
                 io::Error::other(format!("Model provider `{provider_id}` is not configured"))
             })?
             .clone();
+        if provider_id == GEMINI_PROVIDER_ID && provider.wire_api != WireApi::GeminiInteractions {
+            return Err(io::Error::other(format!(
+                "Model provider `{provider_id}` must use `wire_api = \"gemini_interactions\"` for this model"
+            )));
+        }
         let projected = toml::toml! {
             model = (self.model.as_deref().unwrap_or_default())
             model_provider = provider_id
