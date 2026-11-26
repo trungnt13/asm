@@ -3178,9 +3178,7 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
         hide_spawn_agent_metadata,
         expose_spawn_agent_model_overrides,
         expose_spawn_agent_service_tier,
-        require_spawn_agent_model: base
-            .and_then(|config| config.require_spawn_agent_model)
-            .unwrap_or_default(),
+        require_spawn_agent_model: config_toml.require_spawn_agent_model.unwrap_or_default(),
         subagent_model_list: config_toml.subagent_model_list.clone(),
         wait_agent_enabled,
         interrupt_at_item_boundary,
