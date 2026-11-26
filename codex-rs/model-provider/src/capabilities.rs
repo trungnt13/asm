@@ -33,7 +33,7 @@ impl Default for ProviderCapabilities {
 
 impl ProviderCapabilities {
     pub(crate) fn from_config(info: &ModelProviderInfo) -> Self {
-        if info.wire_api == WireApi::ChatCompletions {
+        if info.wire_api != WireApi::Responses {
             return Self {
                 reasoning_summaries: false,
                 image_generation: false,

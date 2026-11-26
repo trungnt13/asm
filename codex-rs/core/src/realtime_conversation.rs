@@ -38,6 +38,7 @@ use codex_login::default_client::default_headers;
 use codex_login::read_openai_api_key_from_env;
 use codex_model_provider::resolve_api_provider;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::WireApi;
 use codex_prompts::prepare_realtime_backend_prompt;
 use codex_protocol::auth::AuthMode;
 use codex_protocol::error::CodexErr;
@@ -1745,6 +1746,11 @@ async fn prepare_realtime_start(
         .model_client
         .validate_required_cyber_access_program(/*programs*/ None)?;
     let provider = sess.provider().await;
+    if provider.wire_api == WireApi::GeminiInteractions {
+        return Err(CodexErr::UnsupportedOperation(
+            "Gemini Interactions does not support realtime conversations".into(),
+        ));
+    }
     let auth_manager = sess
         .services
         .model_client

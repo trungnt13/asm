@@ -19,6 +19,10 @@ pub(crate) mod telemetry;
 pub const RESPONSES_PATH: &str = "/responses";
 /// Path of the Chat Completions endpoint, relative to a provider's base URL.
 pub const CHAT_COMPLETIONS_PATH: &str = "/chat/completions";
+/// Path of the Gemini Interactions endpoint, relative to a provider's base URL.
+pub const GEMINI_INTERACTIONS_PATH: &str = "/interactions";
+
+pub use crate::requests::gemini::is_gemini_thought;
 
 pub use crate::requests::headers::X_CODEX_TURN_METADATA_HEADER;
 pub use crate::requests::headers::build_realtime_thread_headers;

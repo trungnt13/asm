@@ -4,6 +4,7 @@ use crate::tools::handlers::ToolSearchHandler;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 use crate::tools::router::ToolRouter;
+use codex_model_provider_info::WireApi;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
@@ -22,7 +23,8 @@ use std::sync::Arc;
 pub(crate) fn enabled(turn: &TurnContext, model: &ModelInfo) -> bool {
     (turn.config.model_provider_id == "fireworks"
         || model.slug.starts_with("claude-code/")
-        || (turn.provider.info().wire_api == codex_model_provider_info::WireApi::ChatCompletions
+        || turn.provider.info().wire_api == WireApi::GeminiInteractions
+        || (turn.provider.info().wire_api == WireApi::ChatCompletions
             && turn
                 .config
                 .features
