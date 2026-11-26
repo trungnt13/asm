@@ -367,6 +367,16 @@
         }
       ]
     },
+    "AsmConfigToml": {
+      "additionalProperties": false,
+      "properties": {
+        "require_spawn_agent_model": {
+          "description": "Require an explicit V2 spawn model when model overrides are exposed.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "AsyncClassifierMode": {
       "description": "Legacy classifier modes retained for configuration and model-catalog compatibility.",
       "enum": [
@@ -3745,10 +3755,6 @@
         },
         "preserve_fork_prefix": {
           "description": "Preserve the parent's model-visible history on full forks and append child instructions. Defaults to true. Legacy compaction without a reusable context baseline still rebuilds.",
-          "type": "boolean"
-        },
-        "require_spawn_agent_model": {
-          "description": "Require an explicit model argument when the multi-agent V2 spawn tool exposes model overrides.",
           "type": "boolean"
         },
         "root_agent_usage_hint_text": {
@@ -8541,6 +8547,14 @@
     "apps_mcp_product_sku": {
       "description": "Optional product SKU forwarded on host-owned Codex Apps MCP requests.",
       "type": "string"
+    },
+    "asm": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/AsmConfigToml"
+        }
+      ],
+      "description": "Settings that only ASM reads."
     },
     "audio": {
       "allOf": [
