@@ -54,9 +54,16 @@ impl App {
         let automatic_title_prompt = self.automatic_thread_title_prompt(&event).await;
         self.handle_thread_event_now_recovering_file_changes(event)
             .await;
-        if let Some(prompt) = automatic_title_prompt
+        if let Some(mut prompt) = automatic_title_prompt
             && let Some(thread_id) = self.active_thread_id
         {
+            if prompt.request.expected_name.is_none() {
+                prompt.request.expected_name = app_server
+                    .side_chat_fork_names
+                    .get(&thread_id)
+                    .cloned()
+                    .flatten();
+            }
             self.generate_thread_title(
                 app_server,
                 thread_id,
@@ -380,7 +387,10 @@ impl App {
         title: String,
         request: AutoRenameRequest,
     ) {
+        let replaces_inherited_name = request.expected_name.is_some()
+            && app_server.side_chat_fork_names.get(&thread_id) == Some(&request.expected_name);
         if request.expected_name.is_some()
+            && !replaces_inherited_name
             && (!self.automatic_title_record_matches(thread_id, request.expected_name.as_deref())
                 || self
                     .automatic_thread_titles
@@ -401,7 +411,8 @@ impl App {
             self.stop_automatic_thread_titles(thread_id);
             return;
         }
-        if thread.name.as_ref() == Some(&title) {
+        // An inherited match still needs a name write after the Side boundary.
+        if thread.name.as_ref() == Some(&title) && !replaces_inherited_name {
             self.persist_automatic_thread_title(thread_id, &title).await;
             return;
         }
@@ -412,6 +423,7 @@ impl App {
         {
             return;
         }
+        app_server.side_chat_fork_names.remove(&thread_id);
         self.persist_automatic_thread_title(thread_id, &title).await;
         self.chat_widget
             .on_thread_name_updated(thread_id, Some(title));
