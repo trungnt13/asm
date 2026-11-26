@@ -279,7 +279,7 @@ async fn decode_gemini_stream(
                                 reason: reason.to_owned(),
                                 partial_output: Vec::new(),
                                 response_id,
-                                token_usage: usage.totals,
+                                token_usage: usage.totals(),
                             },
                         )));
                     }
@@ -302,7 +302,7 @@ async fn decode_gemini_stream(
     let _ = events
         .send(Ok(ResponseEvent::Completed {
             response_id,
-            token_usage: usage.totals,
+            token_usage: usage.totals(),
             usage_metadata: None,
             request_duration_ms: Some(i64::try_from(completion_ms).unwrap_or(i64::MAX)),
             generation_duration_ms: None,
@@ -358,37 +358,47 @@ fn thought_item(step: &Value) -> ResponseItem {
 
 #[derive(Default)]
 struct GeminiUsage {
-    totals: Option<TokenUsage>,
+    reported_input_tokens: Option<i64>,
     reported_cached_tokens: Option<i64>,
+    reported_output_tokens: Option<i64>,
+    reported_thought_tokens: Option<i64>,
+    reported_total_tokens: Option<i64>,
 }
 
 impl GeminiUsage {
     fn record(&mut self, usage: &Value) {
         // Usage updates are cumulative, but may omit individual counters.
+        self.reported_input_tokens = usage["total_input_tokens"]
+            .as_i64()
+            .or(self.reported_input_tokens);
         self.reported_cached_tokens = usage["total_cached_tokens"]
             .as_i64()
             .or(self.reported_cached_tokens);
-        if let (Some(input_tokens), Some(total_tokens)) = (
-            usage["total_input_tokens"].as_i64(),
-            usage["total_tokens"].as_i64(),
-        ) {
-            let reasoning_output_tokens =
-                usage["total_thought_tokens"].as_i64().unwrap_or_default();
-            self.totals = Some(TokenUsage {
-                input_tokens,
-                // Gemini reports visible output and thought tokens separately.
-                output_tokens: usage["total_output_tokens"]
-                    .as_i64()
-                    .unwrap_or_default()
-                    .saturating_add(reasoning_output_tokens),
-                reasoning_output_tokens,
-                total_tokens,
-                ..Default::default()
-            });
-        }
-        if let Some(totals) = &mut self.totals {
-            totals.cached_input_tokens = self.reported_cached_tokens.unwrap_or_default();
-        }
+        self.reported_output_tokens = usage["total_output_tokens"]
+            .as_i64()
+            .or(self.reported_output_tokens);
+        self.reported_thought_tokens = usage["total_thought_tokens"]
+            .as_i64()
+            .or(self.reported_thought_tokens);
+        self.reported_total_tokens = usage["total_tokens"]
+            .as_i64()
+            .or(self.reported_total_tokens);
+    }
+
+    fn totals(&self) -> Option<TokenUsage> {
+        let reasoning_output_tokens = self.reported_thought_tokens.unwrap_or_default();
+        Some(TokenUsage {
+            input_tokens: self.reported_input_tokens?,
+            cached_input_tokens: self.reported_cached_tokens.unwrap_or_default(),
+            // Gemini reports visible output and thought tokens separately.
+            output_tokens: self
+                .reported_output_tokens
+                .unwrap_or_default()
+                .saturating_add(reasoning_output_tokens),
+            reasoning_output_tokens,
+            total_tokens: self.reported_total_tokens?,
+            ..Default::default()
+        })
     }
 }
 
