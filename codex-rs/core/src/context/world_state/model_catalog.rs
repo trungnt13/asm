@@ -7,6 +7,9 @@ use super::SectionTransition;
 use super::WorldStateHash;
 use super::WorldStateSection;
 use super::WorldStateUpdate;
+use crate::agent::model_catalog::CONTEXT_WINDOW_SCOPE;
+use crate::agent::model_catalog::context_window_label;
+use crate::config::Config;
 use crate::context::ContextualUserFragment;
 use crate::context::environment_context::push_xml_escaped_text;
 use codex_protocol::models::ContentItem;
@@ -14,6 +17,7 @@ use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::ContentItemMetadata;
 use codex_protocol::models::ContentItemNamespace;
 use codex_protocol::models::input_text;
+use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::protocol::MultiAgentVersion;
 
@@ -33,8 +37,10 @@ impl ModelCatalogState {
     pub(crate) fn new(
         models: &[ModelPreset],
         multi_agent_version: MultiAgentVersion,
-        configured: Option<&[String]>,
+        config: &Config,
+        active_models: &[ModelInfo],
     ) -> Self {
+        let configured = config.multi_agent_v2.subagent_model_list.as_deref();
         let mut catalog = String::new();
         let mut models = match crate::agent::model_catalog::advertised_models(
             models,
@@ -60,15 +66,19 @@ impl ModelCatalogState {
             } else {
                 catalog.push_str("No picker-visible model overrides are currently loaded.\n");
             }
+        } else {
+            catalog.push_str(CONTEXT_WINDOW_SCOPE);
+            catalog.push('\n');
         }
         let (open, close) = Self::type_markers();
         let body_budget = MAX_RENDERED_BYTES - open.len() - close.len() - 2;
+        // Reserve model IDs and capability labels before spending the budget on descriptions.
+        let model_count = models.len();
+        let mut rows = Vec::new();
+        let mut remaining = body_budget - catalog.len();
         for model in models {
-            let mut line = format!("- `{}`: ", model.model);
-            line.extend(model.description.chars().take(MAX_DESCRIPTION_CHARS));
-            if model.description.chars().count() > MAX_DESCRIPTION_CHARS {
-                line.push('…');
-            }
+            let mut line =
+                context_window_label(config, multi_agent_version, active_models, &model.model);
             if !model.supported_reasoning_efforts.is_empty() {
                 line.push_str(" Reasoning efforts: ");
                 for (index, preset) in model.supported_reasoning_efforts.iter().enumerate() {
@@ -92,16 +102,55 @@ impl ModelCatalogState {
                 }
                 line.push('.');
             }
-            let mut escaped = String::new();
-            push_xml_escaped_text(&mut escaped, &line);
-            if catalog.len() + escaped.len() + 1 + OMITTED_NOTICE.len() > body_budget {
-                // Keep identifiers and capability lists intact instead of advertising
-                // a truncated model ID, reasoning effort, or service tier.
-                catalog.push_str(OMITTED_NOTICE);
+            let mut prefix = String::new();
+            let mut details = String::new();
+            push_xml_escaped_text(&mut prefix, &format!("- `{}`: ", model.model));
+            push_xml_escaped_text(&mut details, &line);
+            let row_bytes = prefix.len() + details.len() + 1;
+            if row_bytes > remaining {
                 break;
             }
-            catalog.push_str(&escaped);
+            remaining -= row_bytes;
+            rows.push((prefix, &model.description, details));
+        }
+        let omitted = rows.len() < model_count;
+        if omitted {
+            while remaining < OMITTED_NOTICE.len() {
+                let Some((prefix, _, details)) = rows.pop() else {
+                    break;
+                };
+                remaining += prefix.len() + details.len() + 1;
+            }
+            remaining -= OMITTED_NOTICE.len();
+        }
+        for (prefix, description, details) in rows {
+            catalog.push_str(&prefix);
+            let start = catalog.len();
+            let mut ellipsis_end = start;
+            if remaining > 1 {
+                for (index, ch) in description.chars().enumerate() {
+                    push_xml_escaped_text(&mut catalog, ch.encode_utf8(&mut [0; 4]));
+                    if index == MAX_DESCRIPTION_CHARS || catalog.len() - start >= remaining {
+                        catalog.truncate(ellipsis_end);
+                        if ellipsis_end > start {
+                            catalog.push('…');
+                        }
+                        break;
+                    }
+                    if catalog.len() - start + '…'.len_utf8() < remaining {
+                        ellipsis_end = catalog.len();
+                    }
+                }
+            }
+            if catalog.len() > start {
+                catalog.push(' ');
+                remaining -= catalog.len() - start;
+            }
+            catalog.push_str(&details);
             catalog.push('\n');
+        }
+        if omitted {
+            catalog.push_str(OMITTED_NOTICE);
         }
         Self {
             catalog,

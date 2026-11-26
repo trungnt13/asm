@@ -843,6 +843,8 @@ Keep `codex-ollama`'s `wiremock` under `[dev-dependencies]` while only tests use
 
 Optional top-level `subagent_model_list` selects advertised model IDs in user order for spawn descriptions and `<model_catalog>`. Omission keeps automatic picker-visible selection; `[]` advertises none. Explicit IDs can select hidden loaded models. Deduplicate and advertise only the first five; keep the catalog's 1,000-byte context bound. Before truncation, validate every ID against the loaded catalog and spawning backend. Fail invalid IDs without fallback. Do not restrict runtime spawning or change the picker.
 
+Both catalog placements show each listed model's usable child context window, after exact model configuration, provider clamping, and headroom, before role overrides. Do not start provider discovery to fill in missing sizes. Show a configured Claude auto-compaction window as a setting, not capacity; leave native-managed or unavailable capacity unguessed.
+
 ### Flat reasoning-effort picker
 
 Show all model-supported efforts, including Max/Ultra, in one list without “More reasoning…”. Keep persistence, Plan-mode scope, and explicit-picker requirements for shortcuts that raise effort to Ultra.

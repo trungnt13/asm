@@ -787,12 +787,8 @@ impl ModelsManager for OpenAiModelsManager {
                     | SelectedCatalog::Fallback(models) => models,
                 };
                 let model = match &self.catalog_source {
-                    CatalogSource::Default => crate::external_models::models()
-                        .find(|candidate| {
-                            candidate.slug == model
-                                && crate::external_models::provider_for_model(model).is_some()
-                        })
-                        .cloned()
+                    CatalogSource::Default => crate::external_models::bundled_provider_model(model)
+                        .map(|(_, info)| info.clone())
                         .or_else(|| find_model_from_candidates(model, models)),
                     CatalogSource::ExplicitProvider(_) => models
                         .iter()

@@ -247,11 +247,11 @@ fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, String> {
         config.system1.min_effort = min;
         config.system1.max_effort = max;
     }
+    config.model_context_window = config.inherited_subagent_context_window();
     if config
         .features
         .enabled(Feature::SubagentDefaultContextLimits)
     {
-        config.model_context_window = None;
         config.model_auto_compact_token_limit = None;
     }
     // Preserve activation for history forks without freezing the parent's model-owned prompts.

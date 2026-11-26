@@ -102,6 +102,7 @@ struct CoreToolPlanContext<'a> {
     tool_suggest_candidates: Option<&'a crate::tools::router::ToolSuggestCandidates>,
     wait_for_environment_tool_config: Option<&'a Arc<crate::WaitForEnvironmentToolConfig>>,
     default_agent_type_description: &'a str,
+    models_manager: Option<&'a codex_models_manager::manager::SharedModelsManager>,
 }
 
 #[instrument(level = "trace", skip_all)]
@@ -132,6 +133,7 @@ pub(crate) fn build_tool_router(
         tool_suggest_candidates,
         wait_for_environment_tool_config: wait_for_environment_tool_config.as_ref(),
         default_agent_type_description: &default_agent_type_description,
+        models_manager: Some(&session.services.models_manager),
     };
     let mut registry = ToolRegistry::with_tool_policy(Arc::clone(&session.tool_policy));
     add_core_tool_sources(&context, &mut registry);
@@ -300,6 +302,7 @@ pub(crate) fn build_core_tool_registry(
         tool_suggest_candidates,
         wait_for_environment_tool_config,
         default_agent_type_description: &default_agent_type_description,
+        models_manager: None,
     };
     let mut registry = ToolRegistry::default();
     add_core_tool_sources(&context, &mut registry);
@@ -1485,40 +1488,57 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                 agent_type_description(turn_context, context.default_agent_type_description);
             let hide_spawn_agent_metadata =
                 turn_context.config.multi_agent_v2.hide_spawn_agent_metadata;
+            let include_model_catalog_in_spawn_agent_list = turn_context
+                .config
+                .include_model_catalog_in_spawn_agent_list;
+            let model_catalog_in_context = turn_context
+                .config
+                .features
+                .enabled(Feature::ModelCatalogInContext);
+            let expose_spawn_agent_model_overrides = turn_context
+                .config
+                .multi_agent_v2
+                .expose_spawn_agent_model_overrides;
+            let context_windows = if include_model_catalog_in_spawn_agent_list
+                && !model_catalog_in_context
+                && expose_spawn_agent_model_overrides
+            {
+                let active_models = context
+                    .models_manager
+                    .and_then(|manager| manager.try_get_remote_models().ok())
+                    .unwrap_or_default();
+                crate::agent::model_catalog::advertised_context_windows(
+                    &turn_context.available_models,
+                    turn_context.multi_agent_version,
+                    &turn_context.config,
+                    &active_models,
+                )
+            } else {
+                std::collections::HashMap::new()
+            };
             registry.register_trusted_with_native_review(
                 multi_agent_v2_handler(
                     SpawnAgentHandlerV2::new(
                         SpawnAgentToolOptions {
                             available_models: turn_context.available_models.clone(),
+                            context_windows,
                             subagent_model_list: turn_context
                                 .config
                                 .multi_agent_v2
                                 .subagent_model_list
                                 .clone(),
-                            external_model_aliases: if turn_context
-                                .config
-                                .multi_agent_v2
-                                .expose_spawn_agent_model_overrides
-                            {
+                            external_model_aliases: if expose_spawn_agent_model_overrides {
                                 external_model_aliases
                             } else {
                                 Vec::new()
                             },
                             multi_agent_version: turn_context.multi_agent_version,
-                            include_model_catalog_in_spawn_agent_list: turn_context
-                                .config
-                                .include_model_catalog_in_spawn_agent_list,
-                            model_catalog_in_context: turn_context
-                                .config
-                                .features
-                                .enabled(Feature::ModelCatalogInContext),
+                            include_model_catalog_in_spawn_agent_list,
+                            model_catalog_in_context,
                             agent_type_description,
                             expose_agent_type: !turn_context.config.agent_roles.is_empty(),
                             hide_agent_type_model_reasoning: hide_spawn_agent_metadata,
-                            expose_spawn_agent_model_overrides: turn_context
-                                .config
-                                .multi_agent_v2
-                                .expose_spawn_agent_model_overrides,
+                            expose_spawn_agent_model_overrides,
                             require_spawn_agent_model: turn_context
                                 .config
                                 .multi_agent_v2
