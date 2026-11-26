@@ -283,19 +283,10 @@ impl Default for HandoffConfig {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AsmConfigToml {
-    /// Require an explicit V2 spawn model when model overrides are exposed.
-    pub require_spawn_agent_model: Option<bool>,
-}
-
 /// Base config deserialized from ~/.codex/config.toml.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConfigToml {
-    /// Settings that only ASM reads.
-    pub asm: Option<AsmConfigToml>,
     /// Optional override of model selection.
     pub model: Option<String>,
     /// Launch-only settings for native runtimes, leaving standalone CLI settings unchanged.
@@ -311,6 +302,8 @@ pub struct ConfigToml {
     /// Selects advertised multi-agent v2 subagent models in the given order without
     /// restricting spawning. Omission uses picker-visible models. An empty list advertises none.
     pub subagent_model_list: Option<Vec<String>>,
+    /// Require an explicit V2 spawn model when model overrides are exposed.
+    pub require_spawn_agent_model: Option<bool>,
     /// Review model override used by the `/review` feature.
     pub review_model: Option<String>,
 

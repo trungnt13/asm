@@ -367,16 +367,6 @@
         }
       ]
     },
-    "AsmConfigToml": {
-      "additionalProperties": false,
-      "properties": {
-        "require_spawn_agent_model": {
-          "description": "Require an explicit V2 spawn model when model overrides are exposed.",
-          "type": "boolean"
-        }
-      },
-      "type": "object"
-    },
     "AsyncClassifierMode": {
       "description": "Legacy classifier modes retained for configuration and model-catalog compatibility.",
       "enum": [
@@ -8548,14 +8538,6 @@
       "description": "Optional product SKU forwarded on host-owned Codex Apps MCP requests.",
       "type": "string"
     },
-    "asm": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/AsmConfigToml"
-        }
-      ],
-      "description": "Settings that only ASM reads."
-    },
     "audio": {
       "allOf": [
         {
@@ -9842,6 +9824,10 @@
       ],
       "default": null,
       "description": "Experimental / do not use. Realtime websocket session selection. `version` controls v1/v2 and `type` controls conversational/transcription."
+    },
+    "require_spawn_agent_model": {
+      "description": "Require an explicit V2 spawn model when model overrides are exposed.",
+      "type": "boolean"
     },
     "responses": {
       "allOf": [
