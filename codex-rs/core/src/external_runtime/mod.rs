@@ -760,6 +760,7 @@ async fn run_conversation(
                                 .adapt_reasoning(
                                     turn,
                                     codex_config::System1Trigger::TurnStart,
+                                    /*pending_input*/ &[],
                                     cancellation,
                                     Some(supported),
                                 )

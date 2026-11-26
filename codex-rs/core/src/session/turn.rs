@@ -460,6 +460,7 @@ pub(crate) async fn run_turn(
             .adapt_reasoning(
                 &turn_context,
                 codex_config::System1Trigger::TurnStart,
+                /*pending_input*/ &[],
                 &cancellation_token,
                 /*native_efforts*/ None,
             )
@@ -661,6 +662,7 @@ pub(crate) async fn run_turn(
                     } else {
                         codex_config::System1Trigger::ToolResult
                     },
+                    &pending_input,
                     &cancellation_token,
                     /*native_efforts*/ None,
                 )
