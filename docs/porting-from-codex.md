@@ -68,6 +68,11 @@ Before PR readiness, use [asm-live-check](../.agents/skills/asm-live-check/SKILL
 
 After approved integration, reuse checks and the verified binary pair only with matching effective source, generated files, dependencies, toolchain, features, flags, and pair provenance. Preserve checkout-wrapper isolation; never copy fingerprints to fake freshness. For integration changes or version bumps, rebuild affected binaries and repeat affected checks.
 
+### Shared config compatibility
+
+- Put ASM-only keys at the top level of `config.toml`. Do not add them to upstream tables. Use an ASM-only profile for stock strict mode or warning-free startup.
+- Test shared config changes in separate private `CODEX_HOME` directories. Verify that ASM applies the key. Verify that stock `config/read` returns a non-default setting from the file. Startup alone is not a pass.
+
 ### Desktop SSH tests
 
 For isolated Desktop SSH tests, use [asm-desktop-ssh-test](../.agents/skills/asm-desktop-ssh-test/SKILL.md). Preserve the normal backend. Follow the build and [live-check](../.agents/skills/asm-live-check/SKILL.md) rules.
@@ -252,7 +257,9 @@ Delete every thread-private runtime file (linkage, Cursor configuration, diagnos
 - GLM 5.3 selects `fireworks`, alias `fireworks/glm-5.3`, and uses Code Mode only on Responses with Standard as its only catalog tier. Apply ordinary resume admission to saved GLM chats, with no exception for chats saved under a different provider.
 - Show picker aliases but retain canonical identity. Native aliases `claude/…` and `cursor/…` retain `claude-code/…` and `cursor-agent/…` IDs. Do not add HTTP bindings or change native model/runtime selection. Picker changes that require a new runtime fork the current context into the selected model. Blank sessions still start fresh. Existing same-provider in-place model changes stay in place.
 - Admit valid bound/native input and resume independently of the global HTTP-provider default. Validate saved/requested identities separately. Overrides cannot exempt unrelated saved chats. Preserve mandatory policy, configuration errors, missing-provider checks, and history/runtime boundaries. Require the current provider definition and valid configuration. Classify routes from in-memory bindings/runtime detection, not discovery. Unbound API models retain upstream saved-provider admission.
-- V2 `spawn_agent` requires `fork_turns="none"` or `"all"`; legacy positive integer strings still select full history. Roles configured with `fork_turns = "none"` always start fresh. Set `require_spawn_agent_model = true` under `[features.multi_agent_v2]` to require an explicit model on the V2 tool. This only applies when `expose_spawn_agent_model_overrides` is enabled; it does not change app-server RPCs or internal spawns.
+- V2 `spawn_agent` requires `fork_turns="none"` or `"all"`; legacy positive integer strings still select full history. Roles configured with `fork_turns = "none"` always start fresh.
+- Set the top-level `require_spawn_agent_model = true` before any TOML table header to require an explicit model on the V2 tool. This only applies when `expose_spawn_agent_model_overrides` is enabled; it does not change app-server RPCs or internal spawns. Remove the old key from `[features.multi_agent_v2]`: stock Codex rejects unknown keys in that table.
+- Stock Codex warns and ignores the top-level key in normal mode. For strict mode, put the key in `asm.config.toml` and select it only in ASM with `--profile asm`.
 - Cross-provider subagents use the same portable handoff for `fork_turns="all"`; `"none"` transfers no history. The child task is separate from inherited context. Preserve destination provider identity on resume. Bound models use their own provider-specific model manager, not parent discovery identity. Active Claude `all` requires a matching foreground call before steering is admitted. A replay acknowledgment does not establish which assistant request used that input; retry on a new turn.
 - For user-spawned children with a catalog-bound provider ID, require an explicitly bound model or native runtime, including descendants/cold resumes. Reject unbound selections before startup; do not infer reverse routing. Use a separate provider ID for unbound custom subagent models. Preserve ordinary main/internal-worker provider behavior.
 - Keep upstream catalog/API model types unchanged. Hiding bundled entries does not disable explicit selection.

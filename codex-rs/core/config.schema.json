@@ -3747,10 +3747,6 @@
           "description": "Preserve the parent's model-visible history on full forks and append child instructions. Defaults to true. Legacy compaction without a reusable context baseline still rebuilds.",
           "type": "boolean"
         },
-        "require_spawn_agent_model": {
-          "description": "Require an explicit model argument when the multi-agent V2 spawn tool exposes model overrides.",
-          "type": "boolean"
-        },
         "root_agent_usage_hint_text": {
           "type": "string"
         },
@@ -9828,6 +9824,10 @@
       ],
       "default": null,
       "description": "Experimental / do not use. Realtime websocket session selection. `version` controls v1/v2 and `type` controls conversational/transcription."
+    },
+    "require_spawn_agent_model": {
+      "description": "Require an explicit V2 spawn model when model overrides are exposed.",
+      "type": "boolean"
     },
     "responses": {
       "allOf": [

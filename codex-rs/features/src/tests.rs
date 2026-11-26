@@ -923,7 +923,6 @@ non_code_mode_only = true
             hide_spawn_agent_metadata: Some(true),
             expose_spawn_agent_model_overrides: Some(true),
             expose_spawn_agent_service_tier: Some(true),
-            require_spawn_agent_model: None,
             wait_agent_enabled: Some(false),
             interrupt_at_item_boundary: None,
             disable_native_tools: Some(true),

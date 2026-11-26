@@ -424,11 +424,6 @@ pub struct MultiAgentV2ConfigToml {
     /// Allow V2 `spawn_agent` to select a `service_tier` for one child. Defaults to false.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expose_spawn_agent_service_tier: Option<bool>,
-    #[schemars(
-        description = "Require an explicit model argument when the multi-agent V2 spawn tool exposes model overrides."
-    )]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub require_spawn_agent_model: Option<bool>,
     /// Expose the multi-agent v2 `wait_agent` tool.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_agent_enabled: Option<bool>,
