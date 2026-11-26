@@ -76,6 +76,15 @@ fn markdown_layout(markdown: &str, width: u16) -> TextLayout {
     )
 }
 
+fn markdown_layout_with_visible_destinations(markdown: &str, width: u16) -> TextLayout {
+    let lines = crate::markdown_render::render_markdown_lines_with_width_and_cwd(
+        markdown,
+        Some(usize::from(width)),
+        Some(Path::new("/")),
+    );
+    TextLayout::new(lines, width)
+}
+
 fn payload(layout: &TextLayout, range: std::ops::Range<usize>) -> (String, CopyFormat) {
     let mut lines = Vec::new();
     layout.copy_lines(range.clone(), "", &[], &mut lines);
@@ -102,6 +111,16 @@ fn partial_markup_is_balanced_and_preserves_selected_characters() {
             "[documentation](https://example.com)",
             "ment",                          // codespell:ignore ment
             "[ment](<https://example.com>)", // codespell:ignore ment
+        ),
+        (
+            "before [`guide`.md:2-4](guide.md:2-4) after",
+            "guide.md:2-4",
+            "[`guide`.md:2-4](<guide.md:2-4>)",
+        ),
+        (
+            "before [**guide**.md:2-4](guide.md:2-4) after",
+            "guide",
+            "[**guide**](<guide.md:2-4>)",
         ),
         ("[**label**](/repo/file.rs)", "label", "**label**"),
         (
@@ -147,7 +166,7 @@ fn inline_code_selection_copies_only_selected_content() {
         ),
     ] {
         for width in [18, 80] {
-            let layout = markdown_layout(source, width);
+            let layout = markdown_layout_with_visible_destinations(source, width);
             let start = layout.text().find(selected).expect(source);
             let copied = payload(&layout, start..start + selected.len());
             assert_eq!(copied, (selected.into(), CopyFormat::PlainText), "{source}");
@@ -166,14 +185,14 @@ fn inline_code_selection_copies_only_selected_content() {
 #[test]
 fn mixed_file_targets_preserve_markdown_escaping() {
     for (source, expected) in [
-        ("before [+](/+) after", "before + (+) after"),
-        ("before [1.)](</1.)>) after", "before 1.) (1.)) after"),
+        ("before [+](/+) after", "before + after"),
+        ("before [number](</1.)>) after", "before number (1.)) after"),
         (
             "| File |\n|---|\n| [`foo_bar!`](/repo/foo_bar!) |",
             "| File |\n|---|\n| `foo_bar!` (repo/foo\\_bar\\!) |",
         ),
     ] {
-        let layout = markdown_layout(source, /*width*/ 80);
+        let layout = markdown_layout_with_visible_destinations(source, /*width*/ 80);
         assert_eq!(
             payload(&layout, 0..layout.text().len()),
             (expected.into(), CopyFormat::Markdown),
@@ -551,7 +570,10 @@ fn link_entities_are_not_decoded_twice() {
 
 #[test]
 fn selected_local_link_keeps_one_visible_destination() {
-    let layout = markdown_layout("Open [**label**](/repo/file.rs).", /*width*/ 80);
+    let layout = markdown_layout_with_visible_destinations(
+        "Open [**label**](/repo/file.rs).",
+        /*width*/ 80,
+    );
     let copied = payload(&layout, 0..layout.text().len()).0;
     assert_eq!(copied, "Open **label** (repo/file.rs).");
     assert_eq!(
@@ -876,5 +898,21 @@ fn selected_list_and_code_containers_keep_their_structure() {
             crate::clipboard_html::render_markdown(expected),
             "{copied:?} from {source:?}"
         );
+    }
+}
+
+#[test]
+fn file_ranges_keep_hidden_destinations_when_copying_markdown() {
+    crate::markdown_render::preferences::set_document_links(/*enabled*/ true);
+    for dest in ["./src/search.ts#L42-L44", "./src/search.ts:42:5-44:10"] {
+        let link = format!("[src/search.ts:42-44](<{dest}>)");
+        for source in [&link, &format!("| Location |\n|---|\n| {link} |")] {
+            for width in [12, 80] {
+                let layout = markdown_layout(source, width);
+                let (copied, _) = payload(&layout, 0..layout.text().len());
+                assert_eq!(copied.matches(&link).count(), 1, "{copied}");
+                assert!(!layout.text().contains(dest));
+            }
+        }
     }
 }

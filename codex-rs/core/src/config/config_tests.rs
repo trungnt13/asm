@@ -12856,6 +12856,7 @@ async fn explicit_feature_config_is_normalized_by_requirements() -> std::io::Res
 [features]
 view_image = false
 shell_tool = true
+guardianv3.shadow_enabled = true
 "#,
     )?;
 
@@ -12868,6 +12869,7 @@ shell_tool = true
 [features]
 view_image = true
 shell_tool = false
+"guardianv3.shadow_enabled" = false
 "#,
             ),
         )
@@ -12876,6 +12878,7 @@ shell_tool = false
 
     assert!(config.features.enabled(Feature::ViewImage));
     assert!(!config.features.enabled(Feature::ShellTool));
+    assert!(!config.features.enabled(Feature::GuardianV3Shadow));
     assert!(
         !config
             .startup_warnings

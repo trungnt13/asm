@@ -107,7 +107,7 @@ impl App {
                 config.daybreak_enabled = false;
                 config.side_prompt = self.config.side_prompt.clone();
                 let selected_profile = self.selected_server_profile(thread_id);
-                let fork = match app_server
+                let mut fork = match app_server
                     .sidebar_fork(
                         self.local_settings.clone(),
                         config,
@@ -126,7 +126,7 @@ impl App {
                         return Ok(());
                     }
                 };
-                app_server.observe_sidebar_fork(&fork);
+                app_server.observe_sidebar_fork(&mut fork);
                 let storage = fork.storage;
                 let forked = fork.thread;
                 let replacement_id = forked.session.thread_id;

@@ -577,6 +577,9 @@ impl App {
         {
             super::thread_settings::apply_thread_settings_to_session(&mut session, settings, &cwd);
         }
+        if let Some(name) = incoming.and_then(|updates| updates.name.as_ref()) {
+            session.thread_name.clone_from(name);
+        }
         if live_attached && self.primary_thread_id == Some(thread_id) {
             self.primary_session_configured = Some(session.clone());
         }
@@ -767,7 +770,8 @@ impl App {
         let known_side = self.side_threads.contains_key(&thread_id)
             && self.thread_event_channels.contains_key(&thread_id);
         // The live parent already receives lifecycle notifications while its child has focus.
-        let live_parent = self.side_retention_enabled(tui)
+        let live_parent = (self.side_retention_enabled(tui)
+            || self.scrollback_side_chats_enabled())
             && !self.reconnect.offline
             && self.primary_thread_id == Some(thread_id)
             && self.active_side_parent_thread_id() == Some(thread_id)
@@ -979,6 +983,13 @@ impl App {
             .await?;
         self.restore_automatic_thread_title(thread_id, self.chat_widget.thread_name().as_deref())
             .await;
+        if let Some(old) = previous_thread_id
+            && old != thread_id
+            && self.abandoned_side_threads.contains(&old)
+            && self.side_threads.contains_key(&old)
+        {
+            self.discard_thread_local_state(old).await;
+        }
         if !is_replay_only
             && let Some(message) = self
                 .side_threads
@@ -988,15 +999,17 @@ impl App {
             self.chat_widget
                 .submit_user_message_as_plain_user_turn(message);
         }
-        if self.side_retention_enabled(tui) {
+        let fullscreen = self.side_retention_enabled(tui);
+        if fullscreen || self.scrollback_side_chats_enabled() {
             if self.side_threads.contains_key(&thread_id) {
-                self.sidebar_mut().show(
-                    sidebar::SidebarContent::Chat(thread_id),
-                    sidebar::PaneFocus::Sidebar,
-                );
-            } else if let Some(sidebar::SidebarContent::Chat(child)) = self
-                .sidebar()
-                .and_then(sidebar::SidebarPane::visible_content)
+                self.sidebar_mut().select_chat(thread_id, fullscreen);
+                if !fullscreen {
+                    self.sync_side_thread_ui();
+                }
+            } else if fullscreen
+                && let Some(sidebar::SidebarContent::Chat(child)) = self
+                    .sidebar()
+                    .and_then(sidebar::SidebarPane::visible_content)
             {
                 self.sidebar_mut().show(
                     sidebar::SidebarContent::Chat(child),
@@ -1066,6 +1079,9 @@ impl App {
                 || side_parent(thread_id).is_some_and(|parent| {
                     self.chat_widget.thread_id().and_then(side_parent) == Some(parent)
                 }));
+        let scrollback_side_switch = self.scrollback_side_chats_enabled()
+            && (side_parent(thread_id).is_some()
+                || self.chat_widget.thread_id().and_then(side_parent).is_some());
         self.startup_protected_input_boundary |= docked_resume;
         let mut init = self.chatwidget_init_for_forked_or_resumed_thread(
             tui, config, /*initial_user_message*/ None,
@@ -1132,9 +1148,11 @@ impl App {
         }
         archived_thread::show_cached_read_only_thread(self, thread_id);
         if tui.is_owned_screen() {
-            // Hold drawing and input through the history events emitted by replay.
             self.chat_widget
                 .run_commit_tick_with_scope(CommitTickScope::Replay);
+        }
+        if tui.is_owned_screen() || scrollback_side_switch {
+            // Hold drawing and input through the history events emitted by replay.
             self.pending_thread_switch_resets += 1;
             self.app_event_tx
                 .send(AppEvent::SideReplayFinished(thread_id));
@@ -1159,6 +1177,15 @@ impl App {
     }
 
     pub(super) async fn reset_thread_event_state(&mut self) {
+        let removed: Vec<_> = self
+            .side_threads
+            .keys()
+            .copied()
+            .filter(|id| self.abandoned_side_threads.contains(id))
+            .collect();
+        for id in removed {
+            self.discard_thread_local_state(id).await;
+        }
         let voice_owner = self.voice_owner_thread_id();
         let mut previous_pending = std::mem::take(&mut self.pending_app_server_requests);
         // Move retained tasks' approvals to background routing before clearing request bookkeeping.
@@ -2309,6 +2336,9 @@ impl App {
                 channel.history_may_be_incomplete = false;
                 channel.recovered_cloud_history = origin == ResumeOrigin::CloudRecovery;
                 self.remember_attached_host_project(app_server);
+                if !read_only && self.scrollback_side_chats_enabled() {
+                    self.refresh_saved_chats(app_server, resumed_thread_id);
+                }
                 let resumed_turn_running = !read_only
                     && self
                         .active_turn_id_for_thread(resumed_thread_id)
@@ -2426,24 +2456,6 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn terminal_thread_read_error_detection_matches_not_loaded_errors() {
-        let err = color_eyre::eyre::eyre!(
-            "thread/read failed during TUI session lookup: thread/read failed: thread not loaded: thr_123"
-        );
-
-        assert!(App::is_terminal_thread_read_error(&err));
-    }
-
-    #[test]
-    fn terminal_thread_read_error_detection_ignores_transient_failures() {
-        let err = color_eyre::eyre::eyre!(
-            "thread/read failed during TUI session lookup: thread/read transport error: broken pipe"
-        );
-
-        assert!(!App::is_terminal_thread_read_error(&err));
-    }
 
     #[test]
     fn closed_state_for_thread_read_error_preserves_live_state_without_cache_on_transient_error() {

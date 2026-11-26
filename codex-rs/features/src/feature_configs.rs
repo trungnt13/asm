@@ -338,11 +338,17 @@ where
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GuardianV3ConfigToml {
-    /// Keep each fresh root's Guardian board in memory until the runtime closes. Defaults to false.
+    /// Maximum evidence per root shadow board in MiB. Defaults to 32. Ignored in project config.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shadow_board_limit_mib: Option<NonZeroU32>,
+    /// Defaults to true for shadow boards and false for live boards. False disables shadow reviews.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message_board_in_memory: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
+    /// Run shadow reviews alongside Guardian V2 without changing approval decisions. Ignored in project config.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shadow_enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub housekeeper: Option<GuardianV3HousekeeperConfigToml>,
     #[serde(skip_serializing_if = "Option::is_none")]

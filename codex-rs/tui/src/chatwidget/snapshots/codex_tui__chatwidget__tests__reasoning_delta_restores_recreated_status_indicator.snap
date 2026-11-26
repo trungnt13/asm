@@ -11,3 +11,4 @@ expression: normalized_backend_snapshot(terminal.backend())
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  sol56 def·/tmp/project                                                        "
+"  ? for shortcuts                                                               "
