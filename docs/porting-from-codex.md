@@ -462,9 +462,9 @@ xhigh_effort_description = "Distinguishing plausible causes, reconciling interac
 max_effort_description = "Exceptionally difficult problems requiring the maximum supported reasoning budget."
 ```
 
-Before the first model request, weigh the reasoning needed to understand the task and choose an approach. Use low effort for a trivial request. On later requests, choose effort for the work that the current evidence allows. Use less effort for a routine action. Reassess when its result calls for analysis.
+Before the first model request, weigh the reasoning needed to understand the task and choose an approach. On later requests, budget for work the current evidence allows, not for completed work or analysis that must wait. For direct execution, use the lowest sufficient offered level. For settled work that still needs care, use the matching choice description.
 
-Keep the `turn_start` and `tool_result` triggers. For a later request with new user steering, use steering guidance even if tool results also arrived. Weigh what the user changed. Do not add a trigger, rubric field, or Decisions call.
+Keep the `turn_start` and `tool_result` triggers. For a later request with new user steering, use steering guidance. Weigh what the user changed and any analysis the existing evidence still requires. Do not add a trigger, rubric field, or Decisions call.
 
 Use configured `rubric_instructions` verbatim instead of the built-in rubric. In both backends, prefix decision instructions with trusted baseline context, separate from evidence:
 
