@@ -2,6 +2,7 @@ use super::decision_log::DecisionApiOutcome;
 use super::decision_log::DecisionDisposition;
 use super::decision_log::DecisionLog;
 use super::decision_log::DecisionPurpose;
+use super::input_queue::InputQueueEntry;
 use super::input_queue::TurnInput;
 use super::session::Session;
 use super::session::SessionConfiguration;
@@ -51,6 +52,7 @@ pub(super) struct System1Baseline(pub(super) Option<ReasoningEffort>);
 
 const RUBRIC_START: &str = "Start from task_baseline_effort, not last_effort. Keep the baseline unless concrete evidence warrants a change. Judge the whole next response: what must this model decide, produce, or verify?\n\n";
 const TURN_START_GUIDANCE: &str = "Weigh the reasoning needed to understand the request, resolve ambiguity, identify constraints, and choose an approach. Count that work even if the first visible action is a simple tool call. Match effort to the complexity and consequences of those decisions; a clear, trivial request can use the lowest sufficient effort.";
+const STEERING_GUIDANCE: &str = "The user sent new input during this turn. Compare the latest user message with the original task and decide what it changes. Use the lowest sufficient offered level for a straightforward adjustment. If the steer changes the goal, constraints, or approach, weigh the reasoning needed to revise the plan, even if the next action looks simple. Keep prior work that still applies.";
 const TOOL_RESULT_GUIDANCE: &str = "Choose effort for this response, not for the whole task. Read the latest evidence first and identify the next unfinished action. If the next response only executes an unambiguous action, such as opening the file named by a tool result, or reports an already verified result, choose the lowest sufficient offered level even if the overall task is hard or the previous effort was higher. If the latest result provides the evidence needed to answer, do not mistake the completed retrieval for the next action. When the answer depends on reconciling conflicting constraints or comparing plausible outcomes under uncertainty, use an offered level suited to substantive analysis, not the direct-execution level.";
 
 const RUBRIC_END: &str = "\n\nRaise effort when deeper reasoning is likely to materially improve the outcome. Consider whether the model must distinguish plausible causes, reconcile interacting constraints, or catch a subtle, consequential error. Move directly to the offered level that fits; do not escalate just because a higher level exists.
@@ -587,6 +589,7 @@ impl Session {
         self: &Arc<Self>,
         turn: &Arc<TurnContext>,
         trigger: System1Trigger,
+        pending_input: &[InputQueueEntry],
         cancellation: &CancellationToken,
         native_efforts: Option<&[&str]>,
     ) -> Option<ReasoningEffort> {
@@ -789,6 +792,14 @@ impl Session {
                                     instructions.push_str(RUBRIC_START);
                                     instructions.push_str(match trigger {
                                         System1Trigger::TurnStart => TURN_START_GUIDANCE,
+                                        System1Trigger::ToolResult
+                                            if pending_input.iter().any(|entry| {
+                                                matches!(
+                                                    &entry.input,
+                                                    TurnInput::UserInput { content, metadata, .. }
+                                                        if !content.is_empty() && metadata.origin.is_user()
+                                                )
+                                            }) => STEERING_GUIDANCE,
                                         System1Trigger::ToolResult => TOOL_RESULT_GUIDANCE,
                                     });
                                     instructions.push_str(RUBRIC_END);
