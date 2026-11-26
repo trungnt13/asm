@@ -69,7 +69,7 @@ pub(crate) struct WebSearchTool {
     pub(crate) originator: Option<String>,
 }
 
-impl<'call> ToolExecutor<ToolCall<'call>> for WebSearchTool {
+impl ToolExecutor for WebSearchTool {
     fn tool_name(&self) -> ToolName {
         if self.flat_tool {
             ToolName::plain("web_run")
@@ -132,10 +132,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for WebSearchTool {
         true
     }
 
-    fn handle<'a>(&'a self, call: ToolCall<'call>) -> codex_extension_api::ToolExecutorFuture<'a>
-    where
-        'call: 'a,
-    {
+    fn handle<'a>(&'a self, call: ToolCall<'a>) -> codex_extension_api::ToolExecutorFuture<'a> {
         Box::pin(self.handle_call(call))
     }
 }

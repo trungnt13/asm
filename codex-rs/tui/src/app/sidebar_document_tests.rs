@@ -220,7 +220,7 @@ async fn document_preview_scenario() -> Result<()> {
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!(visible, @"
-    guide.md × +
+    guide.md × + ›
     # Guide
     First section.
     ");
@@ -250,6 +250,7 @@ async fn document_preview_scenario() -> Result<()> {
         app.keymap.pager.scroll_down = vec![KeyBinding::from_event(key)];
         Box::pin(app.handle_tui_event(&mut tui, &mut server, TuiEvent::Key(key))).await?;
         let scrolled = side_frame(&mut app, &mut tui, size)?;
+        assert_eq!(scrolled.contains("Tab link"), key.code != KeyCode::Tab);
         assert!(!scrolled.contains("# Guide"), "{scrolled}");
         assert!(!scrolled.contains("Back to bottom"), "{scrolled}");
         Box::pin(app.handle_tui_event(&mut tui, &mut server, TuiEvent::Key(KeyCode::Home.into())))
@@ -285,6 +286,16 @@ async fn document_preview_scenario() -> Result<()> {
         .find_map(|line| line.find("Find: ").map(|start| line[start..].trim_end()))
         .expect("document Find editor");
     insta::assert_snapshot!(footer, @"Find: egg");
+    app.focus_workspace_composer(&mut tui);
+    assert_eq!(app.panel_focus(), Some(PaneFocus::Main));
+    let parked = side_frame(&mut app, &mut tui, size)?;
+    let sidebar = app.conversation_frame.panel_area().expect("document panel");
+    insta::assert_snapshot!(visible_sidebar_row(&tui, sidebar, sidebar.bottom() - 1), @"Find: egg");
+    assert!(!parked.contains("esc cancel"), "{parked}");
+    let pane = app.sidebar_mut();
+    pane.show(pane.visible_content().unwrap(), PaneFocus::Sidebar);
+    assert!(side_frame(&mut app, &mut tui, size)?.contains("Find: egg"));
+
     Box::pin(app.handle_tui_event(&mut tui, &mut server, TuiEvent::Key(KeyCode::Esc.into())))
         .await?;
     let select = crossterm::event::KeyEvent::new(KeyCode::F(8), KeyModifiers::NONE);
@@ -299,6 +310,12 @@ async fn document_preview_scenario() -> Result<()> {
     for key in [KeyCode::Char('v'), KeyCode::Right] {
         Box::pin(app.handle_tui_event(&mut tui, &mut server, TuiEvent::Key(key.into()))).await?;
     }
+    app.focus_workspace_composer(&mut tui);
+    let parked = side_frame(&mut app, &mut tui, size)?;
+    assert!(!parked.contains("q close"), "{parked}");
+    let pane = app.sidebar_mut();
+    pane.show(pane.visible_content().unwrap(), PaneFocus::Sidebar);
+    assert!(side_frame(&mut app, &mut tui, size)?.contains("q close"));
     app.reconnect.offline = true;
     let copy = crossterm::event::KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
     assert!(matches!(
@@ -392,6 +409,13 @@ async fn document_preview_scenario() -> Result<()> {
         .map(ratatui::buffer::Cell::symbol)
         .collect::<String>();
     insta::assert_snapshot!(highlighted, @"Next");
+    let line = visible_sidebar_row(&tui, sidebar, sidebar.bottom() - 1);
+    assert!(line.starts_with("esc clear link"), "{line}");
+    for key in [KeyCode::Esc, KeyCode::Tab] {
+        Box::pin(app.handle_tui_event(&mut tui, &mut server, TuiEvent::Key(key.into()))).await?;
+        assert_eq!(app.sidebar().unwrap().documents.len(), 1);
+    }
+
     for key in [KeyCode::Home, KeyCode::Enter] {
         assert!(
             Box::pin(app.handle_document_input(&mut tui, &mut server, &TuiEvent::Key(key.into())))
@@ -515,7 +539,7 @@ async fn document_preview_scenario() -> Result<()> {
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!(preview, @"
-    guide.md       ×   main.rs        ×                           +
+    guide.md       ×   main.rs        ×                        +  ›
     3 let value = 3;                                               ↑
     esc clear highlight · c copy path · p show path · ↑/↓ read
     f3 find · Tab link · f8 select
@@ -702,7 +726,7 @@ size 123
         .sidebar_tab_strip()
         .expect("tab strip");
     let narrow_labels = visible_sidebar_row(&tui, strip, strip.y);
-    insta::assert_snapshot!(narrow_labels, @"‹  f…eA/g…d ×   f…eB/g…d ×    +");
+    insta::assert_snapshot!(narrow_labels, @"‹  fe…eB/g…md ×            +  ›");
     let long_file = "Before the fold.\n\n".repeat(24);
     for directory in ["feature-alpha-build", "feature-beta-build"] {
         std::fs::create_dir_all(dir.path().join(directory))?;
@@ -729,7 +753,7 @@ size 123
         .sidebar_tab_strip()
         .expect("tab strip");
     let narrow_labels = visible_sidebar_row(&tui, strip, strip.y);
-    insta::assert_snapshot!(narrow_labels, @"‹  1:f…d/…d ×   2:f…d/…d ×    +");
+    insta::assert_snapshot!(narrow_labels, @"‹  2:f…ld/g…d ×            +  ›");
     // If resolution itself fails, there is no new tab in which to show the path.
     let tab_count = app.sidebar().unwrap().documents.len();
     app.open_document(
@@ -798,6 +822,45 @@ size 123
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!("refreshed_sidebar_at_reading_position", visible);
+    let document = app.sidebar().unwrap().visible_content();
+    for target in [
+        sidebar_input::SidebarTarget::Tab(crate::sidebar_tab_strip::TabTarget::Hide),
+        sidebar_input::SidebarTarget::Restore,
+    ] {
+        let area = app
+            .conversation_frame
+            .sidebar_targets
+            .iter()
+            .find_map(|(candidate, area)| (*candidate == target).then_some(*area))
+            .expect("painted sidebar control");
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            let event = MouseEvent {
+                kind,
+                column: area.x + 1,
+                row: area.y,
+                modifiers: KeyModifiers::NONE,
+            };
+            Box::pin(app.handle_tui_event(&mut tui, &mut server, TuiEvent::Mouse(event))).await?;
+        }
+        side_frame(&mut app, &mut tui, size)?;
+        if target == sidebar_input::SidebarTarget::Tab(crate::sidebar_tab_strip::TabTarget::Hide) {
+            app.chat_widget.apply_external_edit("/m".into());
+            side_frame(&mut app, &mut tui, size)?;
+            assert!(!app.chat_widget.no_modal_or_popup_active());
+            assert!(
+                !app.conversation_frame
+                    .sidebar_targets
+                    .iter()
+                    .any(|(target, _)| *target == sidebar_input::SidebarTarget::Restore)
+            );
+            app.chat_widget.apply_external_edit(String::new());
+            side_frame(&mut app, &mut tui, size)?;
+        }
+    }
+    assert!(app.sidebar().unwrap().visible_content() == document);
     server.shutdown().await?;
     Ok(())
 }

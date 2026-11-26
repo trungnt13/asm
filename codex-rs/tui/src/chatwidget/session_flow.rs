@@ -399,6 +399,7 @@ impl ChatWidget {
         self.status_state.suppressed_system1_turn_id = None;
         self.review = Default::default();
         self.transcript.take_active_cell();
+        self.transcript.pending_command_rows.clear();
         self.transcript.reset_copy_history();
         self.transcript.reset_turn_flags();
         for turn in retained_turns {

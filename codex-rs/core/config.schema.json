@@ -1098,6 +1098,9 @@
             "command_sessions_world_state": {
               "type": "boolean"
             },
+            "compact_filesystem_context": {
+              "type": "boolean"
+            },
             "compaction_image_budget": {
               "type": "boolean"
             },
@@ -8843,6 +8846,9 @@
           "type": "boolean"
         },
         "command_sessions_world_state": {
+          "type": "boolean"
+        },
+        "compact_filesystem_context": {
           "type": "boolean"
         },
         "compaction_image_budget": {

@@ -10,6 +10,7 @@ use super::*;
 const CELLS_PER_FRAME: usize = 32;
 
 struct PendingCell {
+    appended_result: bool,
     source: Arc<dyn HistoryCell>,
     owner: std::sync::Weak<dyn HistoryCell>,
 }
@@ -47,9 +48,27 @@ impl NativeHistory {
 
     pub(super) fn defer(&mut self, cell: &Arc<dyn HistoryCell>) {
         self.pending.push_back(PendingCell {
+            appended_result: false,
             source: cell.clone(),
             owner: Arc::downgrade(cell),
         });
+    }
+
+    /// A printed launch owns the result even when later entries delay its emission.
+    pub(super) fn defer_command_result(
+        &mut self,
+        owner: &Arc<dyn HistoryCell>,
+        result: &crate::exec_cell::ExecCell,
+    ) -> bool {
+        if self.pending.is_empty() {
+            return false;
+        }
+        self.pending.push_back(PendingCell {
+            appended_result: true,
+            source: Arc::new(result.clone()),
+            owner: Arc::downgrade(owner),
+        });
+        true
     }
 
     /// Replace an entirely unprinted stream with final source. For a partly printed stream, keep
@@ -71,6 +90,7 @@ impl NativeHistory {
             self.pending.insert(
                 index,
                 PendingCell {
+                    appended_result: false,
                     source: consolidated.clone(),
                     owner: Arc::downgrade(consolidated),
                 },
@@ -113,7 +133,8 @@ impl NativeHistory {
         let mut blocked = false;
         self.pending.retain(|entry| {
             blocked |= is_pending(entry.source.as_ref());
-            blocked
+            // Printed launches precede the blocker and replay with their results in place.
+            blocked && !entry.appended_result
         });
     }
 }
