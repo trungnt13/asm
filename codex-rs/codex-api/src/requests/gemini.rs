@@ -48,17 +48,15 @@ pub(crate) fn build_gemini_request(
         })
         .collect::<Vec<_>>();
     let (instructions, input) = project_steps(request)?;
-    let mut body = json!({
-        "model": request.model,
-        "input": input,
-        "store": false,
-        "stream": true,
-    });
+    let mut body = json!({"model": request.model});
+    body["input"] = Value::Array(input);
+    body["store"] = Value::Bool(false);
+    body["stream"] = Value::Bool(true);
     if !instructions.is_empty() {
-        body["system_instruction"] = json!(instructions);
+        body["system_instruction"] = Value::String(instructions);
     }
     if !tools.is_empty() {
-        body["tools"] = json!(tools);
+        body["tools"] = Value::Array(tools);
     }
     if let Some(effort) = request
         .reasoning
@@ -123,7 +121,8 @@ fn project_steps(request: &ResponsesApiRequest) -> Result<(String, Vec<Value>), 
                             .into_iter()
                             .map(|text| json!({"type":"text", "text":text}))
                             .collect::<Vec<_>>();
-                        let step = json!({"type": kind, "content":content});
+                        let mut step = json!({"type": kind});
+                        step["content"] = Value::Array(content);
                         if role == "assistant" {
                             steps.push(step);
                             continue;
@@ -177,7 +176,9 @@ fn project_steps(request: &ResponsesApiRequest) -> Result<(String, Vec<Value>), 
                 {
                     return Err(invalid_request("invalid saved Gemini tool call"));
                 }
-                steps.push(json!({"type":"function_call", "id": call_id, "name": name, "arguments": arguments}));
+                let mut step = json!({"type":"function_call", "id": call_id, "name": name});
+                step["arguments"] = arguments;
+                steps.push(step);
                 continue;
             }
             ResponseItem::FunctionCallOutput {

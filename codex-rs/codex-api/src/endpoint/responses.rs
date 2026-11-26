@@ -101,7 +101,7 @@ impl<T: HttpTransport> ResponsesClient<T> {
         mut extra_headers: HeaderMap,
         on_encoded: impl FnOnce(&bytes::Bytes),
     ) -> Result<ResponseStream, ApiError> {
-        let ((request, tool_names), path) = match api {
+        let ((projected_request, tool_names), path) = match api {
             FunctionApi::Chat => (build_chat_request(request)?, crate::CHAT_COMPLETIONS_PATH),
             FunctionApi::Gemini => {
                 extra_headers.insert("api-revision", HeaderValue::from_static("2026-05-20"));
@@ -111,8 +111,9 @@ impl<T: HttpTransport> ResponsesClient<T> {
                 )
             }
         };
-        let body = EncodedJsonBody::encode(&request)
+        let body = EncodedJsonBody::encode(&projected_request)
             .map_err(|err| ApiError::Stream(format!("failed to encode function request: {err}")))?;
+        drop(projected_request);
         on_encoded(body.shared_bytes());
         let (stream, request_started_at) = self
             .session
