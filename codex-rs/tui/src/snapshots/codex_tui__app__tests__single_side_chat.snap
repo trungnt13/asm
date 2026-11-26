@@ -3,7 +3,7 @@ source: tui/src/app/tests.rs
 assertion_line: 4521
 expression: panel
 ---
-parent-24                                                      │ Side chat  ×                    +
+parent-24                                                      │ Side chat  ×                 +  ›
                                                                │child-24
 parent-25                                                      │
                                                                │child-25

@@ -2,7 +2,7 @@
 source: tui/src/app/sidebar_agent_status_tests.rs
 expression: "crate::chatwidget::tests::helpers::normalize_agent_center_snapshot(screen.replace(&child.to_string(),\n\"[agent id]\").replace(env!(\"CARGO_PKG_VERSION\"), \"<VERSION>\"))"
 ---
-                                                                                                                       │ reviewer      ×                                         +
+                                                                                                                       │ reviewer      ×                                      +  ›
   >_ ASM (v<VERSION>)                                                                                            │esc back to agents · Watch only
      /tmp/project                                                                                                      │
                                                                                                                        │  >_ ASM (v<VERSION>)
