@@ -68,6 +68,11 @@ Before PR readiness, use [asm-live-check](../.agents/skills/asm-live-check/SKILL
 
 After approved integration, reuse checks and the verified binary pair only with matching effective source, generated files, dependencies, toolchain, features, flags, and pair provenance. Preserve checkout-wrapper isolation; never copy fingerprints to fake freshness. For integration changes or version bumps, rebuild affected binaries and repeat affected checks.
 
+### Shared config compatibility
+
+- Keep `config.toml` loadable by the stock Codex app-server used by Desktop. Put new ASM-only keys at the top level, not inside upstream-owned tables. Stock Codex can reject unknown keys in those tables and fall back to defaults. If stock uses strict validation or must start without warnings, put ASM-only keys in a profile file selected only by ASM.
+- For changes that affect shared config, use separate private `CODEX_HOME` directories with the same minimal representative config. Confirm the ASM candidate applies the setting and the stock app-server's `config/read` preserves a non-default upstream setting. Startup alone is not proof: fail the check if stock discards the config or falls back to defaults. Keep the personal config untouched.
+
 ### Desktop SSH tests
 
 For isolated Desktop SSH tests, use [asm-desktop-ssh-test](../.agents/skills/asm-desktop-ssh-test/SKILL.md). Preserve the normal backend. Follow the build and [live-check](../.agents/skills/asm-live-check/SKILL.md) rules.
