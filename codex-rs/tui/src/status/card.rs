@@ -75,8 +75,26 @@ pub(crate) struct StatusTokenUsageData {
 
 #[derive(Debug)]
 struct StatusRateLimitState {
+    account: Option<StatusAccountDisplay>,
     rate_limits: StatusRateLimitData,
     refreshing_rate_limits: bool,
+}
+
+impl StatusRateLimitState {
+    /// Returns whether the account label changed in the rendered card.
+    fn update_quota_plan(&mut self, quota_plan: Option<PlanType>) -> bool {
+        let (Some(StatusAccountDisplay::ChatGpt { plan, .. }), Some(quota_plan)) =
+            (&mut self.account, quota_plan)
+        else {
+            return false;
+        };
+        let label = super::plan_type_display_name(quota_plan);
+        if plan.as_ref() == Some(&label) {
+            return false;
+        }
+        *plan = Some(label);
+        true
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -103,8 +121,9 @@ impl StatusHistoryHandle {
     pub(crate) fn finish_rate_limit_refresh(
         &self,
         rate_limits: &[RateLimitSnapshotDisplay],
+        quota_plan: Option<PlanType>,
         now: DateTime<Local>,
-    ) {
+    ) -> bool {
         let rate_limits = if rate_limits.len() <= 1 {
             compose_rate_limit_data(rate_limits.first(), now)
         } else {
@@ -118,6 +137,7 @@ impl StatusHistoryHandle {
             .expect("status history rate-limit state poisoned");
         state.rate_limits = rate_limits;
         state.refreshing_rate_limits = false;
+        state.update_quota_plan(quota_plan)
     }
 
     pub(crate) fn set_thread_usage(
@@ -140,7 +160,6 @@ struct StatusHistoryCell {
     model_provider: Option<String>,
     remote_connection: Option<RemoteConnectionStatus>,
     show_chatgpt_usage_link: bool,
-    account: Option<StatusAccountDisplay>,
     thread_name: Option<String>,
     session_id: Option<String>,
     forked_from: Option<String>,
@@ -160,7 +179,7 @@ pub(crate) fn new_status_output(
     thread_name: Option<String>,
     forked_from: Option<ThreadId>,
     rate_limits: Option<&RateLimitSnapshotDisplay>,
-    _plan_type: Option<PlanType>,
+    quota_plan: Option<PlanType>,
     now: DateTime<Local>,
     model_name: &str,
     collaboration_mode: Option<&str>,
@@ -176,7 +195,7 @@ pub(crate) fn new_status_output(
         thread_name,
         forked_from,
         snapshots,
-        _plan_type,
+        quota_plan,
         now,
         model_name,
         collaboration_mode,
@@ -196,7 +215,7 @@ pub(crate) fn new_status_output_with_rate_limits(
     thread_name: Option<String>,
     forked_from: Option<ThreadId>,
     rate_limits: &[RateLimitSnapshotDisplay],
-    _plan_type: Option<PlanType>,
+    quota_plan: Option<PlanType>,
     now: DateTime<Local>,
     model_name: &str,
     collaboration_mode: Option<&str>,
@@ -215,7 +234,7 @@ pub(crate) fn new_status_output_with_rate_limits(
         thread_name,
         forked_from,
         rate_limits,
-        _plan_type,
+        quota_plan,
         now,
         model_name,
         collaboration_mode,
@@ -240,7 +259,7 @@ pub(crate) fn new_status_output_with_rate_limits_handle(
     thread_name: Option<String>,
     forked_from: Option<ThreadId>,
     rate_limits: &[RateLimitSnapshotDisplay],
-    _plan_type: Option<PlanType>,
+    quota_plan: Option<PlanType>,
     now: DateTime<Local>,
     model_name: &str,
     collaboration_mode: Option<&str>,
@@ -262,7 +281,7 @@ pub(crate) fn new_status_output_with_rate_limits_handle(
         thread_name,
         forked_from,
         rate_limits,
-        _plan_type,
+        quota_plan,
         now,
         model_name,
         collaboration_mode,
@@ -295,7 +314,7 @@ impl StatusHistoryCell {
         thread_name: Option<String>,
         forked_from: Option<ThreadId>,
         rate_limits: &[RateLimitSnapshotDisplay],
-        _plan_type: Option<PlanType>,
+        quota_plan: Option<PlanType>,
         now: DateTime<Local>,
         model_name: &str,
         collaboration_mode: Option<&str>,
@@ -426,10 +445,12 @@ impl StatusHistoryCell {
         } else {
             compose_rate_limit_data_many(rate_limits, now)
         };
-        let rate_limit_state = Arc::new(RwLock::new(StatusRateLimitState {
+        let mut rate_limit_state = StatusRateLimitState {
+            account,
             rate_limits,
             refreshing_rate_limits,
-        }));
+        };
+        rate_limit_state.update_quota_plan(quota_plan);
         let agents_summary = Arc::new(RwLock::new(agents_summary));
         let thread_usage = StatusThreadUsage::default();
 
@@ -442,13 +463,12 @@ impl StatusHistoryCell {
             model_provider,
             remote_connection: remote_connection.cloned(),
             show_chatgpt_usage_link,
-            account,
             thread_name,
             session_id,
             forked_from,
             token_usage,
             agents_summary,
-            rate_limit_state,
+            rate_limit_state: Arc::new(RwLock::new(rate_limit_state)),
             thread_usage,
         }
     }
@@ -791,19 +811,27 @@ impl StatusHistoryCell {
         }
         let mut lines = Vec::new();
 
-        let account_value = self.account.as_ref().map(|account| match account {
-            StatusAccountDisplay::ChatGpt { email, plan, .. } => match (email, plan) {
-                (Some(email), Some(plan)) => format!("{email} ({plan})"),
-                (Some(email), None) => email.clone(),
-                (None, Some(plan)) => plan.clone(),
-                (None, None) => "ChatGPT".to_string(),
-            },
-            StatusAccountDisplay::ApiKey => {
-                "API key configured (run asm login to use ChatGPT)".to_string()
-            }
-        });
+        #[expect(clippy::expect_used)]
+        let rate_limit_state = self
+            .rate_limit_state
+            .read()
+            .expect("status history rate-limit state poisoned");
+        let account_value = rate_limit_state
+            .account
+            .as_ref()
+            .map(|account| match account {
+                StatusAccountDisplay::ChatGpt { email, plan, .. } => match (email, plan) {
+                    (Some(email), Some(plan)) => format!("{email} ({plan})"),
+                    (Some(email), None) => email.clone(),
+                    (None, Some(plan)) => plan.clone(),
+                    (None, None) => "ChatGPT".to_string(),
+                },
+                StatusAccountDisplay::ApiKey => {
+                    "API key configured (run asm login to use ChatGPT)".to_string()
+                }
+            });
 
-        let workspace = match &self.account {
+        let workspace = match &rate_limit_state.account {
             Some(StatusAccountDisplay::ChatGpt { workspace, .. }) => workspace.as_deref(),
             _ => None,
         };
@@ -814,11 +842,6 @@ impl StatusHistoryCell {
             .collect();
         let mut seen: BTreeSet<String> = labels.iter().cloned().collect();
         let thread_name = self.thread_name.as_deref().filter(|name| !name.is_empty());
-        #[expect(clippy::expect_used)]
-        let rate_limit_state = self
-            .rate_limit_state
-            .read()
-            .expect("status history rate-limit state poisoned");
         #[expect(clippy::expect_used)]
         let agents_summary = self
             .agents_summary
@@ -917,7 +940,10 @@ impl StatusHistoryCell {
 
         lines.push(Line::from(Vec::<Span<'static>>::new()));
         // Hide token usage only for ChatGPT subscribers
-        if !matches!(self.account, Some(StatusAccountDisplay::ChatGpt { .. })) {
+        if !matches!(
+            rate_limit_state.account,
+            Some(StatusAccountDisplay::ChatGpt { .. })
+        ) {
             lines.push(formatter.line("Token usage", self.token_usage_spans()));
         }
 

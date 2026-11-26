@@ -594,6 +594,11 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
     crate::terminal_palette::set_default_colors_from_startup_probe(/*colors*/ None);
 
     let mut tui = CustomTerminal::with_options_and_cursor_position(backend, cursor_pos)?;
+    #[cfg(unix)]
+    let implicit_bidi = startup_probe.implicit_bidi;
+    #[cfg(not(unix))]
+    let implicit_bidi = None;
+    tui.bidi_layout = terminal_capabilities::needs_bidi_layout(implicit_bidi);
     tui.virtual_image_base = session.virtual_image_base();
     let stderr_guard = terminal_stderr::TerminalStderrGuard::install()?;
     let initialized_terminal = InitializedTerminal {
@@ -1170,21 +1175,19 @@ impl Tui {
     }
 
     pub fn event_stream(&self) -> Pin<Box<dyn Stream<Item = TuiEvent> + Send + 'static>> {
-        #[cfg(unix)]
-        let stream = TuiEventStream::new(
+        Box::pin(self.input_stream())
+    }
+
+    pub(crate) fn input_stream(&self) -> TuiEventStream {
+        TuiEventStream::new(
             self.event_broker.clone(),
             self.draw_tx.subscribe(),
             self.terminal_focused.clone(),
+            #[cfg(unix)]
             self.suspend_context.clone(),
+            #[cfg(unix)]
             self.alt_screen_active.clone(),
-        );
-        #[cfg(not(unix))]
-        let stream = TuiEventStream::new(
-            self.event_broker.clone(),
-            self.draw_tx.subscribe(),
-            self.terminal_focused.clone(),
-        );
-        Box::pin(stream)
+        )
     }
 
     /// Overlays and in-place history edits can flush a replay before the scheduled draw.

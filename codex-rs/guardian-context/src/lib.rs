@@ -25,6 +25,9 @@ use transcript::ConversationTranscriptSection;
 
 mod audio_transcripts;
 mod native_tool_call;
+mod subagent_reply;
+pub use subagent_reply::is_encrypted_subagent_reply;
+pub use subagent_reply::subagent_reply_output;
 
 pub use action::ActionPresentation;
 pub use action::EnclosingCall;
@@ -52,6 +55,7 @@ pub use entry::TranscriptContent;
 pub use history::TranscriptHistory;
 pub use transcript::ConversationTranscriptConfig;
 pub use transcript::ConversationTranscriptOptions;
+pub use transcript::MANUAL_APPROVAL_CONTENT_KIND;
 pub use transcript::MANUAL_APPROVAL_DEVELOPER_PREFIX;
 pub use transcript::TranscriptEntryLimits;
 pub use transcript::TranscriptRetentionConfig;

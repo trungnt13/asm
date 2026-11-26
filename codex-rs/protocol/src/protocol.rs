@@ -106,6 +106,8 @@ pub use crate::approvals::NetworkPolicyAmendment;
 pub use crate::approvals::NetworkPolicyRuleAction;
 pub use crate::environment::EnvironmentConfig;
 pub use crate::environment::EnvironmentConfigState;
+pub use crate::environment::EnvironmentPluginConfig;
+pub use crate::environment::EnvironmentPluginsConfig;
 pub use crate::environment::TurnEnvironmentRequest;
 pub use crate::environment::TurnEnvironmentRequests;
 pub use crate::environment::TurnEnvironmentSelection;
@@ -2439,6 +2441,13 @@ pub struct ModelVerificationEvent {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
 #[serde(from = "StoredTargetedModeration")]
 pub struct TargetedAnswerModeration {
+    #[serde(
+        rename = "promptWellbeingResults",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(optional)]
+    pub prompt_wellbeing_results: Option<Vec<crate::items::PromptWellbeingResult>>,
     pub item_id: String,
     pub moderated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2457,6 +2466,7 @@ impl From<StoredTargetedModeration> for TargetedAnswerModeration {
     fn from(value: StoredTargetedModeration) -> Self {
         Self {
             item_id: value.item_id,
+            prompt_wellbeing_results: value.decision.prompt_wellbeing_results,
             moderated: value.decision.moderated,
             display: value.decision.display,
         }

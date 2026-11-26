@@ -9,6 +9,7 @@ use super::token_budget::has_explicit_settings;
 use super::token_budget::official_context_is_eligible;
 use super::token_budget::resolve_token_budget;
 use super::*;
+use crate::agent::model_catalog::turn_model_catalog;
 use crate::config::TokenBudgetConfig;
 use crate::cyber_access_program;
 use crate::environment_selection::EnvironmentAttachment;
@@ -32,6 +33,7 @@ use codex_file_system::EnvironmentAccess;
 use codex_file_system::FileSystemEnvironmentAccessor;
 use codex_file_system::FileSystemSandboxContext;
 use codex_model_provider::SharedModelProvider;
+use codex_model_provider_info::WireApi;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
@@ -371,6 +373,10 @@ pub(crate) struct NewTurnContextOptions {
     pub(crate) goal_daybreak: Option<crate::GoalDaybreakSnapshot>,
 }
 
+/// Unrecorded input shared with cleanup, even after the active task is detached.
+#[derive(Clone)]
+struct PendingInitialInput(Vec<TurnInput>);
+
 /// The context needed for a single turn of the thread.
 #[derive(Debug)]
 pub struct TurnContext {
@@ -424,6 +430,7 @@ pub struct TurnContext {
     // so owner-provided environment settings govern the remaining sandbox decisions.
     pub(crate) windows_sandbox_level: WindowsSandboxLevel,
     pub(crate) available_models: Vec<ModelPreset>,
+    pub(crate) subagent_context_windows: Arc<HashMap<String, String>>,
     pub(crate) final_output_json_schema: Option<Value>,
     pub(crate) prompt_cache_ttl: Option<crate::PromptCacheTtl>,
     pub(crate) turn_metadata_state: Arc<TurnMetadataState>,
@@ -477,6 +484,17 @@ impl TurnContext {
         )
     }
 
+    pub(crate) fn park_initial_input(&self, input: Vec<TurnInput>) {
+        let previous = self.extension_data.insert(PendingInitialInput(input));
+        debug_assert!(previous.is_none());
+    }
+
+    pub(crate) fn take_initial_input(&self) -> Option<Vec<TurnInput>> {
+        self.extension_data
+            .remove::<PendingInitialInput>()
+            .map(|input| Arc::unwrap_or_clone(input).0)
+    }
+
     /// Returns the resolved causal root for this admitted turn.
     pub(crate) fn root_turn_id(&self) -> String {
         self.turn_metadata_state
@@ -525,6 +543,7 @@ impl TurnContext {
             originator: self.originator.clone(),
             initial_environments: self.initial_environments.clone(),
             available_models,
+            subagent_context_windows: Arc::default(),
             current_date: self.current_date.clone(),
             timezone: self.timezone.clone(),
             app_server_client_name: self.app_server_client_name.clone(),
@@ -924,12 +943,19 @@ impl TurnContext {
         };
         config.model_reasoning_effort = reasoning_effort.clone();
 
-        let available_models = models_manager
-            .list_models(
+        let active_models = models_manager
+            .raw_model_catalog(
                 RefreshStrategy::OnlineIfUncached,
                 config.http_client_factory(),
             )
-            .await;
+            .await
+            .models;
+        let (available_models, subagent_context_windows) = turn_model_catalog(
+            models_manager.as_ref(),
+            active_models,
+            &config,
+            self.multi_agent_version,
+        );
         let model_info = Arc::new(model_info);
         let mut selected = self.initial_settings.selected().clone();
         selected.collaboration_mode = selected.collaboration_mode.with_updates(
@@ -980,6 +1006,7 @@ impl TurnContext {
             network: self.network.clone(),
             windows_sandbox_level: self.windows_sandbox_level,
             available_models,
+            subagent_context_windows,
             final_output_json_schema: self.final_output_json_schema.clone(),
             prompt_cache_ttl: self.prompt_cache_ttl,
             turn_metadata_state: self.turn_metadata_state.clone(),
@@ -1166,7 +1193,12 @@ impl Session {
         let model_info = &step_settings.model_info;
         let session_telemetry_for_context = step_settings.telemetry(session_telemetry);
         let session_source = session_configuration.session_source.clone();
-        let available_models = models_manager.try_list_models().unwrap_or_default();
+        let (available_models, subagent_context_windows) = turn_model_catalog(
+            models_manager.as_ref(),
+            models_manager.try_get_remote_models().unwrap_or_default(),
+            &per_turn_config,
+            multi_agent_version,
+        );
 
         let mut per_turn_config = per_turn_config;
         let configured_token_budget = per_turn_config.token_budget.clone();
@@ -1272,6 +1304,7 @@ impl Session {
             network,
             windows_sandbox_level: session_configuration.windows_sandbox_level,
             available_models,
+            subagent_context_windows,
             final_output_json_schema: None,
             prompt_cache_ttl: None,
             turn_metadata_state,
@@ -1635,8 +1668,9 @@ impl Session {
                 .await;
         }
 
-        if let Some(message) =
-            unsupported_code_mode_warning(tc.model_info(), tc.config.features.get())
+        if tc.provider.info().wire_api != WireApi::GeminiInteractions
+            && let Some(message) =
+                unsupported_code_mode_warning(tc.model_info(), tc.config.features.get())
         {
             self.send_event(tc, EventMsg::Warning(WarningEvent { message }))
                 .await;

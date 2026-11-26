@@ -1,5 +1,11 @@
 pub(crate) fn compact_model_name(name: &str) -> String {
     let name = name.to_lowercase();
+    if matches!(
+        name.as_str(),
+        "gemini-4-neon" | "gemini 4 neon" | "gemini neon 4"
+    ) {
+        return "neo4".to_string();
+    }
     let name = name.strip_prefix("gpt-").unwrap_or(&name);
     let family: String = name
         .chars()

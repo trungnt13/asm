@@ -1,8 +1,10 @@
 //! Direct review preserves live action rendering without executing commands or applying patches.
 
 use anyhow::Result;
+use codex_core::CodexThread;
 use codex_core::config::Constrained;
 use codex_core::guardian_review::GuardianReviewResult;
+use codex_core::guardian_review::RecordedReviewMode;
 use codex_features::Feature;
 use codex_history::RolloutItem;
 use codex_protocol::ThreadId;
@@ -24,6 +26,21 @@ use core_test_support::test_codex::test_codex;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
+
+pub(in crate::suite) async fn assess_with_transcript_reviewer(
+    thread: &CodexThread,
+    tool_call: &ResponseItem,
+) -> codex_protocol::error::Result<GuardianReviewResult> {
+    thread
+        .review_recorded_call(
+            tool_call,
+            RecordedReviewMode::Transcript {
+                root_evidence: None,
+            },
+            &CancellationToken::new(),
+        )
+        .await
+}
 
 #[tokio::test]
 async fn direct_patch_review_assesses_writable_file_without_writes() -> Result<()> {
@@ -67,9 +84,7 @@ async fn direct_patch_review_assesses_writable_file_without_writes() -> Result<(
         "input": "*** Begin Patch\n*** Update File: guardian-skipped.txt\n@@\n-before\n+after\n*** End Patch",
     }))?;
     assert_eq!(
-        test.codex
-            .guardian_review(&tool_call, &CancellationToken::new())
-            .await?,
+        assess_with_transcript_reviewer(&test.codex, &tool_call).await?,
         GuardianReviewResult {
             call_id: "patch-skip".to_owned(),
             assessment: serde_json::from_value(assessment)?,
@@ -127,9 +142,7 @@ async fn direct_permissions_review_returns_assessment_when_policy_disallows_requ
         "arguments": r#"{"permissions":{"network":{"enabled":true}}}"#,
     }))?;
     assert_eq!(
-        test.codex
-            .guardian_review(&tool_call, &CancellationToken::new())
-            .await?,
+        assess_with_transcript_reviewer(&test.codex, &tool_call).await?,
         GuardianReviewResult {
             call_id: "permissions-review".into(),
             assessment: serde_json::from_value(assessment)?,
@@ -217,9 +230,7 @@ prefix_rule(pattern=["git", "init", "guardian-rewritten"], decision="prompt")
         .inject_response_items(vec![tool_call.clone()])
         .await?;
     assert_eq!(
-        test.codex
-            .guardian_review(&tool_call, &CancellationToken::new())
-            .await?,
+        assess_with_transcript_reviewer(&test.codex, &tool_call).await?,
         GuardianReviewResult {
             call_id: "hook-review".to_owned(),
             assessment: serde_json::from_value(assessment)?,
@@ -307,9 +318,7 @@ async fn direct_exec_review_honors_hook_denial_before_assessment() -> Result<()>
         "type": "function_call", "call_id": "hook-review", "name": "exec_command",
         "arguments": r#"{"cmd":"git init guardian-original"}"#,
     }))?;
-    let error = test
-        .codex
-        .guardian_review(&tool_call, &CancellationToken::new())
+    let error = assess_with_transcript_reviewer(&test.codex, &tool_call)
         .await
         .expect_err("hook must reject the call before Guardian can assess it");
     assert!(matches!(

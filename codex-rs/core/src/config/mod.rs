@@ -1942,6 +1942,12 @@ impl Config {
                 .enabled(Feature::GuardianNativeMultiAgentHistory)
     }
 
+    /// Both the reviewed thread and the reviewer must support encrypted agent history.
+    pub fn guardian_quotes_subagent_replies(&self, reviewer_provider_id: &str) -> bool {
+        self.guardian_native_multi_agent_history_enabled()
+            && reviewer_provider_id == OPENAI_PROVIDER_ID
+    }
+
     pub(crate) fn multi_agent_version_override(&self) -> Option<MultiAgentVersion> {
         if self.features.enabled(Feature::MultiAgentV2) {
             Some(MultiAgentVersion::V2)
@@ -2006,9 +2012,18 @@ impl Config {
         workspace_roots
     }
 
+    pub(crate) fn inherited_subagent_context_window(&self) -> Option<i64> {
+        if self.features.enabled(Feature::SubagentDefaultContextLimits) {
+            None
+        } else {
+            self.model_context_window
+        }
+    }
+
     pub fn to_models_manager_config(&self) -> ModelsManagerConfig {
         ModelsManagerConfig {
             chat_completions: self.model_provider.wire_api == WireApi::ChatCompletions,
+            gemini_interactions: self.model_provider.wire_api == WireApi::GeminiInteractions,
             model_context_window: self.model_context_window,
             model_auto_compact_token_limit: self.model_auto_compact_token_limit,
             tool_output_token_limit: self.tool_output_token_limit,
@@ -3171,9 +3186,7 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
         hide_spawn_agent_metadata,
         expose_spawn_agent_model_overrides,
         expose_spawn_agent_service_tier,
-        require_spawn_agent_model: base
-            .and_then(|config| config.require_spawn_agent_model)
-            .unwrap_or_default(),
+        require_spawn_agent_model: config_toml.require_spawn_agent_model.unwrap_or_default(),
         subagent_model_list: config_toml.subagent_model_list.clone(),
         wait_agent_enabled,
         interrupt_at_item_boundary,

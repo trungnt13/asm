@@ -206,6 +206,7 @@ impl ResolvedStepSettings {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ModelInfoOverrides {
     chat_completions: bool,
+    gemini_interactions: bool,
     pub(crate) context_window: Option<i64>,
     // Keep model-specific child limits separate from the inherited scalar fallback.
     pub(crate) subagent_context_windows: HashMap<String, i64>,
@@ -218,6 +219,7 @@ impl From<ModelsManagerConfig> for ModelInfoOverrides {
     fn from(config: ModelsManagerConfig) -> Self {
         Self {
             chat_completions: config.chat_completions,
+            gemini_interactions: config.gemini_interactions,
             context_window: config.model_context_window,
             subagent_context_windows: HashMap::new(),
             auto_compact_token_limit: config.model_auto_compact_token_limit,
@@ -254,6 +256,7 @@ impl ModelInfoOverrides {
     ) -> ModelsManagerConfig {
         ModelsManagerConfig {
             chat_completions: self.chat_completions,
+            gemini_interactions: self.gemini_interactions,
             model_context_window: self
                 .subagent_context_windows
                 .get(model)

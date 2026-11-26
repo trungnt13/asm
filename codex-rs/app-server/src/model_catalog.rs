@@ -170,7 +170,7 @@ impl ModelCatalog {
             .map(|entry| Arc::unwrap_or_clone(entry.model))
             .collect();
         let mut presets = models_manager.build_available_models(models);
-        if config.model_provider.wire_api == WireApi::ChatCompletions {
+        if config.model_provider.wire_api != WireApi::Responses {
             for preset in &mut presets {
                 preset.input_modalities = vec![InputModality::Text];
             }

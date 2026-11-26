@@ -565,11 +565,21 @@ impl ModelInfo {
         self.context_window.or(self.max_context_window)
     }
 
+    pub fn clamp_context_window(&self, context_window: i64) -> i64 {
+        self.max_context_window
+            .map_or(context_window, |max| context_window.min(max))
+    }
+
     /// Context available to inference after reserving this model's configured headroom.
     pub fn usable_context_window(&self) -> Option<i64> {
-        self.resolved_context_window().map(|context_window| {
-            context_window.saturating_mul(self.effective_context_window_percent) / 100
-        })
+        self.usable_context_window_with_override(/*context_window*/ None)
+    }
+
+    pub fn usable_context_window_with_override(&self, context_window: Option<i64>) -> Option<i64> {
+        context_window
+            .map(|window| self.clamp_context_window(window))
+            .or_else(|| self.resolved_context_window())
+            .map(|window| window.saturating_mul(self.effective_context_window_percent) / 100)
     }
 
     pub fn auto_compact_token_limit(&self) -> Option<i64> {

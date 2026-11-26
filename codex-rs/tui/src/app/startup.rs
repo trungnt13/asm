@@ -1357,8 +1357,7 @@ See the Codex keymap documentation for supported actions and examples."
         if let Err(err) = app.render_startup_frame(tui, &app_event_rx) {
             return shutdown_on_startup_error(app_server, &mut other_backends, err).await;
         }
-        let tui_events = tui.event_stream();
-        tokio::pin!(tui_events);
+        let mut tui_events = tui.input_stream();
         tracing::info!(
             duration_ms = %(startup_elapsed_before_app + startup_started_at.elapsed()).as_millis(),
             bootstrap_ms = %bootstrap_ms,
@@ -1378,6 +1377,8 @@ See the Codex keymap documentation for supported actions and examples."
                 app.app_event_tx.clone(),
                 app.chat_widget.security_setup_request_id,
             );
+        }
+        if app.chat_widget.should_prefetch_rate_limits() {
             let reset_hint_request_id = app.chat_widget.start_rate_limit_reset_startup_check();
             app.refresh_rate_limits(
                 &app_server,
@@ -1654,6 +1655,7 @@ See the Codex keymap documentation for supported actions and examples."
                     cloud_inventory_owner = cloud_owner;
                     cloud_inventory_poll.reset();
                 }
+                tui_events.coalesce_divider_drags = app.divider_drag.is_some();
                 let control = select! {
                     // Leave the previous frame visible and let other app work run between batches.
                     Some(transition) = std::future::ready(app.pending_input_drain), if app.pending_input_drain.is_some() => {

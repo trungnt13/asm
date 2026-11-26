@@ -449,6 +449,7 @@ pub struct GuardianReviewEventParams {
     pub guardian_context_mode: Option<&'static str>,
     pub thread_id: String,
     pub turn_id: String,
+    pub root_turn_id: Option<String>,
     pub review_id: String,
     pub target_item_id: Option<String>,
     pub approval_request_source: GuardianApprovalRequestSource,
@@ -489,6 +490,7 @@ pub struct GuardianReviewEventParams {
 pub struct GuardianReviewTrackContext {
     thread_id: String,
     turn_id: String,
+    root_turn_id: Option<String>,
     review_id: String,
     target_item_id: Option<String>,
     approval_request_source: GuardianApprovalRequestSource,
@@ -498,9 +500,11 @@ pub struct GuardianReviewTrackContext {
 }
 
 impl GuardianReviewTrackContext {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         thread_id: String,
         turn_id: String,
+        root_turn_id: Option<String>,
         review_id: String,
         target_item_id: Option<String>,
         approval_request_source: GuardianApprovalRequestSource,
@@ -510,6 +514,7 @@ impl GuardianReviewTrackContext {
         Self {
             thread_id,
             turn_id,
+            root_turn_id,
             review_id,
             target_item_id,
             approval_request_source,
@@ -530,6 +535,7 @@ impl GuardianReviewTrackContext {
             guardian_context_mode: result.guardian_context_mode,
             thread_id: self.thread_id.clone(),
             turn_id: self.turn_id.clone(),
+            root_turn_id: self.root_turn_id.clone(),
             review_id: self.review_id.clone(),
             target_item_id: self.target_item_id.clone(),
             approval_request_source: self.approval_request_source,

@@ -112,7 +112,7 @@ impl ChatWidget {
                     notification.thread_settings.system1_failure_episode =
                         self.status_state.system1_failure_episode;
                 }
-                self.on_thread_settings_updated(notification);
+                self.apply_thread_settings(notification, replay_kind);
             }
             ServerNotification::System1Updated(notification) => {
                 if !from_replay

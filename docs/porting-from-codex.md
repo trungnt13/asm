@@ -68,6 +68,11 @@ Before PR readiness, use [asm-live-check](../.agents/skills/asm-live-check/SKILL
 
 After approved integration, reuse checks and the verified binary pair only with matching effective source, generated files, dependencies, toolchain, features, flags, and pair provenance. Preserve checkout-wrapper isolation; never copy fingerprints to fake freshness. For integration changes or version bumps, rebuild affected binaries and repeat affected checks.
 
+### Shared config compatibility
+
+- Put ASM-only keys at the top level of `config.toml`. Do not add them to upstream tables. Use an ASM-only profile for stock strict mode or warning-free startup.
+- Test shared config changes in separate private `CODEX_HOME` directories. Verify that ASM applies the key. Verify that stock `config/read` returns a non-default setting from the file. Startup alone is not a pass.
+
 ### Desktop SSH tests
 
 For isolated Desktop SSH tests, use [asm-desktop-ssh-test](../.agents/skills/asm-desktop-ssh-test/SKILL.md). Preserve the normal backend. Follow the build and [live-check](../.agents/skills/asm-live-check/SKILL.md) rules.
@@ -209,7 +214,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `3f65e9f13165d85d1b1fbe20ce06c55758f927b9`, 2026-11-25. Subject: Enable fixed launch directories for shared MCP REPL servers (#63821).
+Last incorporated commit: `42c320991eb0b8c8042341eb7dcea4711d31bfa0`, 2026-11-26. Subject: Add compact filesystem context for workspace-write profiles (#64164).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 
@@ -248,10 +253,14 @@ Delete every thread-private runtime file (linkage, Cursor configuration, diagnos
 
 - With `load_external_models_json = true`, merge bundled entries into custom `model_catalog_json` in memory. Exact custom IDs retain all metadata overrides. With `false`, retain only the custom catalog. Routing remains bundled and exact-match-only.
 - Bundled `external_models.json` entries can select an existing named `model_provider`. Accept canonical slugs and optional provider/runtime-qualified aliases. Normalize aliases before validation/requests. Persist canonical model/provider identity so alias changes cannot reroute resumed chats. Preserve existing full IDs and managed provider requirements. Do not infer routing from slashes or remote catalog metadata. Keep endpoints/credentials in user provider configuration.
-- DeepSeek V4.1 Flash 1017 selects `fireworks`, alias `fireworks/deepseek-v4.1-flash`, without a profile or custom role. Default its context to 300,000 tokens; allow explicit overrides through 1,000,000. Select direct tools: live checks could not execute Code Mode's custom tool through Fireworks.
+- DeepSeek V4.1 Flash 1017 selects `fireworks`, alias `fireworks/deepseek-v4.1-flash`, without a profile or custom role. Default its context to 300,000 tokens; allow explicit overrides through 1,000,000. Use Code Mode only. On Fireworks Responses, encode `exec` as a function at the wire boundary; keep canonical calls and saved history as Code Mode. Default to Standard and route `ultrafast` through the Ultra-fast router without changing the persisted model.
+- GLM 5.3 selects `fireworks`, alias `fireworks/glm-5.3`, and uses Code Mode only on Responses with Standard as its only catalog tier. Apply ordinary resume admission to saved GLM chats, with no exception for chats saved under a different provider.
+- Gemini 4 Neon selects the configured `gemini` provider. Use `wire_api = "gemini_interactions"`, `base_url = "https://generativelanguage.googleapis.com/v1beta"`, and `env_http_headers = { "x-goog-api-key" = "GEMINI_API_KEY" }` under `[model_providers.gemini]`. Default to direct tools; honor `code_mode` and `code_mode_only` for ASM-owned execution. Keep the Gemini wire path text-only. Always send `store: false`; this disables stored Interactions, not provider abuse-monitoring logs. Replay opaque thought steps only on the Gemini route. Do not send OpenAI credentials or Responses Lite fields.
 - Show picker aliases but retain canonical identity. Native aliases `claude/…` and `cursor/…` retain `claude-code/…` and `cursor-agent/…` IDs. Do not add HTTP bindings or change native model/runtime selection. Picker changes that require a new runtime fork the current context into the selected model. Blank sessions still start fresh. Existing same-provider in-place model changes stay in place.
 - Admit valid bound/native input and resume independently of the global HTTP-provider default. Validate saved/requested identities separately. Overrides cannot exempt unrelated saved chats. Preserve mandatory policy, configuration errors, missing-provider checks, and history/runtime boundaries. Require the current provider definition and valid configuration. Classify routes from in-memory bindings/runtime detection, not discovery. Unbound API models retain upstream saved-provider admission.
-- V2 `spawn_agent` requires `fork_turns="none"` or `"all"`; legacy positive integer strings still select full history. Roles configured with `fork_turns = "none"` always start fresh. Set `require_spawn_agent_model = true` under `[features.multi_agent_v2]` to require an explicit model on the V2 tool. This only applies when `expose_spawn_agent_model_overrides` is enabled; it does not change app-server RPCs or internal spawns.
+- V2 `spawn_agent` requires `fork_turns="none"` or `"all"`; legacy positive integer strings still select full history. Roles configured with `fork_turns = "none"` always start fresh.
+- Set the top-level `require_spawn_agent_model = true` before any TOML table header to require an explicit model on the V2 tool. This only applies when `expose_spawn_agent_model_overrides` is enabled; it does not change app-server RPCs or internal spawns. Remove the old key from `[features.multi_agent_v2]`: stock Codex rejects unknown keys in that table.
+- Stock Codex warns and ignores the top-level key in normal mode. For strict mode, put the key in `asm.config.toml` and select it only in ASM with `--profile asm`.
 - Cross-provider subagents use the same portable handoff for `fork_turns="all"`; `"none"` transfers no history. The child task is separate from inherited context. Preserve destination provider identity on resume. Bound models use their own provider-specific model manager, not parent discovery identity. Active Claude `all` requires a matching foreground call before steering is admitted. A replay acknowledgment does not establish which assistant request used that input; retry on a new turn.
 - For user-spawned children with a catalog-bound provider ID, require an explicitly bound model or native runtime, including descendants/cold resumes. Reject unbound selections before startup; do not infer reverse routing. Use a separate provider ID for unbound custom subagent models. Preserve ordinary main/internal-worker provider behavior.
 - Keep upstream catalog/API model types unchanged. Hiding bundled entries does not disable explicit selection.
@@ -397,6 +406,16 @@ Explicit `cursor-agent/<model>` selects official Cursor ACP (`agent acp`, JSON-R
 - Verified CLI: 2026.10.22-27dcf5f. Revalidate upgrades.
 
 ### Minimal diagnostics
+
+Do not add optional diagnostics or telemetry, or make the change depend on either. For existing diagnostics and telemetry:
+
+1. If they do not interfere with the change, leave them alone.
+2. If a very small change resolves the conflict, make that change.
+3. Otherwise, remove only the diagnostics or telemetry that block the change.
+
+When removing a collector, keep the config and protocol behavior the Codex app needs. If the app needs the collector itself, report the conflict before removing it.
+
+When app behavior could change, verify the affected flow in the Codex app with the candidate backend. Follow the [shared compatibility gate](#shared-compatibility-gate) where it applies.
 
 - Default `diagnostic_log_capture = false`. This startup policy controls Rust stderr/file logs, persistent diagnostics, feedback ring/continuous tags, optional TUI replay, and rollout-trace recorders. `RUST_LOG`, `log_dir`, and recorder environment variables cannot enable disabled capture.
 - To opt in, set `diagnostic_log_capture = true` and restart affected processes. Keep existing filters. Explicit `log_dir` also routes SQLite logs unless managed `sqlite_home` overrides it. Propagate policy to the code-mode helper; inherited helper settings cannot override it. Standalone helpers without user config require explicit opt-in.
@@ -825,6 +844,8 @@ Keep `codex-ollama`'s `wiremock` under `[dev-dependencies]` while only tests use
 ### Advertised subagent models
 
 Optional top-level `subagent_model_list` selects advertised model IDs in user order for spawn descriptions and `<model_catalog>`. Omission keeps automatic picker-visible selection; `[]` advertises none. Explicit IDs can select hidden loaded models. Deduplicate and advertise only the first five; keep the catalog's 1,000-byte context bound. Before truncation, validate every ID against the loaded catalog and spawning backend. Fail invalid IDs without fallback. Do not restrict runtime spawning or change the picker.
+
+Both catalog placements show each listed model's usable child context window, after exact model configuration, provider clamping, and headroom, before role overrides. Do not start provider discovery to fill in missing sizes. Show a configured Claude auto-compaction window as a setting, not capacity; leave native-managed or unavailable capacity unguessed.
 
 ### Flat reasoning-effort picker
 

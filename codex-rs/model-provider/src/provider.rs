@@ -16,7 +16,9 @@ use codex_login::AuthManagerInitializationError;
 use codex_login::CodexAuth;
 use codex_login::WorkspaceRoutingRequest;
 use codex_login::default_client::ClientRedirectPolicy;
+use codex_model_provider_info::GEMINI_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::WireApi;
 use codex_models_manager::cache::ModelsCache;
 use codex_models_manager::manager::ModelCatalogSettings;
 use codex_models_manager::manager::OpenAiModelsManager;
@@ -505,10 +507,11 @@ impl ConfiguredModelProvider {
         let auth_manager = auth_manager_for_provider(auth_manager, &info);
         let runtime_for_destination = |destination: Option<&str>| {
             runtime_auth.clone().filter(|_| {
-                destination.is_none_or(|url| {
-                    codex_http_client::classify_openai_api_url(url)
-                        != codex_http_client::OpenAiDestination::Other
-                })
+                info.wire_api != WireApi::GeminiInteractions
+                    && destination.is_none_or(|url| {
+                        codex_http_client::classify_openai_api_url(url)
+                            != codex_http_client::OpenAiDestination::Other
+                    })
             })
         };
         let inference_runtime_auth = runtime_for_destination(info.base_url.as_deref());
@@ -736,6 +739,11 @@ impl ModelProvider for ConfiguredModelProvider {
                 )
                 .with_external_models(),
             );
+        }
+        if self.info.wire_api == WireApi::GeminiInteractions {
+            return Arc::new(StaticModelsManager::for_bundled_provider(
+                GEMINI_PROVIDER_ID,
+            ));
         }
         let endpoint = Arc::new(
             OpenAiModelsEndpoint::new(

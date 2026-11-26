@@ -73,7 +73,6 @@ use codex_protocol::protocol::MultiAgentVersion;
 use codex_tools::IndirectNamespacePrefixes;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::TOOL_SEARCH_TOOL_NAME;
-use codex_tools::ToolCall as ExtensionToolCall;
 use codex_tools::ToolEnvironmentMode;
 use codex_tools::ToolExecutor;
 use codex_tools::ToolExposures;
@@ -314,9 +313,7 @@ pub(crate) fn append_source_tools(
     model_info: &ModelInfo,
     registry: &mut ToolRegistry,
     mcp_tools: Vec<RegisteredTool>,
-    extension_tool_executors: impl IntoIterator<
-        Item = Arc<dyn for<'call> ToolExecutor<ExtensionToolCall<'call>>>,
-    >,
+    extension_tool_executors: impl IntoIterator<Item = Arc<dyn ToolExecutor>>,
     dynamic_tools: &[DynamicToolSpec],
 ) -> Vec<ToolSpec> {
     for tool in mcp_tools {
@@ -340,7 +337,7 @@ pub(crate) fn append_source_tools(
 pub(crate) fn extension_tool_executors<'a>(
     session: &'a Session,
     step_store: &'a ExtensionData,
-) -> impl Iterator<Item = Arc<dyn for<'call> ToolExecutor<ExtensionToolCall<'call>>>> + 'a {
+) -> impl Iterator<Item = Arc<dyn ToolExecutor>> + 'a {
     session
         .services
         .extensions
@@ -1390,8 +1387,7 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
     }
 
     if features.enabled(Feature::ViewImage)
-        && turn_context.provider.info().wire_api
-            != codex_model_provider_info::WireApi::ChatCompletions
+        && turn_context.provider.info().wire_api == codex_model_provider_info::WireApi::Responses
     {
         let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
         registry.add(ViewImageHandler::new(ViewImageToolOptions {
@@ -1489,40 +1485,40 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                 agent_type_description(turn_context, context.default_agent_type_description);
             let hide_spawn_agent_metadata =
                 turn_context.config.multi_agent_v2.hide_spawn_agent_metadata;
+            let include_model_catalog_in_spawn_agent_list = turn_context
+                .config
+                .include_model_catalog_in_spawn_agent_list;
+            let model_catalog_in_context = turn_context
+                .config
+                .features
+                .enabled(Feature::ModelCatalogInContext);
+            let expose_spawn_agent_model_overrides = turn_context
+                .config
+                .multi_agent_v2
+                .expose_spawn_agent_model_overrides;
             registry.register_trusted_with_native_review(
                 multi_agent_v2_handler(
                     SpawnAgentHandlerV2::new(
                         SpawnAgentToolOptions {
                             available_models: turn_context.available_models.clone(),
+                            context_windows: Arc::clone(&turn_context.subagent_context_windows),
                             subagent_model_list: turn_context
                                 .config
                                 .multi_agent_v2
                                 .subagent_model_list
                                 .clone(),
-                            external_model_aliases: if turn_context
-                                .config
-                                .multi_agent_v2
-                                .expose_spawn_agent_model_overrides
-                            {
+                            external_model_aliases: if expose_spawn_agent_model_overrides {
                                 external_model_aliases
                             } else {
                                 Vec::new()
                             },
                             multi_agent_version: turn_context.multi_agent_version,
-                            include_model_catalog_in_spawn_agent_list: turn_context
-                                .config
-                                .include_model_catalog_in_spawn_agent_list,
-                            model_catalog_in_context: turn_context
-                                .config
-                                .features
-                                .enabled(Feature::ModelCatalogInContext),
+                            include_model_catalog_in_spawn_agent_list,
+                            model_catalog_in_context,
                             agent_type_description,
                             expose_agent_type: !turn_context.config.agent_roles.is_empty(),
                             hide_agent_type_model_reasoning: hide_spawn_agent_metadata,
-                            expose_spawn_agent_model_overrides: turn_context
-                                .config
-                                .multi_agent_v2
-                                .expose_spawn_agent_model_overrides,
+                            expose_spawn_agent_model_overrides,
                             require_spawn_agent_model: turn_context
                                 .config
                                 .multi_agent_v2
@@ -1722,7 +1718,7 @@ fn append_tool_search_executor(
 fn append_extension_tool_executors(
     turn_context: &TurnContext,
     model_info: &ModelInfo,
-    executors: impl IntoIterator<Item = Arc<dyn for<'call> ToolExecutor<ExtensionToolCall<'call>>>>,
+    executors: impl IntoIterator<Item = Arc<dyn ToolExecutor>>,
     registry: &mut ToolRegistry,
 ) -> Option<ToolName> {
     let standalone_web_search_enabled = standalone_web_search_enabled(turn_context, model_info);

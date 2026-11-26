@@ -38,6 +38,7 @@ use codex_app_server_client::InProcessClientStartArgs;
 use codex_app_server_client::RemoteAppServerClient;
 use codex_app_server_client::RemoteAppServerConnectArgs;
 pub use codex_app_server_client::RemoteAppServerEndpoint;
+use codex_app_server_client::TypedRequestError;
 use codex_app_server_client::cloud_backend;
 pub use codex_app_server_client::resolve_remote_addr;
 pub use codex_app_server_client::resolve_remote_endpoint;
@@ -100,7 +101,6 @@ use tracing::warn;
 use tracing_appender::non_blocking;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
-use uuid::Uuid;
 
 pub(crate) use codex_app_server_client::legacy_core;
 
@@ -766,35 +766,34 @@ async fn lookup_session_target_with_app_server(
     config: &Config,
     id_or_name: &str,
 ) -> color_eyre::Result<Option<resume_picker::SessionTarget>> {
-    if Uuid::parse_str(id_or_name).is_ok() {
-        let thread_id = match ThreadId::from_string(id_or_name) {
-            Ok(thread_id) => thread_id,
-            Err(err) => {
-                warn!(
-                    session = id_or_name,
-                    %err,
-                    "Failed to parse session id during TUI lookup"
-                );
-                return Ok(None);
-            }
-        };
-        return match app_server
+    if let Ok(thread_id) = ThreadId::from_string(id_or_name) {
+        let thread = match app_server
             .thread_read(thread_id, /*include_turns*/ false)
             .await
         {
-            Ok(thread) => Ok(session_target_from_app_server_thread(
-                app_server.backend_id(),
-                thread,
-            )),
+            Ok(thread) => thread,
             Err(err) => {
-                warn!(
-                    session = id_or_name,
-                    %err,
-                    "thread/read failed during TUI session lookup"
-                );
-                Ok(None)
+                // Startup displays only the outer error. Expose the RPC failure without raw data.
+                let mut err = err.downcast::<TypedRequestError>()?;
+                if let TypedRequestError::Server { source, .. } = &mut err {
+                    if source.code == app_server_session::JSONRPC_INVALID_REQUEST
+                        && source.message == format!("thread not loaded: {thread_id}")
+                    {
+                        return Ok(None);
+                    }
+                    source.data = None;
+                }
+                return Err(err.into());
             }
         };
+        let target = session_target_from_app_server_thread(app_server.backend_id(), thread)
+            .filter(|target| target.thread_id == thread_id)
+            .ok_or_else(|| {
+                color_eyre::eyre::eyre!(
+                    "thread/read returned an unexpected session ID for {thread_id}"
+                )
+            })?;
+        return Ok(Some(target));
     }
 
     let model_providers = match action {
@@ -1628,11 +1627,11 @@ async fn run_ratatui_app(
                     ),
                 )
                 .await;
-            let target_session = match lookup {
-                Ok(result) => result?,
+            let target_session = match lookup.map_err(color_eyre::Report::from).flatten() {
+                Ok(result) => result,
                 Err(err) => {
                     shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
-                    return Err(err.into());
+                    return Err(err);
                 }
             };
             match target_session {
@@ -1724,7 +1723,7 @@ async fn run_ratatui_app(
         };
         let lookup = startup_draft
             .run_until(&mut tui, async {
-                if Uuid::parse_str(id_str).is_ok() {
+                if ThreadId::from_string(id_str).is_ok() {
                     return Ok(lookup_session_target_with_app_server(
                         crate::resume_picker::SessionPickerAction::Resume,
                         startup_app_server,
@@ -1757,11 +1756,11 @@ async fn run_ratatui_app(
                 )
             })
             .await;
-        let mut targets = match lookup {
-            Ok(result) => result?,
+        let mut targets = match lookup.map_err(color_eyre::Report::from).flatten() {
+            Ok(result) => result,
             Err(err) => {
                 shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
-                return Err(err.into());
+                return Err(err);
             }
         };
         match targets.len() {
@@ -2184,6 +2183,30 @@ async fn run_ratatui_app(
         config.cwd.as_path(),
     );
 
+    let statsig = if matches!(app_server_target, AppServerTarget::Embedded) {
+        codex_statsig::StatsigRuntime::current()
+    } else if config.statsig_enabled()
+        && config
+            .config_layer_stack
+            .ensure_config_server_applied()
+            .is_ok()
+    {
+        let identity = if matches!(app_server_target, AppServerTarget::Remote { .. }) {
+            // Remote workspace config skips local login requirements.
+            crate::legacy_core::config::StatsigHostIdentity::Installation
+        } else {
+            // Defer reloading credentials and policy after account changes in another process.
+            crate::legacy_core::config::StatsigHostIdentity::LocalAccount
+        };
+        let mut config = config.clone();
+        codex_app_server_client::EmbeddedNetworkPolicy::default().activate(&mut config);
+        config
+            .start_statsig(crate::legacy_core::config::StatsigSurface::Tui, identity)
+            .await
+    } else {
+        None
+    };
+
     // Count launches that reach final config resolution, regardless of screen policy.
     if config.analytics_enabled != Some(false)
         && config.otel.metrics_exporter != codex_config::types::OtelExporterKind::None
@@ -2484,6 +2507,7 @@ async fn run_ratatui_app(
     .await;
 
     terminal_restore_guard.restore_silently();
+    codex_statsig::StatsigRuntime::finish(statsig).await;
     // Mark the end of the recorded session.
     session_log::log_session_end();
     // ignore error when collecting usage – report underlying error instead

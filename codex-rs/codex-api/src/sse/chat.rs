@@ -243,44 +243,7 @@ async fn decode_chat_stream(
         if call.id.is_empty() || !ids.insert(call.id.clone()) {
             return Err(ApiError::Stream("invalid chat tool call".into()));
         }
-        items.push(match tool {
-            ChatTool::Function(tool) => {
-                if !matches!(
-                    serde_json::from_str::<Value>(&call.arguments),
-                    Ok(Value::Object(_))
-                ) {
-                    return Err(ApiError::Stream("invalid chat tool arguments".into()));
-                }
-                ResponseItem::FunctionCall {
-                    encrypted_content: None,
-                    status: None,
-                    id: None,
-                    name: tool.name.clone(),
-                    namespace: tool.namespace.clone(),
-                    arguments: call.arguments,
-                    encrypted_function_args: None,
-                    call_id: call.id,
-                    internal_chat_message_metadata_passthrough: None,
-                }
-            }
-            ChatTool::Freeform(tool) => {
-                if !call.arguments.trim_start().starts_with('{') {
-                    return Err(ApiError::Stream("invalid chat freeform tool input".into()));
-                }
-                let arguments: FreeformArguments = serde_json::from_str(&call.arguments)
-                    .map_err(|_| ApiError::Stream("invalid chat freeform tool input".into()))?;
-                ResponseItem::CustomToolCall {
-                    encrypted_content: None,
-                    status: None,
-                    id: None,
-                    name: tool.name.clone(),
-                    namespace: tool.namespace.clone(),
-                    input: arguments.input,
-                    call_id: call.id,
-                    internal_chat_message_metadata_passthrough: None,
-                }
-            }
-        });
+        items.push(call.into_item(tool)?);
     }
     for item in items {
         if events
@@ -309,7 +272,7 @@ async fn decode_chat_stream(
     Ok(())
 }
 
-fn assistant_message(text: String, status: Option<&str>) -> ResponseItem {
+pub(crate) fn assistant_message(text: String, status: Option<&str>) -> ResponseItem {
     ResponseItem::Message {
         encrypted_content: None,
         status: status.map(str::to_owned),
@@ -371,10 +334,53 @@ struct FreeformArguments {
 }
 
 #[derive(Default)]
-struct ChatToolCall {
-    id: String,
-    name: String,
-    arguments: String,
+pub(crate) struct ChatToolCall {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) arguments: String,
+}
+
+impl ChatToolCall {
+    pub(crate) fn into_item(self, tool: &ChatTool) -> Result<ResponseItem, ApiError> {
+        Ok(match tool {
+            ChatTool::Function(tool) => {
+                if !matches!(
+                    serde_json::from_str::<Value>(&self.arguments),
+                    Ok(Value::Object(_))
+                ) {
+                    return Err(ApiError::Stream("invalid chat tool arguments".into()));
+                }
+                ResponseItem::FunctionCall {
+                    encrypted_content: None,
+                    status: None,
+                    id: None,
+                    name: tool.name.clone(),
+                    namespace: tool.namespace.clone(),
+                    arguments: self.arguments,
+                    encrypted_function_args: None,
+                    call_id: self.id,
+                    internal_chat_message_metadata_passthrough: None,
+                }
+            }
+            ChatTool::Freeform(tool) => {
+                if !self.arguments.trim_start().starts_with('{') {
+                    return Err(ApiError::Stream("invalid chat freeform tool input".into()));
+                }
+                let arguments: FreeformArguments = serde_json::from_str(&self.arguments)
+                    .map_err(|_| ApiError::Stream("invalid chat freeform tool input".into()))?;
+                ResponseItem::CustomToolCall {
+                    encrypted_content: None,
+                    status: None,
+                    id: None,
+                    name: tool.name.clone(),
+                    namespace: tool.namespace.clone(),
+                    input: arguments.input,
+                    call_id: self.id,
+                    internal_chat_message_metadata_passthrough: None,
+                }
+            }
+        })
+    }
 }
 
 #[derive(Deserialize)]

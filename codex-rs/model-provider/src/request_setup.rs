@@ -21,6 +21,7 @@ use codex_login::default_client::ClientRedirectPolicy;
 use codex_login::default_client::create_client_for_route;
 use codex_model_provider_info::GatewayOAuthConfig;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::WireApi;
 use codex_protocol::error::Result;
 use codex_runtime_agent_instance::RuntimeAuth;
 use codex_runtime_agent_instance::RuntimeAuthManager;
@@ -188,11 +189,12 @@ pub async fn resolve_request(
                     .map(|state| state.generation)
                     .or(state.map(|state| state.generation)),
                 api_provider,
-                redirect_policy: if provider
-                    .info()
-                    .gateway_oauth
-                    .as_ref()
-                    .is_some_and(GatewayOAuthConfig::uses_credential_export)
+                redirect_policy: if provider.info().wire_api == WireApi::GeminiInteractions
+                    || provider
+                        .info()
+                        .gateway_oauth
+                        .as_ref()
+                        .is_some_and(GatewayOAuthConfig::uses_credential_export)
                 {
                     ClientRedirectPolicy::Reject
                 } else {

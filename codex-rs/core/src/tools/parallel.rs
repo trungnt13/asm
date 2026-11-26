@@ -1014,10 +1014,7 @@ mod tests {
             })
         }
 
-        fn handle<'a>(&'a self, _invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'a>
-        where
-            ToolInvocation: 'a,
-        {
+        fn handle(&self, _invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
             self.calls.fetch_add(1, Ordering::Relaxed);
             Box::pin(async {
                 Ok(

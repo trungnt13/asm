@@ -37,6 +37,35 @@ pub(crate) fn build_chat_request(
         ));
     }
 
+    let (tools, tool_names) = project_tools(request)?;
+
+    let mut body = json!({
+        "model": request.model,
+        "stream": true,
+        "stream_options": {"include_usage": true},
+    });
+    body["messages"] = Value::Array(project_messages(request, &tool_names)?);
+    if let Some(tier) = &request.service_tier {
+        body["service_tier"] = json!(tier);
+    }
+    if !tools.is_empty() {
+        body["tools"] = Value::Array(tools);
+        body["tool_choice"] = json!(request.tool_choice);
+        body["parallel_tool_calls"] = json!(request.parallel_tool_calls);
+    }
+    if let Some(effort) = request
+        .reasoning
+        .as_ref()
+        .and_then(|reasoning| reasoning.effort.as_ref())
+    {
+        body["reasoning_effort"] = json!(effort.as_str());
+    }
+    Ok((body, tool_names))
+}
+
+pub(super) fn project_tools(
+    request: &ResponsesApiRequest,
+) -> Result<(Vec<Value>, HashMap<String, ChatTool>), ApiError> {
     let mut tool_names = HashMap::new();
     let mut tools = Vec::new();
     if let Some(declarations) = &request.tools {
@@ -72,28 +101,7 @@ pub(crate) fn build_chat_request(
         }
     }
 
-    let mut body = json!({
-        "model": request.model,
-        "stream": true,
-        "stream_options": {"include_usage": true},
-    });
-    body["messages"] = Value::Array(project_messages(request, &tool_names)?);
-    if let Some(tier) = &request.service_tier {
-        body["service_tier"] = json!(tier);
-    }
-    if !tools.is_empty() {
-        body["tools"] = Value::Array(tools);
-        body["tool_choice"] = json!(request.tool_choice);
-        body["parallel_tool_calls"] = json!(request.parallel_tool_calls);
-    }
-    if let Some(effort) = request
-        .reasoning
-        .as_ref()
-        .and_then(|reasoning| reasoning.effort.as_ref())
-    {
-        body["reasoning_effort"] = json!(effort.as_str());
-    }
-    Ok((body, tool_names))
+    Ok((tools, tool_names))
 }
 
 fn project_messages(
@@ -289,7 +297,7 @@ fn project_messages(
     Ok(messages)
 }
 
-fn tool_result_text(output: &FunctionCallOutputBody) -> Result<Cow<'_, str>, ApiError> {
+pub(super) fn tool_result_text(output: &FunctionCallOutputBody) -> Result<Cow<'_, str>, ApiError> {
     match output {
         FunctionCallOutputBody::Text(text) => Ok(Cow::Borrowed(text)),
         FunctionCallOutputBody::ContentItems(parts) => {
@@ -383,7 +391,7 @@ fn project_tool(
     Ok(function)
 }
 
-fn wire_tool_name(namespace: Option<&str>, name: &str) -> String {
+pub(super) fn wire_tool_name(namespace: Option<&str>, name: &str) -> String {
     let wire = namespace.map_or_else(
         || name.to_owned(),
         |namespace| format!("{namespace}__{name}"),

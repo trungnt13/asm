@@ -672,8 +672,11 @@ impl App {
                 self.chat_widget.windows_sandbox_elevated_setup_complete;
         }
         // Different providers can report identical account details.
-        let provider_changed = thread_provider
-            .is_some_and(|provider| provider != self.chat_widget.quota_provider_id());
+        let provider_changed = thread_provider.is_some_and(|provider| {
+            provider != self.chat_widget.quota_provider_id()
+                || chat_widget.config_ref().model_providers.get(provider)
+                    != self.chat_widget.config_ref().model_providers.get(provider)
+        });
         let lost_chatgpt_account =
             self.chat_widget.has_chatgpt_account() && !chat_widget.has_chatgpt_account();
         if provider_changed || lost_chatgpt_account {
@@ -1577,7 +1580,9 @@ impl App {
         if let Some((model, effort, service_tier)) = model_selection {
             config.model = Some(model);
             config.model_reasoning_effort = effort;
-            config.service_tier = service_tier;
+            if let Some(service_tier) = service_tier {
+                config.service_tier = Some(service_tier);
+            }
             config.apply_external_model_provider()?;
         }
         let started = crate::boxed_future!(app_server.start_thread_with_session_start_source(

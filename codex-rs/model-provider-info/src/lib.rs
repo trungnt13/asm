@@ -92,6 +92,8 @@ pub const AMAZON_BEDROCK_RUNTIME_PROVIDER_NAME: &str = "Amazon Bedrock Runtime";
 pub const AMAZON_BEDROCK_RUNTIME_PROVIDER_ID: &str = "amazon-bedrock-runtime";
 pub const GCP_PROVIDER_NAME: &str = "Google Cloud Vertex AI";
 pub const GCP_PROVIDER_ID: &str = "gcp";
+pub const GEMINI_PROVIDER_ID: &str = "gemini";
+const GEMINI_API_KEY_HEADER: &str = "x-goog-api-key";
 pub const AMAZON_BEDROCK_GPT_5_5_MODEL_ID: &str = "openai.gpt-5.5";
 pub const AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID: &str = "openai.gpt-5.6-sol";
 pub const AMAZON_BEDROCK_GPT_6_1_SOL_MODEL_ID: &str = "openai.gpt-6.1-sol";
@@ -124,6 +126,9 @@ pub enum WireApi {
     /// Chat Completions over HTTP at `/v1/chat/completions`.
     #[serde(rename = "chat_completions")]
     ChatCompletions,
+    /// The Gemini Developer API at `/v1beta/interactions`.
+    #[serde(rename = "gemini_interactions")]
+    GeminiInteractions,
 }
 
 impl fmt::Display for WireApi {
@@ -131,6 +136,7 @@ impl fmt::Display for WireApi {
         let value = match self {
             Self::Responses => "responses",
             Self::ChatCompletions => "chat_completions",
+            Self::GeminiInteractions => "gemini_interactions",
         };
         f.write_str(value)
     }
@@ -145,10 +151,11 @@ impl<'de> Deserialize<'de> for WireApi {
         match value.as_str() {
             "responses" => Ok(Self::Responses),
             "chat_completions" => Ok(Self::ChatCompletions),
+            "gemini_interactions" => Ok(Self::GeminiInteractions),
             "chat" => Err(serde::de::Error::custom(CHAT_WIRE_API_REMOVED_ERROR)),
             _ => Err(serde::de::Error::unknown_variant(
                 &value,
-                &["responses", "chat_completions"],
+                &["responses", "chat_completions", "gemini_interactions"],
             )),
         }
     }
@@ -161,7 +168,7 @@ pub struct ModelProviderInfo {
     /// Friendly display name.
     #[serde(default)]
     pub name: String,
-    /// Base URL for the provider's OpenAI-compatible API.
+    /// Base URL for the provider's API.
     pub base_url: Option<String>,
     /// Optional full URL for a Codex-native model catalog. When unset, OpenAI discovery
     /// uses the Codex backend unless `base_url` overrides the inference endpoint.
@@ -369,25 +376,29 @@ other non-default provider fields are not supported"
     }
 
     pub fn validate(&self) -> std::result::Result<(), String> {
-        if self.wire_api == WireApi::ChatCompletions {
+        if self.wire_api != WireApi::Responses {
+            let wire_api = self.wire_api;
             if self
                 .base_url
                 .as_deref()
                 .is_none_or(|url| url.trim().is_empty())
             {
-                return Err("chat_completions requires an explicit base_url".into());
+                return Err(format!("{wire_api} requires an explicit base_url"));
             }
             if self.requires_openai_auth || self.is_openai() {
-                return Err("chat_completions cannot use OpenAI login".into());
+                return Err(format!("{wire_api} cannot use OpenAI login"));
             }
             if self.supports_websockets
                 || self.capabilities.and_then(|caps| caps.remote_compaction)
                     == Some(RemoteCompactionSupport::V2)
             {
-                return Err(
-                    "chat_completions does not support WebSockets or remote compaction".into(),
-                );
+                return Err(format!(
+                    "{wire_api} does not support WebSockets or remote compaction"
+                ));
             }
+        }
+        if self.wire_api == WireApi::GeminiInteractions {
+            self.validate_gemini_interactions()?;
         }
         if self.is_gcp() {
             self.validate_gcp_credential_file()?;
@@ -473,6 +484,54 @@ other non-default provider fields are not supported"
         }
     }
 
+    fn validate_gemini_interactions(&self) -> Result<(), String> {
+        let url = codex_http_client::validate_endpoint_url(
+            self.base_url.as_deref().unwrap_or_default(),
+            "base_url",
+        )?;
+        if url.query().is_some()
+            || self
+                .query_params
+                .as_ref()
+                .is_some_and(|params| !params.is_empty())
+        {
+            return Err("gemini_interactions does not support URL query parameters".into());
+        }
+        if uses_builtin_auth(&self.name)
+            || self.env_key.is_some()
+            || self.experimental_bearer_token.is_some()
+            || self.auth.is_some()
+            || self.gateway_oauth.is_some()
+            || self.aws.is_some()
+        {
+            return Err("gemini_interactions uses x-goog-api-key via env_http_headers, not built-in or bearer auth".into());
+        }
+        if self.model_catalog_url.is_some()
+            || self.supports_standalone_web_search
+            || self.standalone_web_search_provider.is_some()
+        {
+            return Err("gemini_interactions does not support a remote model catalog or standalone web search".into());
+        }
+        let mut key_headers = self
+            .env_http_headers
+            .iter()
+            .flatten()
+            .filter(|(name, _)| name.eq_ignore_ascii_case(GEMINI_API_KEY_HEADER));
+        if key_headers
+            .next()
+            .is_none_or(|(_, env_var)| env_var.trim().is_empty())
+            || key_headers.next().is_some()
+            || self
+                .http_headers
+                .iter()
+                .flatten()
+                .any(|(name, _)| name.eq_ignore_ascii_case(GEMINI_API_KEY_HEADER))
+        {
+            return Err("gemini_interactions requires one x-goog-api-key entry in env_http_headers, not http_headers".into());
+        }
+        Ok(())
+    }
+
     /// Resolve configured request headers before choosing credentials or a runtime.
     pub fn build_header_map(&self) -> CodexResult<HeaderMap> {
         let capacity = self.http_headers.as_ref().map_or(0, HashMap::len)
@@ -490,6 +549,25 @@ other non-default provider fields are not supported"
 
         if let Some(env_headers) = &self.env_http_headers {
             for (header, env_var) in env_headers {
+                if self.wire_api == WireApi::GeminiInteractions
+                    && header.eq_ignore_ascii_case(GEMINI_API_KEY_HEADER)
+                {
+                    let key = std::env::var(env_var)
+                        .ok()
+                        .filter(|value| !value.trim().is_empty())
+                        .ok_or_else(|| {
+                            CodexErr::EnvVar(EnvVarError {
+                                var: env_var.clone(),
+                                instructions: None,
+                            })
+                        })?;
+                    let mut value = HeaderValue::from_str(&key).map_err(|_| {
+                        CodexErr::InvalidRequest(format!("Invalid x-goog-api-key header value from environment variable `{env_var}`"))
+                    })?;
+                    value.set_sensitive(/*val*/ true);
+                    headers.insert(GEMINI_API_KEY_HEADER, value);
+                    continue;
+                }
                 if let Ok(val) = std::env::var(env_var)
                     && !val.trim().is_empty()
                     && let (Ok(name), Ok(value)) =
@@ -849,6 +927,17 @@ pub fn merge_configured_model_providers(
     configured_model_providers: HashMap<String, ModelProviderInfo>,
 ) -> Result<HashMap<String, ModelProviderInfo>, String> {
     for (key, mut provider) in configured_model_providers {
+        if provider.wire_api == WireApi::GeminiInteractions {
+            // Managed provider definitions enter after ordinary TOML validation.
+            if model_providers.contains_key(&key) {
+                return Err(format!(
+                    "model_providers.{key}: gemini_interactions requires a custom provider ID"
+                ));
+            }
+            provider
+                .validate()
+                .map_err(|message| format!("model_providers.{key}: {message}"))?;
+        }
         let search_provider = provider.standalone_web_search_provider.take();
         if key == "openai" {
             // Keep the built-in identity, inference routing, and authentication.

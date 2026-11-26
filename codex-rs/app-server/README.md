@@ -278,9 +278,19 @@ instructions, use `thread/fork` followed by `turn/start`.
 ## Recorded Guardian reviews (experimental)
 
 On an idle thread, `thread/guardianReview` assesses the supplied `toolCall`
-without appending or executing it. To review an archived worker's action,
-start a dedicated ephemeral thread and load the worker's history with
-`thread/inject_items`. Supply the action and parent messages in the review request.
+without appending or executing it.
+
+With `features.guardianv3.enabled = true` at app-server startup, use
+`thread/start` to create a fresh root thread with `ephemeral: false` and
+`historyMode: "paginated"`. Inject history with `thread/inject_items`, then
+call `thread/guardianReview` with `threadId` and `toolCall`. V3 waits for
+pending history to be processed before assessing the call. Wait for the verdict
+before injecting another batch on the same thread. V3 rejects `rootEvidence`.
+
+The worker example below uses the transcript reviewer with Guardian V3 disabled
+at app-server startup. Start a dedicated ephemeral thread and inject the archived
+worker's history with `thread/inject_items`. Supply the action and parent
+messages in the review request.
 
 ```json
 {
@@ -584,6 +594,12 @@ Attachment creation and deletion requests using the same thread ID are serialize
 
 # Thread plugin settings
 
+In `thread/start` config, a named plugin entry such as `"notes@market": {}`
+lists the plugin. Without an explicit `enabled` flag, it inherits the default.
+
+In the effective thread config, an empty `plugins._default` means
+`enabled = true`. Omitting `plugins._default` leaves the fallback unset.
+
 Plugin summaries returned by `plugin/list`, `plugin/installed`, `plugin/read`,
 and `plugin/share/list` report effective `enabled` state. When
 `plugins._default.enabled` is configured, an explicit
@@ -599,9 +615,14 @@ Apps authentication setup without writing an `enabled` override.
 
 `thread/settings/update` and `turn/start` accept `disabledPluginIds`, a list of
 `PluginSummary.id` values from `plugin/list`, in the
-`<plugin-name>@<marketplace-name>` format. A supplied list replaces the selection;
-omission or `null` preserves it, and `[]` clears it. Saving this selection does
-not yet filter plugin capabilities.
+`<plugin-name>@<marketplace-name>` format. A supplied list replaces the selection.
+Omission or `null` preserves it, and `[]` clears it.
+
+Setting a plugin's `enabled` flag to `false` in thread or executor config
+does not by itself hide tools offered independently by Apps. With
+`disabledPluginIds`, Core also hides Apps tools whose connector IDs it can
+associate with an excluded plugin. A connector shared with another enabled
+plugin remains visible unless its canonical owner is excluded.
 
 Read the selection from `threadSettings.disabledPluginIds` in
 `thread/settings/updated` notifications, or from `disabledPluginIds` in
