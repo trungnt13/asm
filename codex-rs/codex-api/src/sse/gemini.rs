@@ -70,6 +70,7 @@ async fn decode_gemini_stream(
     events: &mpsc::Sender<Result<ResponseEvent, ApiError>>,
 ) -> Result<(), ApiError> {
     let stream_open_ms = request_started_at.elapsed().as_millis();
+    let headers = stream.headers;
     let mut stream = stream.bytes.eventsource();
     let mut provider_id: Option<String> = None;
     let mut response_id = None;
@@ -256,11 +257,21 @@ async fn decode_gemini_stream(
             {
                 usage.record(&interaction["usage"]);
                 let completion_ms = request_started_at.elapsed().as_millis();
+                let actual_service_tier = [
+                    headers
+                        .get("x-gemini-service-tier")
+                        .and_then(|value| value.to_str().ok()),
+                    interaction["service_tier"].as_str(),
+                ]
+                .into_iter()
+                .flatten()
+                .find(|value| matches!(*value, "standard" | "priority"));
                 tracing::debug!(
                     stream_open_ms,
                     ?first_tool_start_ms,
                     ?last_tool_stop_ms,
                     completion_ms,
+                    ?actual_service_tier,
                     tool_calls = call_ids.len(),
                     terminal_cached_tokens = ?interaction["usage"]["total_cached_tokens"].as_i64(),
                     reported_cached_tokens = ?usage.reported_cached_tokens,

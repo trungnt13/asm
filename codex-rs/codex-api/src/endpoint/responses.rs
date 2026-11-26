@@ -20,6 +20,7 @@ use codex_client::HttpTransport;
 use codex_client::RequestCompression;
 use codex_client::RequestTelemetry;
 use codex_client::TransportError;
+use codex_protocol::config_types::ServiceTier;
 use codex_protocol::models::ToolResultBody;
 use codex_protocol::protocol::SessionSource;
 use http::HeaderMap;
@@ -111,6 +112,10 @@ impl<T: HttpTransport> ResponsesClient<T> {
                 )
             }
         };
+        let projected_service_tier = projected_request
+            .get("service_tier")
+            .and_then(Value::as_str)
+            .and_then(ServiceTier::from_request_value);
         let body = EncodedJsonBody::encode(&projected_request)
             .map_err(|err| ApiError::Stream(format!("failed to encode function request: {err}")))?;
         drop(projected_request);
@@ -127,7 +132,14 @@ impl<T: HttpTransport> ResponsesClient<T> {
 
         let spawn_stream = match api {
             FunctionApi::Chat => spawn_chat_stream,
-            FunctionApi::Gemini => spawn_gemini_stream,
+            FunctionApi::Gemini => {
+                tracing::debug!(
+                    requested_service_tier =
+                        projected_service_tier.map_or("standard", ServiceTier::request_value),
+                    "Gemini Interactions service tier"
+                );
+                spawn_gemini_stream
+            }
         };
         Ok(spawn_stream(
             stream,

@@ -4,6 +4,7 @@ use super::chat::tool_result_text;
 use super::chat::wire_tool_name;
 use crate::common::ResponsesApiRequest;
 use crate::error::ApiError;
+use codex_protocol::config_types::ServiceTier;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::plaintext_agent_message_content;
@@ -52,6 +53,9 @@ pub(crate) fn build_gemini_request(
     body["input"] = Value::Array(input);
     body["store"] = Value::Bool(false);
     body["stream"] = Value::Bool(true);
+    if request.service_tier.as_deref() == Some(ServiceTier::Fast.request_value()) {
+        body["service_tier"] = json!(ServiceTier::Fast.request_value());
+    }
     if !instructions.is_empty() {
         body["system_instruction"] = Value::String(instructions);
     }

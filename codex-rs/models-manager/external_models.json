@@ -454,6 +454,13 @@
       "visibility": "list",
       "supported_in_api": true,
       "priority": 111,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "Uses Gemini Priority inference at higher token prices."
+        }
+      ],
       "availability_nux": null,
       "upgrade": null,
       "include_skills_usage_instructions": false,
