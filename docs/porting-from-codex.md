@@ -70,8 +70,8 @@ After approved integration, reuse checks and the verified binary pair only with 
 
 ### Shared config compatibility
 
-- Keep `config.toml` loadable by the stock Codex app-server used by Desktop. Put new ASM-only keys at the top level, not inside upstream-owned tables. Stock Codex can reject unknown keys in those tables and fall back to defaults. If stock uses strict validation or must start without warnings, put ASM-only keys in a profile file selected only by ASM.
-- For changes that affect shared config, use separate private `CODEX_HOME` directories with the same minimal representative config. Confirm the ASM candidate applies the setting and the stock app-server's `config/read` preserves a non-default upstream setting. Startup alone is not proof: fail the check if stock discards the config or falls back to defaults. Keep the personal config untouched.
+- Put ASM-only keys at the top level of `config.toml`. Do not add them to upstream tables. Use an ASM-only profile for stock strict mode or warning-free startup.
+- Test shared config changes in separate private `CODEX_HOME` directories. Verify that ASM applies the key. Verify that stock `config/read` returns a non-default setting from the file. Startup alone is not a pass.
 
 ### Desktop SSH tests
 
