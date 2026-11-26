@@ -9,7 +9,6 @@ use super::WorldStateSection;
 use super::WorldStateUpdate;
 use crate::agent::model_catalog::CONTEXT_WINDOW_SCOPE;
 use crate::agent::model_catalog::context_window_label;
-use crate::config::Config;
 use crate::context::ContextualUserFragment;
 use crate::context::environment_context::push_xml_escaped_text;
 use codex_protocol::models::ContentItem;
@@ -17,9 +16,9 @@ use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::ContentItemMetadata;
 use codex_protocol::models::ContentItemNamespace;
 use codex_protocol::models::input_text;
-use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::protocol::MultiAgentVersion;
+use std::collections::HashMap;
 
 // Includes XML escaping and markers; at most 1,000 tokens even with byte fallback.
 const MAX_RENDERED_BYTES: usize = 1_000;
@@ -37,10 +36,9 @@ impl ModelCatalogState {
     pub(crate) fn new(
         models: &[ModelPreset],
         multi_agent_version: MultiAgentVersion,
-        config: &Config,
-        active_models: &[ModelInfo],
+        configured: Option<&[String]>,
+        windows: &HashMap<String, String>,
     ) -> Self {
-        let configured = config.multi_agent_v2.subagent_model_list.as_deref();
         let mut catalog = String::new();
         let mut models = match crate::agent::model_catalog::advertised_models(
             models,
@@ -77,8 +75,7 @@ impl ModelCatalogState {
         let mut rows = Vec::new();
         let mut remaining = body_budget - catalog.len();
         for model in models {
-            let mut line =
-                context_window_label(config, multi_agent_version, active_models, &model.model);
+            let mut line = context_window_label(windows, &model.model).to_owned();
             if !model.supported_reasoning_efforts.is_empty() {
                 line.push_str(" Reasoning efforts: ");
                 for (index, preset) in model.supported_reasoning_efforts.iter().enumerate() {

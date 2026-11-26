@@ -1,4 +1,5 @@
 use crate::agent::model_catalog::CONTEXT_WINDOW_SCOPE;
+use crate::agent::model_catalog::context_window_label;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_tools::JsonSchema;
@@ -8,6 +9,7 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 const SPAWN_AGENT_REQUIRED_MODEL_GUIDANCE: &str = "Specify the model for every spawn.  Pick model overrides from the latest `<model_catalog>` listing using instructions from user or task.";
 const SPAWN_AGENT_INHERITED_MODEL_GUIDANCE: &str = "Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed.";
@@ -20,7 +22,7 @@ const MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION: usize = 64;
 #[derive(Debug, Clone)]
 pub struct SpawnAgentToolOptions {
     pub available_models: Vec<ModelPreset>,
-    pub(crate) context_windows: HashMap<String, String>,
+    pub(crate) context_windows: Arc<HashMap<String, String>>,
     pub subagent_model_list: Option<Vec<String>>,
     pub external_model_aliases: Vec<String>,
     pub agent_type_description: String,
@@ -39,7 +41,7 @@ impl Default for SpawnAgentToolOptions {
     fn default() -> Self {
         Self {
             available_models: Vec::new(),
-            context_windows: HashMap::new(),
+            context_windows: Arc::default(),
             subagent_model_list: None,
             external_model_aliases: Vec::new(),
             agent_type_description: String::new(),
@@ -583,9 +585,7 @@ fn spawn_agent_models_description(
             };
             let model_slug = &model.model;
             let description = &model.description;
-            let window = windows
-                .get(model_slug)
-                .map_or("Context: unknown.", String::as_str);
+            let window = context_window_label(windows, model_slug);
             format!("- `{model_slug}`: {description}{reasoning_efforts_suffix} {window}")
         })
         .collect::<Vec<_>>()

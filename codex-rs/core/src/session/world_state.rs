@@ -571,12 +571,15 @@ impl Session {
                     .features
                     .enabled(Feature::ModelCatalogInContext)
             {
-                let active_models = self.services.models_manager.get_remote_models().await;
                 ModelCatalogState::new(
                     &turn_context.available_models,
                     turn_context.multi_agent_version,
-                    &turn_context.config,
-                    &active_models,
+                    turn_context
+                        .config
+                        .multi_agent_v2
+                        .subagent_model_list
+                        .as_deref(),
+                    &turn_context.subagent_context_windows,
                 )
             } else {
                 ModelCatalogState::default()
