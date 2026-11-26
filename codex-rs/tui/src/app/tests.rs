@@ -3403,6 +3403,23 @@ async fn reopen_saved_side_chat(during: DuringOpen) -> Result<()> {
     let release_enter =
         KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Release);
     capture("Loading", side_frame(&mut app, &mut tui, size)?);
+    if matches!(during, DuringOpen::Navigate) {
+        // Archiving an unrelated thread while the chooser is loading restarts its list.
+        let stale = app.sidebar().unwrap().discovery.request().unwrap();
+        app.handle_app_server_event(
+            &server,
+            AppServerEvent::ServerNotification(Box::new(ServerNotification::ThreadArchived(
+                ThreadArchivedNotification {
+                    thread_id: ThreadId::new().to_string(),
+                },
+            ))),
+        )
+        .await;
+        assert!(matches!(
+            app.sidebar().unwrap().discovery,
+            crate::sidebar_chooser::Discovery::Loading { request, cycle: false, .. } if request != stale
+        ));
+    }
     finish_discovery(&mut app, &mut tui, &mut server).await?;
     assert_eq!(
         app.sidebar().unwrap().latest_prompts,
@@ -9154,7 +9171,6 @@ async fn make_test_app() -> Box<App> {
         reconnect: Default::default(),
         pending_right_click_paste: None,
         right_click_paste_environment: super::right_click_paste::PasteEnvironment {
-            primary: false,
             platform_default: true,
             ssh: false,
             wsl: false,
@@ -9306,7 +9322,6 @@ pub(super) async fn make_test_app_with_channels() -> (
             reconnect: Default::default(),
             pending_right_click_paste: None,
             right_click_paste_environment: super::right_click_paste::PasteEnvironment {
-                primary: false,
                 platform_default: true,
                 ssh: false,
                 wsl: false,
@@ -11829,13 +11844,31 @@ async fn prompt_edit_reverts_earlier_and_first_visible_prompts_in_place_scenario
     }
 
     let source_thread_id = ThreadId::from_string(&source_thread_id)?;
+    // The only loaded item from turn-0 was recorded after turn-3 began.
+    // The first rewind drops it, so it cannot anchor the second rewind.
+    codex_rollout::append_rollout_item_to_path(
+        &source_path,
+        &RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
+            content_token_count: None,
+            thread_id: source_thread_id,
+            turn_id: "turn-0".into(),
+            item: TurnItem::Reasoning(codex_protocol::items::ReasoningItem {
+                id: "late-result".into(),
+                summary_text: Vec::new(),
+                raw_content: Vec::new(),
+            }),
+            started_at_ms: None,
+            completed_at_ms: 0,
+        })),
+    )
+    .await?;
     let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&config)).await?;
     // Bound fixture hydration independently from the owned viewport exercised below.
     // Inline hydration's row cap leaves the oldest prompt on an unloaded page.
     let mut local_settings = crate::local_settings::LocalSettings::from(&config);
     local_settings.transcript_mode = crate::transcript_mode::TranscriptMode::Terminal;
     local_settings.tui.alternate_screen = codex_config::types::AltScreenMode::Never;
-    local_settings.tui.terminal_resize_reflow_max_rows = Some(2);
+    local_settings.tui.terminal_resize_reflow_max_rows = Some(3);
     let started = app_server
         .resume_thread(
             &local_settings,

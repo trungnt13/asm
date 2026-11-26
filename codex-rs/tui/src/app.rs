@@ -930,6 +930,7 @@ impl App {
             }
             _ => self.sidebar_press = None,
         }
+        self.transcript_view.primary_selection = tui.primary_selection_available();
         self.transcript_view.bidi_layout = tui.terminal.bidi_layout;
         self.transcript_view.agent_links = self
             .side_retention_enabled(tui)
@@ -1671,7 +1672,17 @@ impl App {
         width: u16,
         render: impl FnOnce(u16, &dyn Renderable) -> T,
     ) -> T {
-        let chat_widget = self.chat_widget.as_renderable();
+        let footer = self.scrollback_cycle_footer(width);
+        let chat_widget = match &footer {
+            Some(footer) => self.chat_widget.as_renderable_with_options(
+                crate::bottom_pane::ComposerRenderOptions {
+                    footer: Some(footer),
+                    command_popup_placement: crate::bottom_pane::CommandPopupPlacement::Hidden,
+                    ..Default::default()
+                },
+            ),
+            None => self.chat_widget.as_renderable(),
+        };
         render(chat_widget.desired_height(width), &chat_widget)
     }
 }

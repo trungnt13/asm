@@ -148,13 +148,10 @@ async fn picker_side_worktree_fork_and_cd_run_on_the_production_stack() -> Resul
 
     // Starting and closing a side conversation both rebuild the displayed chat widget.
     // Repeat through the real event loop, whose dev-build frames share the production stack.
-    for (attempt, (command, title)) in [("/side", "Side"), ("/side", "Side"), ("/side", "Side")]
-        .into_iter()
-        .enumerate()
-    {
-        submit(&mut terminal, command)?;
-        terminal.wait_for_screen(&format!("{title} from main thread"))?;
-        terminal.wait_for_composer_label(title)?;
+    for attempt in 1..=3 {
+        submit(&mut terminal, "/side")?;
+        terminal.wait_for_screen("Side from main thread")?;
+        terminal.wait_for_composer_label("Side")?;
         terminal.ensure_running()?;
         // Kitty encoding preserves Ctrl+/ without the legacy Ctrl+_ ambiguity.
         terminal.write_input(b"\x1b[47;5u")?;
@@ -163,8 +160,8 @@ async fn picker_side_worktree_fork_and_cd_run_on_the_production_stack() -> Resul
         terminal.wait_for_screen("Ask ASM to do anything")?;
         terminal.ensure_running()?;
         terminal.write_input(b"\x1b[47;5u")?;
-        terminal.wait_for_screen(&format!("{title} from main thread"))?;
-        terminal.wait_for_composer_label(title)?;
+        terminal.wait_for_screen("Side from main thread")?;
+        terminal.wait_for_composer_label("Side")?;
         terminal.ensure_running()?;
         terminal.write_input(b"\x03")?;
         terminal.wait_for_screen("STACK_SAVED_HISTORY")?;

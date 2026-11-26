@@ -28,9 +28,56 @@ static HASH_LOCATION_SUFFIX_RE: LazyLock<Regex> =
     });
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct SourceLocation {
+pub(crate) struct SourcePoint {
     pub(crate) line: usize,
-    pub(crate) column: usize,
+    pub(crate) column: Option<usize>,
+}
+
+/// One-based source coordinates. An end point denotes an inclusive range of lines.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct SourceLocation {
+    pub(crate) start: SourcePoint,
+    pub(crate) end: Option<SourcePoint>,
+}
+
+impl SourceLocation {
+    pub(crate) fn single(line: usize, column: Option<usize>) -> Self {
+        Self {
+            // Single locations historically treat zero coordinates as one.
+            start: SourcePoint {
+                line: line.max(1),
+                column: column.map(|n| n.max(1)),
+            },
+            end: None,
+        }
+    }
+
+    // The suffix matchers validate the shape and normalize both spellings to colon form.
+    fn parse(suffix: &str) -> Option<Self> {
+        let mut points = suffix.strip_prefix(':')?.split(['-', '–']);
+        let parse_point = |point: &str| {
+            let mut fields = point.split(':');
+            Some(SourcePoint {
+                line: fields.next()?.parse().ok()?,
+                column: fields.next().map(str::parse).transpose().ok()?,
+            })
+        };
+        let start = parse_point(points.next()?)?;
+        let Some(end) = points.next() else {
+            return Some(Self::single(start.line, start.column));
+        };
+        let end = parse_point(end)?;
+        // Missing columns span from the start of the first line to the end of the last.
+        let first = (start.line, start.column.unwrap_or(1));
+        let last = (end.line, end.column.unwrap_or(usize::MAX));
+        if start.line == 0 || start.column == Some(0) || end.column == Some(0) || first > last {
+            return None;
+        }
+        Some(Self {
+            start,
+            end: Some(end),
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -55,22 +102,16 @@ pub(crate) fn sidebar_file_link(destination: &str) -> Option<FileLink> {
     if destination.len() > 8192 || destination.contains('?') {
         return None;
     }
-    if destination.starts_with("file://") && Url::parse(destination).ok()?.has_host() {
+    if has_file_scheme(destination) && Url::parse(destination).ok()?.has_host() {
         return None;
     }
-    let (path, location) = parse_local_link_target(destination)?;
+    let (path, location) = parse_local_link_target(destination, /*for_navigation*/ true)?;
     if destination.contains('#') && location.is_none() {
         return None;
     }
-    let location = if let Some(suffix) = location {
-        let start = suffix.strip_prefix(':')?.split(['-', '–']).next()?;
-        let (line, column) = start.split_once(':').unwrap_or((start, "1"));
-        Some(SourceLocation {
-            line: line.parse::<usize>().ok()?.max(1),
-            column: column.parse::<usize>().ok()?.max(1),
-        })
-    } else {
-        None
+    let location = match location {
+        Some(suffix) => Some(SourceLocation::parse(&suffix)?),
+        None => None,
     };
     (!path.is_empty()
         && !path.ends_with('/')
@@ -82,10 +123,72 @@ pub(crate) fn sidebar_file_link(destination: &str) -> Option<FileLink> {
     .then_some(FileLink { path, location })
 }
 
-pub(super) fn is_local_path_like_link(dest_url: &str) -> bool {
-    dest_url
+/// Recognize complete, path-shaped range tokens in prose. Explicit Markdown links also
+/// support spaces and extensionless filenames. Never infer a file from a bare number or URL.
+pub(super) fn bare_file_ranges<'a>(
+    text: &'a str,
+    prefix: &str,
+) -> impl Iterator<Item = (std::range::Range<usize>, FileLink)> + 'a {
+    // A formatting boundary may split a path or URL (e.g. src/__tests__/file.ts).
+    // Only start a link on a complete token, including one enclosed in emphasis.
+    let prefix = prefix.strip_suffix('\\').unwrap_or(prefix);
+    let at_boundary = prefix
+        .trim_end_matches(['*', '_', '~'])
+        .chars()
+        .next_back()
+        .is_none_or(|ch| {
+            ch.is_whitespace() || matches!(ch, '(' | '[' | '<' | '|' | '>' | '"' | '\'')
+        });
+    text.split_whitespace().filter_map(move |token| {
+        if !at_boundary && text.substr_range(token)?.start == 0 {
+            return None;
+        }
+        let token =
+            token.trim_end_matches([')', ']', '>', '"', '\'', '.', ',', ';', ':', '!', '?']);
+        if !token.ends_with(|ch: char| ch.is_ascii_digit())
+            || !token.contains(['-', '–'])
+            || !token.contains([':', '#'])
+        {
+            return None;
+        }
+        // Strip unmatched prose wrappers, preserving balanced [id] and (group) directories.
+        let mut paren = token
+            .matches('(')
+            .count()
+            .saturating_sub(token.matches(')').count());
+        let mut bracket = token
+            .matches('[')
+            .count()
+            .saturating_sub(token.matches(']').count());
+        let candidate = token.trim_start_matches(|ch| {
+            let remaining = match ch {
+                '(' => &mut paren,
+                '[' => &mut bracket,
+                _ => return matches!(ch, '<' | '"' | '\''),
+            };
+            let trim = *remaining > 0;
+            *remaining = remaining.saturating_sub(1);
+            trim
+        });
+        let link = sidebar_file_link(candidate)?;
+        if link.location?.end.is_none()
+            || link.path.contains("://")
+            || !link.path.contains(['.', '/', '\\'])
+        {
+            return None;
+        }
+        Some((text.substr_range(candidate)?, link))
+    })
+}
+
+fn has_file_scheme(destination: &str) -> bool {
+    destination
         .get(..5)
         .is_some_and(|prefix| prefix.eq_ignore_ascii_case("file:"))
+}
+
+pub(super) fn is_local_path_like_link(dest_url: &str) -> bool {
+    has_file_scheme(dest_url)
         || dest_url.starts_with('/')
         || dest_url.starts_with("~/")
         || dest_url.starts_with("./")
@@ -114,7 +217,10 @@ pub(super) fn local_link_destination(destination: &str, cwd: Option<&Path>) -> O
     if destination.chars().any(char::is_control) || destination.len() > 8 * 1024 {
         return None;
     }
-    let (mut path, location) = parse_local_link_target(destination)?;
+    let (mut path, location) = parse_local_link_target(destination, /*for_navigation*/ true)?;
+    if let Some(location) = &location {
+        SourceLocation::parse(location)?;
+    }
     if !is_absolute_local_link_path(&path) {
         if path.starts_with("~/") {
             return None;
@@ -149,7 +255,8 @@ pub(super) fn local_link_destination(destination: &str, cwd: Option<&Path>) -> O
 /// This accepts the path shapes Codex emits today: `file://` URLs, absolute and relative paths,
 /// `~/...`, Windows paths, and `#L..C..` or `:line:col` suffixes.
 pub(super) fn render_local_link_target(dest_url: &str, cwd: Option<&Path>) -> Option<String> {
-    let (path_text, location_suffix) = parse_local_link_target(dest_url)?;
+    let (path_text, location_suffix) =
+        parse_local_link_target(dest_url, /*for_navigation*/ false)?;
     let mut rendered = display_local_link_path(&path_text, cwd);
     if let Some(location_suffix) = location_suffix {
         rendered.push_str(&location_suffix);
@@ -163,13 +270,12 @@ pub(super) fn render_local_link_target(dest_url: &str, cwd: Option<&Path>) -> Op
 /// normalization preserves home-relative paths and uses forward slashes as separators.
 /// A backslash in a POSIX file URI is part of the filename and is preserved.
 ///
-/// Returns `None` only when the destination looks like a `file://` URL but cannot be parsed into a
-/// local path. Plain path-like inputs always return `Some(...)` even if they are relative.
-fn parse_local_link_target(dest_url: &str) -> Option<(String, Option<String>)> {
-    if dest_url
-        .get(..5)
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("file:"))
-    {
+/// Navigation rejects partial ranges before decoding the filename.
+fn parse_local_link_target(
+    dest_url: &str,
+    for_navigation: bool,
+) -> Option<(String, Option<String>)> {
+    if has_file_scheme(dest_url) {
         let url = Url::parse(dest_url).ok()?;
         // Infer the path's OS from the URI, not the host running the TUI.
         let path = PathUri::parse(&url[..url::Position::AfterPath]).ok()?;
@@ -179,14 +285,25 @@ fn parse_local_link_target(dest_url: &str) -> Option<(String, Option<String>)> {
         } else {
             normalize_local_link_path_text(&native_path)
         };
-        let mut location_suffix = url
-            .fragment()
-            .and_then(normalize_hash_location_suffix_fragment);
-        if location_suffix.is_none()
-            && let Some(suffix) = extract_colon_location_suffix(url.path())
-        {
-            path_text.truncate(path_text.len() - suffix.len());
-            location_suffix = Some(suffix);
+        let mut location_suffix = url.fragment().and_then(|fragment| {
+            let fragment = urlencoding::decode(fragment).ok()?;
+            normalize_hash_location_suffix_fragment(&fragment).or_else(|| {
+                // Lexically resolved colon references keep their numeric fragment for OSC 8.
+                let suffix = format!(":{fragment}");
+                (extract_colon_location_suffix(&suffix).as_deref() == Some(suffix.as_str()))
+                    .then_some(suffix)
+            })
+        });
+        if location_suffix.is_none() {
+            let mut raw_path = url.path();
+            if let Some(suffix) = extract_colon_location_suffix(raw_path) {
+                raw_path = &raw_path[..raw_path.len() - suffix.len()];
+                path_text.truncate(path_text.len() - suffix.len());
+                location_suffix = Some(suffix);
+            }
+            if for_navigation && has_unparsed_range(raw_path) {
+                return None;
+            }
         }
         return Some((path_text, location_suffix));
     }
@@ -201,20 +318,36 @@ fn parse_local_link_target(dest_url: &str) -> Option<(String, Option<String>)> {
         path_text = candidate_path;
         location_suffix = Some(normalized);
     }
-    if location_suffix.is_none()
-        && let Some(suffix) = extract_colon_location_suffix(path_text)
-    {
-        let path_len = path_text.len().saturating_sub(suffix.len());
-        path_text = &path_text[..path_len];
-        location_suffix = Some(suffix);
+    // A valid hash location disambiguates colons and dashes in POSIX filenames.
+    if location_suffix.is_none() {
+        if let Some(suffix) = extract_colon_location_suffix(path_text) {
+            let path_len = path_text.len().saturating_sub(suffix.len());
+            path_text = &path_text[..path_len];
+            location_suffix = Some(suffix);
+        }
+        if for_navigation && has_unparsed_range(path_text) {
+            return None;
+        }
     }
-
     let decoded_path_text =
         urlencoding::decode(path_text).unwrap_or(std::borrow::Cow::Borrowed(path_text));
     Some((
         normalize_local_link_path_text(&decoded_path_text),
         location_suffix,
     ))
+}
+
+// After removing a valid location, a remaining point followed by a dash
+// signals a malformed or extra range. Ignore directories and filename stems.
+fn has_unparsed_range(path: &str) -> bool {
+    let tail = path.rsplit(['.', '/', '\\']).next().unwrap_or(path);
+    let tail = &tail[tail.rfind('#').unwrap_or(0)..];
+    tail.rsplit(['-', '–']).skip(1).any(|point| {
+        COLON_LOCATION_SUFFIX_RE.is_match(point)
+            || point
+                .strip_prefix('#')
+                .is_some_and(|fragment| HASH_LOCATION_SUFFIX_RE.is_match(fragment))
+    })
 }
 
 /// Normalize a hash fragment like `L12` or `L12C3-L14C9` into the display suffix we render.
