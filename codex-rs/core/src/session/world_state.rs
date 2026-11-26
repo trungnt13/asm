@@ -579,6 +579,7 @@ impl Session {
                         .multi_agent_v2
                         .subagent_model_list
                         .as_deref(),
+                    &turn_context.subagent_context_windows,
                 )
             } else {
                 ModelCatalogState::default()

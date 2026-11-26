@@ -53,11 +53,15 @@ static CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
 });
 
 pub fn provider_for_model(model: &str) -> Option<&'static str> {
+    bundled_provider_model(model).map(|(provider, _)| provider)
+}
+
+pub fn bundled_provider_model(model: &str) -> Option<(&'static str, &'static ModelInfo)> {
     CATALOG
         .models
         .iter()
         .find(|entry| entry.model.slug == model)
-        .and_then(|entry| entry.model_provider.as_deref())
+        .and_then(|entry| Some((entry.model_provider.as_deref()?, &entry.model)))
 }
 
 pub fn provider_has_model_bindings(provider: &str) -> bool {

@@ -2012,6 +2012,14 @@ impl Config {
         workspace_roots
     }
 
+    pub(crate) fn inherited_subagent_context_window(&self) -> Option<i64> {
+        if self.features.enabled(Feature::SubagentDefaultContextLimits) {
+            None
+        } else {
+            self.model_context_window
+        }
+    }
+
     pub fn to_models_manager_config(&self) -> ModelsManagerConfig {
         ModelsManagerConfig {
             chat_completions: self.model_provider.wire_api == WireApi::ChatCompletions,
