@@ -45,6 +45,7 @@ use codex_model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
 use codex_model_provider_info::OLLAMA_OSS_PROVIDER_ID;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
+use codex_protocol::config_types::ExternalModelRoute;
 use codex_protocol::config_types::ForcedLoginMethod;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
@@ -591,12 +592,10 @@ pub struct ConfigToml {
     /// Load bundled external models into the default catalog. Defaults to true.
     pub load_external_models_json: Option<bool>,
 
-    /// Add or override external models by canonical model ID. Accepted only in
-    /// user configuration. Entries may set catalog metadata, an alias, and a
-    /// named model provider. Providers with `model_catalog_url` accept only
-    /// aliases and provider bindings, not metadata overrides.
+    /// Route external models by canonical model ID. Accepted only in user configuration.
+    /// Use `model_catalog_json` to supply complete model metadata for a custom catalog.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub external_models: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
+    pub external_models: BTreeMap<String, ExternalModelRoute>,
 
     /// Deprecated: `friendly` and `pragmatic` no longer select a style.
     pub personality: Option<Personality>,

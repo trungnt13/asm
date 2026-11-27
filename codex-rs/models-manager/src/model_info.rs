@@ -139,22 +139,6 @@ fn is_h1_heading(line: &str) -> bool {
 /// Build a minimal fallback model descriptor for missing/unknown slugs.
 pub fn model_info_from_slug(slug: &str) -> ModelInfo {
     warn!("Unknown model {slug} is used. This will use fallback model metadata.");
-    generic_model_info(slug)
-}
-
-pub(crate) fn configured_model_defaults(slug: &str) -> ModelInfo {
-    ModelInfo {
-        visibility: ModelVisibility::List,
-        supports_reasoning_summary_parameter: false,
-        context_window: None,
-        max_context_window: None,
-        input_modalities: vec![InputModality::Text],
-        tool_mode: Some(ToolMode::Direct),
-        ..generic_model_info(slug)
-    }
-}
-
-fn generic_model_info(slug: &str) -> ModelInfo {
     ModelInfo {
         slug: slug.to_string(),
         display_name: slug.to_string(),

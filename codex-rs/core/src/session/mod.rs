@@ -2566,13 +2566,7 @@ impl Session {
                     }
                 };
 
-            // The refreshed snapshot is raw provider metadata; local overrides win.
-            if !updated
-                .original_config_do_not_use
-                .external_models
-                .has_metadata_overrides(updated.step_settings.collaboration_mode.model())
-                && let Some(catalog) = self.services.models_manager.refreshed_model_catalog()
-            {
+            if let Some(catalog) = self.services.models_manager.refreshed_model_catalog() {
                 model_catalog_settings::normalize(&mut updated.step_settings, &catalog);
             }
 
