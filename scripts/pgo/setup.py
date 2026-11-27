@@ -14,9 +14,15 @@ import tempfile
 import urllib.request
 
 
+PROFILE_MANIFESTS = {
+    "x86_64-unknown-linux-gnu": "agent-linux.json",
+    "x86_64-unknown-linux-musl": "agent-linux-musl.json",
+}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--target", required=True)
+    parser.add_argument("--target", required=True, choices=PROFILE_MANIFESTS)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--env-file", type=Path, help="Append Cargo settings as NAME=VALUE lines"
@@ -24,11 +30,14 @@ def main():
     parser.add_argument("--lto", choices=("thin", "fat"), default="thin")
     args = parser.parse_args()
     codegen_units = 1 if args.lto == "fat" else 4
-    manifest = json.loads(
-        Path(__file__).resolve().with_name("agent-linux.json").read_text()
-    )
+    manifest_path = Path(__file__).resolve().with_name(PROFILE_MANIFESTS[args.target])
+    if not manifest_path.is_file():
+        parser.error(
+            f"No published PGO profile is pinned for {args.target}: {manifest_path.name}"
+        )
+    manifest = json.loads(manifest_path.read_text())
     if args.target != manifest["target"]:
-        parser.error("No PGO profile is selected for this target")
+        parser.error(f"PGO manifest {manifest_path.name} does not match {args.target}")
     args.output.mkdir(parents=True, exist_ok=True)
     profile = args.output.resolve() / "agent.profdata"
     with tempfile.TemporaryDirectory(dir=args.output) as temporary:

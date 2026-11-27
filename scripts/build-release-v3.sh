@@ -5,7 +5,7 @@ tag=${1:?expected a release tag}
 output=${2:?expected a local output directory}
 v8_dir=${3:?expected a directory with the fork V8 assets and release.json}
 python=${PYTHON:-python3}
-target=x86_64-unknown-linux-gnu
+target=x86_64-unknown-linux-musl
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
 
@@ -63,23 +63,46 @@ done
 
 python=$(command -v "$python")
 rustup=$(command -v rustup)
+zig=$(command -v zig) || { echo 'Install Zig 0.14.0 for musl v3.' >&2; exit 1; }
+if [[ "$("$zig" version)" != 0.14.0 ]]; then
+  echo 'Install Zig 0.14.0 for musl v3.' >&2
+  exit 1
+fi
 toolchain=$("$python" -I -c 'import tomllib; print(tomllib.load(open("codex-rs/rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
 build_env=(
-  env -i "HOME=$HOME" "PATH=$(dirname -- "$rustup"):/usr/bin:/bin"
+  env -i "HOME=$HOME" "PATH=$(dirname -- "$rustup"):$(dirname -- "$zig"):/usr/bin:/bin"
   "RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}" "RUSTUP_TOOLCHAIN=$toolchain"
   "CARGO_HOME=$cargo_home" "CARGO_TARGET_DIR=$output/target" CARGO_NET_GIT_FETCH_WITH_CLI=true
   CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_BUILD_JOBS=1
   CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO=off
-  "RUSTFLAGS=-C target-cpu=x86-64-v3" CC=/usr/bin/cc CXX=/usr/bin/c++
-  CFLAGS=-march=x86-64-v3 CXXFLAGS=-march=x86-64-v3
+  "RUSTFLAGS=-Ctarget-cpu=x86-64-v3 -Clink-arg=-Wl,--no-dynamic-linker"
+  "STABLE_GIT_COMMIT=$sha"
   "CODEX_BWRAP_SOURCE_DIR=$root/codex-rs/vendor/bubblewrap"
   "RUSTY_V8_ARCHIVE=$v8_dir/librusty_v8_ptrcomp_sandbox_release_${target}.a.gz"
   "RUSTY_V8_SRC_BINDING_PATH=$v8_dir/src_binding_ptrcomp_sandbox_release_${target}.rs"
-  AWS_LC_SYS_NO_JITTER_ENTROPY=1 AWS_LC_SYS_NO_JITTER_ENTROPY_x86_64_unknown_linux_gnu=1
+  AWS_LC_SYS_NO_JITTER_ENTROPY=1 AWS_LC_SYS_NO_JITTER_ENTROPY_x86_64_unknown_linux_musl=1
 )
+
+installed_targets=$("${build_env[@]}" "$rustup" target list --installed --toolchain "$toolchain")
+if ! grep -Fxq "$target" <<< "$installed_targets"; then
+  echo "Install the musl Rust standard library: rustup target add --toolchain $toolchain $target" >&2
+  exit 1
+fi
 
 v8_version=$("${build_env[@]}" "$python" .github/scripts/rusty_v8_bazel.py resolved-v8-crate-version)
 "${build_env[@]}" "$python" .github/scripts/verify-fork-v8.py "$v8_dir/release.json" "$v8_dir" "$target" "$v8_version"
+
+musl_settings="$output/musl.env"
+: > "$musl_settings"
+"${build_env[@]}" TARGET="$target" GITHUB_ENV="$musl_settings" RUNNER_TEMP="$output/tools" \
+  CODEX_MUSL_RELEASE_LINK_FLAGS=1 bash .github/scripts/install-musl-build-tools.sh
+while IFS= read -r setting; do
+  case "$setting" in
+    # Zig spells the x86-64-v3 CPU name with underscores.
+    CFLAGS=*|CXXFLAGS=*) setting+=" -march=x86_64_v3" ;;
+  esac
+  build_env+=("$setting")
+done < "$musl_settings"
 
 cd codex-rs
 echo "Building $tag at $sha: $target, x86-64-v3, Fat LTO, 1 codegen unit, PGO"
@@ -98,8 +121,10 @@ archive="$output/staging/$name"
 "${build_env[@]}" "CODEX_REPO_ROOT=$root" "$python" ../scripts/build_codex_package.py --force --target "$target" --cargo-profile release \
   --entrypoint-bin "$release_dir/codex" --code-mode-host-bin "$release_dir/codex-code-mode-host" \
   --exec-server-bin "$release_dir/codex-exec-server" --bwrap-bin "$release_dir/bwrap" \
-  --package-dir "$output/staging/package" --archive-output "$archive"
-"${build_env[@]}" "$python" ../.github/scripts/smoke-codex-archive.py "$archive" | tee "$output/smoke.log"
+  --package-dir "$output/staging/package"
+cd "$root"
+PYTHON="$python" bash .github/scripts/package-asm-linux-voice.sh "$output/staging/package" "$version" "$archive"
+"${build_env[@]}" "$python" .github/scripts/smoke-codex-archive.py "$archive" | tee "$output/smoke.log"
 digest=$(sha256sum "$archive")
 printf '%s\n%s\n' "$sha" "${digest%% *}" > "$archive.provenance"
 mv -- "$archive.provenance" "$output/$name.provenance"

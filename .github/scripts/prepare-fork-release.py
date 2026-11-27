@@ -16,10 +16,8 @@ AUTHOR = "Trung Ngo"
 EMAIL = "1390402+trungnt13@users.noreply.github.com"
 RELEASE_WORKFLOW = ".github/workflows/fork-rust-release.yml"
 CANDIDATE_SUBJECT = "Prepare ASM {version} release"
-NATIVE_CHECKS = {
-    "Verify published aarch64-apple-darwin binaries",
-    "Verify published x86_64-unknown-linux-gnu binaries",
-}
+LINUX_GNU = "x86_64-unknown-linux-gnu"
+LINUX_MUSL = "x86_64-unknown-linux-musl"
 PUBLICATION_JOBS = {
     "Complete and verify immutable release",
     "Publish and verify immutable release",
@@ -33,6 +31,26 @@ def git(*arguments):
 
 def git_file(revision, path):
     return subprocess.check_output(["git", "show", f"{revision}:{path}"], text=True)
+
+
+def installer_linux_target(installer):
+    declarations = [
+        line
+        for line in installer.splitlines()
+        if line.startswith("linux_release_target=")
+    ]
+    if declarations == [f'linux_release_target="{LINUX_MUSL}"']:
+        return LINUX_MUSL
+    if declarations:
+        raise ValueError("Invalid pinned Linux release target")
+    return LINUX_GNU  # Only installers pinned before the musl cutover lack the declaration.
+
+
+def native_checks(linux_target):
+    return {
+        "Verify published aarch64-apple-darwin binaries",
+        f"Verify published {linux_target} binaries",
+    }
 
 
 def api(path, *arguments, allow_missing=False):
@@ -180,34 +198,43 @@ def complete_candidate(tag, revision):
     if release and not release["draft"]:
         if not tag_sha:
             raise ValueError("Published release has no matching remote tag")
-        return published_assets_complete(release)
+        installer = git_file(revision, "scripts/install/install.sh")
+        return published_assets_complete(release, installer_linux_target(installer))
     return False
 
 
-def published_assets_complete(release):
+def published_assets_complete(release, linux_target):
     assets = release.get("assets", [])
     names = {asset["name"] for asset in assets}
     legacy = {
         "codex-aarch64-apple-darwin.tar.gz",
-        "codex-x86_64-unknown-linux-gnu.tar.gz",
+        f"codex-{linux_target}.tar.gz",
         "SHA256SUMS",
         "install.sh",
     }
     staged = legacy | {
         "SHA256SUMS-aarch64-apple-darwin",
-        "SHA256SUMS-x86_64-unknown-linux-gnu",
+        f"SHA256SUMS-{linux_target}",
     }
-    v3_archive = "codex-x86_64-unknown-linux-gnu-v3.tar.gz"
-    v3_manifest = "SHA256SUMS-x86_64-unknown-linux-gnu-v3"
+    v3_archive = f"codex-{linux_target}-v3.tar.gz"
+    v3_manifest = f"SHA256SUMS-{linux_target}-v3"
     if release["draft"] or len(names) != len(assets):
         return False
-    if names in (legacy, staged):
-        return True
-    if names - {v3_archive, v3_manifest} != staged:
+    base = names - {v3_archive, v3_manifest}
+    if base != staged and not (linux_target == LINUX_GNU and names == legacy):
         return False
-    return v3_archive in names or not any(
+    required = base
+    if any(
         asset["name"] == v3_manifest and asset.get("state") == "uploaded"
         for asset in assets
+    ):
+        required |= {v3_archive, v3_manifest}
+    return required <= names and all(
+        asset.get("state") == "uploaded"
+        and asset.get("size", 0) > 0
+        and re.fullmatch(r"sha256:[0-9a-f]{64}", asset.get("digest") or "")
+        for asset in assets
+        if asset["name"] in required
     )
 
 
@@ -219,14 +246,17 @@ def publication_run_succeeded(run):
     )
 
 
-def completed_publication(run, candidate, tag, candidate_ref):
+def completed_publication(run, candidate, tag, candidate_ref, linux_target):
     if not publication_run_succeeded(run):
         return False
     jobs = api(
         f"repos/{REPOSITORY}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100"
     )["jobs"]
     succeeded = {job["name"] for job in jobs if job["conclusion"] == "success"}
-    if not (NATIVE_CHECKS | {SYNC_JOB}) <= succeeded or not succeeded & PUBLICATION_JOBS:
+    if (
+        not (native_checks(linux_target) | {SYNC_JOB}) <= succeeded
+        or not succeeded & PUBLICATION_JOBS
+    ):
         return False
     if run["id"] == int(candidate_ref.rsplit("-", 1)[1]):
         return run["event"] == "workflow_dispatch" and run["head_branch"] == "main"
@@ -308,7 +338,10 @@ def verify_base_release(run_id, tag, revision):
             break
         page += 1
     succeeded = {name for name, job in latest.items() if job["conclusion"] == "success"}
-    if not NATIVE_CHECKS <= succeeded or not succeeded & PUBLICATION_JOBS:
+    linux_target = installer_linux_target(
+        git_file(revision, "scripts/install/install.sh")
+    )
+    if not native_checks(linux_target) <= succeeded or not succeeded & PUBLICATION_JOBS:
         raise ValueError(f"Run {run_id} lacks successful publication and native checks")
     if candidate and (
         SYNC_JOB not in succeeded
@@ -389,7 +422,14 @@ def next_release_version(upstream):
     resume_runs = None
     for tag in (existing_candidates | proof_tags) - superseded:
         release = releases.get(tag)
-        if not tags.get(tag) or not release or not published_assets_complete(release):
+        if (
+            not tags.get(tag)
+            or not release
+            or not any(
+                published_assets_complete(release, target)
+                for target in (LINUX_GNU, LINUX_MUSL)
+            )
+        ):
             raise ValueError(f"Incomplete release {tag}; resume its original run")
         # Superseded complete releases need not depend on retained Actions logs forever.
         if tag not in proof_tags:
@@ -402,9 +442,18 @@ def next_release_version(upstream):
                 f"Cannot prove completed candidate for {tag}; ask the owner"
             )
         for reference in references:
+            git("fetch", "--no-tags", "origin", reference)
+            if git("rev-parse", "FETCH_HEAD^{commit}") != tags[tag]:
+                raise ValueError(f"Candidate {reference} changed during lookup")
+            installer = git_file(tags[tag], "scripts/install/install.sh")
+            linux_target = installer_linux_target(installer)
+            if not published_assets_complete(release, linux_target):
+                raise ValueError(
+                    f"Release assets for {tag} do not match its pinned Linux target"
+                )
             run_id = reference.rsplit("-", 1)[1]
             run = api(f"repos/{REPOSITORY}/actions/runs/{run_id}")
-            if completed_publication(run, tags[tag], tag, reference):
+            if completed_publication(run, tags[tag], tag, reference, linux_target):
                 completed.add(tag)
                 break
             if resume_runs is None:
@@ -419,7 +468,7 @@ def next_release_version(upstream):
                         break
                     page += 1
             if any(
-                completed_publication(resume, tags[tag], tag, reference)
+                completed_publication(resume, tags[tag], tag, reference, linux_target)
                 for resume in resume_runs
             ):
                 completed.add(tag)
@@ -517,8 +566,8 @@ def output(revision, tag="", candidate_ref="", complete=False, publish=False):
     print(
         f"Release source: {revision}; tag: {tag or '(build only)'}; candidate: {candidate_ref or '(none)'}"
     )
-    installer = git_file(revision, "scripts/install/install.sh") if publish else ""
-    staged = (
+    installer = git_file(revision, "scripts/install/install.sh")
+    staged = publish and (
         "SHA256SUMS-$vendor_target" in installer
         or "SHA256SUMS-$asset_target" in installer
     )
@@ -530,6 +579,7 @@ def output(revision, tag="", candidate_ref="", complete=False, publish=False):
             "complete": str(complete).lower(),
             "publish": str(publish).lower(),
             "staged": str(staged).lower(),
+            "linux_target": installer_linux_target(installer),
         }.items():
             print(f"{key}={value}", file=stream)
 

@@ -5,9 +5,9 @@ set -euo pipefail
 # Other reuse requires a successful same-commit main build for the selected target.
 repo="$GITHUB_REPOSITORY"
 sha="$(git rev-parse HEAD)"
-asset_names='["codex-aarch64-apple-darwin","codex-x86_64-unknown-linux-gnu"]'
+asset_names='["codex-aarch64-apple-darwin","codex-x86_64-unknown-linux-musl"]'
 if [[ -n "${TARGET:-}" ]]; then
-  case "$TARGET" in aarch64-apple-darwin|x86_64-unknown-linux-gnu) ;; *) echo "Unsupported artifact target" >&2; exit 1;; esac
+  case "$TARGET" in aarch64-apple-darwin|x86_64-unknown-linux-gnu|x86_64-unknown-linux-musl) ;; *) echo "Unsupported artifact target" >&2; exit 1;; esac
   asset_names="[\"codex-${TARGET}\"]"
 fi
 if [[ -n "${CANDIDATE_REF:-}" ]]; then

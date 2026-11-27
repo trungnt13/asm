@@ -14,7 +14,9 @@ import unittest
 INSTALL_SCRIPT = Path(__file__).with_name("install.sh")
 VERSION = "0.162.1-alpha.18.1.1"
 NEXT_VERSION = "0.162.1-alpha.18.1.2"
-TARGET = "x86_64-unknown-linux-gnu"
+TARGET = "x86_64-unknown-linux-musl"
+LEGACY_TARGET = "x86_64-unknown-linux-gnu"
+VOICE_LIBRARY = "lib/gstreamer-1.0/libgstapp.so"
 
 
 def write_release(
@@ -28,6 +30,7 @@ def write_release(
     invalid_digest=False,
 ):
     source = root / f"source-{version}"
+    target = TARGET if platform_manifest else LEGACY_TARGET
     if source.exists():
         shutil.rmtree(source)
     for name in (
@@ -48,7 +51,7 @@ def write_release(
     package_metadata = {
         "layoutVersion": 1,
         "version": VERSION if wrong_version else version,
-        "target": TARGET,
+        "target": target,
         "variant": "codex",
         "entrypoint": "bin/codex",
         "resourcesDir": "codex-resources",
@@ -56,15 +59,39 @@ def write_release(
     }
     if platform_manifest:
         package_metadata["execServer"] = "bin/codex-exec-server"
+        voice = source / "codex-resources/voice"
+        for name in (
+            "bin/codex-voice-host",
+            "manifest.json",
+            "runtime.json",
+            "NOTICE.md",
+            "sources.json",
+            "licenses/LGPL-2.1.txt",
+            "licenses/Opus.txt",
+            "licenses/PCRE2.md",
+            "licenses/libffi.txt",
+            "licenses/proxy-libintl.txt",
+            "licenses/sljit.txt",
+            "licenses/zlib.txt",
+            VOICE_LIBRARY,
+        ):
+            path = voice / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("voice resource\n")
+            if name == "bin/codex-voice-host":
+                path.chmod(0o755)
+        (voice / "runtime.json").write_text(
+            json.dumps({"libraries": [{"path": VOICE_LIBRARY, "sha256": "0" * 64}]}, indent=2)
+        )
     (source / "codex-package.json").write_text(json.dumps(package_metadata))
-    asset = f"codex-{TARGET}.tar.gz"
+    asset = f"codex-{target}.tar.gz"
     archive = root / f"{version}-{asset}"
     with tarfile.open(archive, "w:gz") as tar:
         for path in sorted(source.rglob("*")):
             tar.add(path, arcname=str(path.relative_to(source)), recursive=False)
     archive_digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     installer_digest = hashlib.sha256(INSTALL_SCRIPT.read_bytes()).hexdigest()
-    manifest_name = f"SHA256SUMS-{TARGET}" if platform_manifest else "SHA256SUMS"
+    manifest_name = f"SHA256SUMS-{target}" if platform_manifest else "SHA256SUMS"
     manifest = root / f"{version}-{manifest_name}"
     contents = f"{'0' * 64 if bad_checksum else archive_digest}  {asset}\n"
     if platform_manifest:
@@ -82,6 +109,8 @@ def write_release(
     if platform_manifest:
         assets.append({"name": "SHA256SUMS", "digest": f"sha256:{manifest_digest}"})
     metadata = root / f"{version}-metadata.json"
+    for asset_info in assets:
+        asset_info["state"] = "uploaded"
     metadata.write_text(json.dumps({"tag_name": f"v{version}", "assets": assets}))
     return archive, manifest, metadata
 
@@ -155,8 +184,10 @@ class InstallShTest(unittest.TestCase):
                 marker.parent.mkdir(parents=True)
                 marker.write_text("upstream-release")
                 current = root / "codex-home/packages/asm-standalone/current"
+                initial_release = "latest" if platform_manifest else VERSION
+                target = TARGET if platform_manifest else LEGACY_TARGET
                 for release, version, expected_downloads in (
-                    ("latest", VERSION, 3),
+                    (initial_release, VERSION, 3),
                     (VERSION, VERSION, 1),
                     (NEXT_VERSION, NEXT_VERSION, 3),
                 ):
@@ -167,7 +198,7 @@ class InstallShTest(unittest.TestCase):
                     result, requests = run_installer(root, release, files)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(len(requests), expected_downloads)
-                    self.assertEqual(current.resolve().name, f"{version}-{TARGET}")
+                    self.assertEqual(current.resolve().name, f"{version}-{target}")
                     for name in ("codex", "codex-code-mode-host"):
                         self.assertEqual(
                             (root / "install-bin" / name).resolve(),
@@ -175,6 +206,13 @@ class InstallShTest(unittest.TestCase):
                         )
                     self.assertEqual(marker.read_text(), "upstream-release")
                     self.assertFalse((current.parent / "auto-update-version").exists())
+                    if platform_manifest and expected_downloads == 1:
+                        library = current / "codex-resources/voice" / VOICE_LIBRARY
+                        library.unlink()
+                        repaired, requests = run_installer(root, release, files)
+                        self.assertEqual(repaired.returncode, 0, repaired.stderr)
+                        self.assertEqual(len(requests), 3)
+                        self.assertTrue(library.is_file())
 
     def test_bad_checksum_and_missing_helper_keep_current_selection(self):
         with tempfile.TemporaryDirectory() as directory:
