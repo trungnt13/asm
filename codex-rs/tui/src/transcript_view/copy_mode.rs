@@ -2,9 +2,14 @@
 //! Targets retain their original payloads and leave surrounding context when revealed.
 
 use super::*;
+use crate::clipboard_copy::CopyFormat;
 use crate::history_cell::AgentMarkdownCell;
+use crate::history_cell::FinalMessageSeparator;
+use crate::history_cell::InterruptionNotice;
 use crate::history_cell::ProposedPlanCell;
+use crate::history_cell::TurnActivityBoundary;
 use crate::history_cell::UserHistoryCell;
+use codex_protocol::models::MessagePhase;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -12,9 +17,12 @@ use std::ops::Range;
 
 pub(super) struct CopyMode {
     _guard: Option<Arc<crate::copy_input_guard::CopyInputGuard>>,
-    pub(super) response: Option<(EntryKey, Arc<str>)>,
-    pub(super) whole: bool,
-    pub(super) source: Option<String>,
+    turn: Option<Anchor>,
+    response: Option<Anchor>,
+    pub(super) awaiting_page: Option<KeyCode>,
+    ungrouped: bool,
+    whole: bool,
+    source: Option<String>,
     pub(super) label: &'static str,
 }
 
@@ -26,37 +34,39 @@ impl TranscriptView {
     ) -> bool {
         self.jump_to_latest();
         self.hold_position();
-        let latest = cells.iter().rposition(is_response);
         self.copy_mode = Some(CopyMode {
             _guard: guard,
-            response: latest.and_then(|index| {
-                let cell = &cells[index];
-                let text = if cell.as_any().is::<AgentMarkdownCell>() {
-                    // Raw lines retain this cell's visible Markdown after hidden directives
-                    // were removed during consolidation, independently of the latest cache.
-                    let markdown = cell
-                        .raw_lines()
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    crate::markdown_render::followup_labels(&markdown).into_owned()
-                } else {
-                    cell.copy_source()?.to_owned()
-                };
-                Some((EntryKey::cell(cell), Arc::from(text)))
-            }),
+            turn: None,
+            response: None,
+            awaiting_page: None,
+            ungrouped: false,
             whole: true,
             source: None,
             label: "Whole response",
         });
-        if !self.select_copy_response(cells) {
-            self.move_copy_target(cells, KeyCode::Up);
+        self.move_copy_turn(cells, KeyCode::End);
+        self.finish_copy_open(cells);
+        self.copy_mode.is_some()
+    }
+
+    fn finish_copy_open(&mut self, cells: &[Arc<dyn HistoryCell>]) {
+        let Some(mode) = &mut self.copy_mode else {
+            return;
+        };
+        if self.selection.is_some() || mode.awaiting_page.is_some() {
+            return;
+        }
+        // Preserve copying visible output when the conversation has no completed reply.
+        mode.ungrouped = true;
+        if let Some(index) = cells.iter().rposition(is_response) {
+            mode.response = Some(cell_anchor(cells, index));
+            self.select_copy_response(cells);
+        } else {
+            self.move_copy_target(cells, KeyCode::Left);
         }
         if self.selection.is_none() {
             self.jump_to_latest();
         }
-        self.copy_mode.is_some()
     }
 
     pub(super) fn handle_copy_mode_key(
@@ -64,20 +74,38 @@ impl TranscriptView {
         key: KeyEvent,
         cells: &[Arc<dyn HistoryCell>],
     ) -> Option<ViewAction> {
-        self.copy_mode.as_ref()?;
+        let mode = self.copy_mode.as_mut()?;
         let code = match crate::key_hint::normalize_key_parts(key.code, key.modifiers) {
             (KeyCode::Char('k'), KeyModifiers::NONE) => KeyCode::Up,
             (KeyCode::Char('j'), KeyModifiers::NONE) => KeyCode::Down,
             (KeyCode::Char('g'), KeyModifiers::NONE) => KeyCode::Home,
             (KeyCode::Char('g'), KeyModifiers::SHIFT) => KeyCode::End,
+            (KeyCode::Char('h'), KeyModifiers::NONE) => KeyCode::Left,
+            (KeyCode::Char('l'), KeyModifiers::NONE) => KeyCode::Right,
             _ => key.code,
         };
+        if self.selection.is_none() && mode.awaiting_page.is_some() && code != KeyCode::Esc {
+            return Some(ViewAction::Changed);
+        }
         match code {
-            KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End => {
-                self.move_copy_target(cells, code)
+            KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End if !mode.ungrouped => {
+                self.move_copy_turn(cells, code)
+            }
+            KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::Home
+            | KeyCode::End => {
+                mode.awaiting_page = None;
+                self.move_copy_target(cells, code);
             }
             KeyCode::Esc => self.jump_to_latest(),
             _ if key.code == KeyCode::Enter || crate::text_selection::is_copy_key(key) => {
+                if self.selection.is_none() {
+                    return Some(ViewAction::Changed);
+                }
+                mode.awaiting_page = None;
                 return Some(ViewAction::CopyAndFollow(
                     self.selected_text(cells).unwrap_or_default(),
                 ));
@@ -86,6 +114,57 @@ impl TranscriptView {
             _ => return Some(ViewAction::Changed),
         }
         Some(ViewAction::Changed)
+    }
+
+    fn move_copy_turn(&mut self, cells: &[Arc<dyn HistoryCell>], direction: KeyCode) {
+        let snapshot = self.snapshot_cells();
+        let cells = snapshot.as_deref().unwrap_or(cells);
+        let Some(mode) = &self.copy_mode else { return };
+        let current = mode.turn.map(|turn| self.resolve(cells, turn));
+        let mut ends = match direction {
+            KeyCode::Up => 0..current.unwrap_or(cells.len()),
+            KeyCode::Down => current.map_or(0, |index| index + 1)..cells.len(),
+            _ => 0..cells.len(),
+        };
+        let find_reply = |end| {
+            let (range, answer_start) = copy_turn_range(cells, end)?;
+            (answer_start..range.end)
+                .rev()
+                .find(|&index| is_whole_response(&cells[index]))
+                .map(|index| (end, index))
+        };
+        let target = if matches!(direction, KeyCode::Up | KeyCode::End) {
+            ends.rev().find_map(find_reply)
+        } else {
+            ends.find_map(find_reply)
+        };
+        let mode = self.copy_mode.as_mut().unwrap();
+        mode.awaiting_page = (target.is_none()
+            && matches!(direction, KeyCode::Up | KeyCode::End)
+            && self.history.has_unloaded_history())
+        .then_some(direction);
+        if let Some((end, index)) = target {
+            mode.turn = Some(cell_anchor(cells, end));
+            mode.response = Some(cell_anchor(cells, index));
+            self.select_copy_response(cells);
+        }
+    }
+
+    pub(crate) fn resume_copy_navigation(&mut self, cells: &[Arc<dyn HistoryCell>]) {
+        match self
+            .copy_mode
+            .as_mut()
+            .and_then(|mode| mode.awaiting_page.take())
+        {
+            Some(KeyCode::Left) => self.move_copy_target(cells, KeyCode::Left),
+            Some(direction) => {
+                self.move_copy_turn(cells, direction);
+                if direction == KeyCode::End {
+                    self.finish_copy_open(cells);
+                }
+            }
+            None => {}
+        }
     }
 
     fn move_copy_target(&mut self, cells: &[Arc<dyn HistoryCell>], direction: KeyCode) {
@@ -97,20 +176,27 @@ impl TranscriptView {
         }
         let Some(mode) = &self.copy_mode else { return };
         let label = mode.label;
+        let whole = mode.whole;
+        let turn = mode.turn;
         let edge = matches!(direction, KeyCode::Home | KeyCode::End);
-        let older = matches!(direction, KeyCode::Up | KeyCode::End);
-        if mode.whole && !older && !edge {
+        let older = matches!(direction, KeyCode::Left | KeyCode::Up | KeyCode::End);
+        if whole && !older && !edge {
             return;
         }
         let current = self
             .selection
             .as_ref()
-            .filter(|_| !mode.whole && !edge)
+            .filter(|_| !whole && !edge)
             .map(|s| (s.start.index, s.start.offset..s.end.offset));
+        let range = turn
+            .and_then(|anchor| copy_turn_range(cells, self.resolve(cells, anchor)))
+            .map_or(0..cells.len(), |(range, _)| range);
         let indices: Box<dyn Iterator<Item = usize>> = if older {
-            Box::new((0..current.as_ref().map_or(cells.len(), |(index, _)| index + 1)).rev())
+            Box::new(
+                (range.start..current.as_ref().map_or(range.end, |(index, _)| index + 1)).rev(),
+            )
         } else {
-            Box::new(current.as_ref().map_or(0, |(index, _)| *index)..cells.len())
+            Box::new(current.as_ref().map_or(range.start, |(index, _)| *index)..range.end)
         };
         for index in indices {
             let user = cells[index].as_any().downcast_ref::<UserHistoryCell>();
@@ -248,8 +334,12 @@ impl TranscriptView {
         }
         if !older {
             self.select_copy_response(cells);
-        } else if self.history.has_unloaded_history() {
-            self.jump_to_entry(cells, /*index*/ 0);
+        } else if range.start == 0 && self.history.has_unloaded_history() {
+            if turn.is_some() {
+                self.copy_mode.as_mut().unwrap().awaiting_page = Some(KeyCode::Left);
+            } else {
+                self.jump_to_entry(cells, /*index*/ 0);
+            }
         }
     }
 
@@ -318,23 +408,48 @@ impl TranscriptView {
     }
 
     fn select_copy_response(&mut self, cells: &[Arc<dyn HistoryCell>]) -> bool {
-        let Some(mode) = &mut self.copy_mode else {
+        let Some(response) = self.copy_mode.as_ref().and_then(|mode| mode.response) else {
             return false;
         };
-        let Some((key, _)) = &mode.response else {
-            return false;
-        };
-        let Some(index) = cells.iter().position(|cell| EntryKey::cell(cell) == *key) else {
-            return false;
-        };
-        mode.whole = true;
-        mode.source = None;
-        mode.label = "Whole response";
+        let index = self.resolve(cells, response);
         let Some(layout) = self.layout(cells, index) else {
             return false;
         };
+        let mode = self.copy_mode.as_mut().unwrap();
+        mode.whole = true;
+        mode.source = None;
+        mode.label = "Whole response";
         self.select_copy_range(cells, index, 0..layout.text().len());
         true
+    }
+
+    pub(super) fn copy_mode_payload(
+        &self,
+        cells: &[Arc<dyn HistoryCell>],
+    ) -> Option<(String, CopyFormat)> {
+        let mode = self.copy_mode.as_ref()?;
+        if !mode.whole {
+            return mode
+                .source
+                .clone()
+                .map(|text| (text, CopyFormat::PlainText));
+        }
+        let snapshot = self.snapshot_cells();
+        let cells = snapshot.as_deref().unwrap_or(cells);
+        let cell = cells.get(self.resolve(cells, mode.response?))?;
+        let text = if cell.as_any().is::<AgentMarkdownCell>() {
+            // The visible source excludes hidden directives.
+            let markdown = cell
+                .raw_lines()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            crate::markdown_render::followup_labels(&markdown).into_owned()
+        } else {
+            cell.copy_source()?.to_owned()
+        };
+        Some((text, CopyFormat::Markdown))
     }
 }
 
@@ -354,6 +469,53 @@ pub(super) fn normalized(text: &str) -> String {
         .join("\n")
         .trim()
         .to_owned()
+}
+
+fn cell_anchor(cells: &[Arc<dyn HistoryCell>], index: usize) -> Anchor {
+    Anchor {
+        key: EntryKey::cell(&cells[index]),
+        index,
+        offset: 0,
+        row_bias: 0,
+    }
+}
+
+fn copy_turn_range(cells: &[Arc<dyn HistoryCell>], end: usize) -> Option<(Range<usize>, usize)> {
+    let turn_id = cells[end]
+        .as_any()
+        .downcast_ref::<FinalMessageSeparator>()?
+        .turn_id
+        .as_deref()?;
+    let mut start = end;
+    let mut begin = None;
+    while start > 0 {
+        let index = start - 1;
+        let cell = cells[index].as_any();
+        let boundary = cell.downcast_ref::<TurnActivityBoundary>();
+        if cell.is::<FinalMessageSeparator>()
+            || cell.is::<InterruptionNotice>()
+            || matches!(boundary, Some(TurnActivityBoundary::UnsuccessfulEnd))
+        {
+            break;
+        }
+        if let Some(TurnActivityBoundary::Begin(id)) = boundary {
+            if turn_id != id {
+                start = begin.unwrap_or(start);
+                break;
+            }
+            begin = Some(index);
+        }
+        start = index;
+    }
+    Some((start..end, begin.unwrap_or(start)))
+}
+
+fn is_whole_response(cell: &Arc<dyn HistoryCell>) -> bool {
+    cell.as_any().is::<ProposedPlanCell>()
+        || cell
+            .as_any()
+            .downcast_ref::<AgentMarkdownCell>()
+            .is_some_and(|message| matches!(message.phase, None | Some(MessagePhase::FinalAnswer)))
 }
 
 fn is_response(cell: &Arc<dyn HistoryCell>) -> bool {

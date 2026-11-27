@@ -162,6 +162,7 @@ impl App {
             } else {
                 TranscriptHistoryState::Complete
             };
+            pane.view.resume_copy_navigation(&pane.cells);
             merge_older_turns(&mut store.lock().await.turns, turns);
             tui.frame_requester().schedule_frame();
             return Ok(());
@@ -416,6 +417,13 @@ impl App {
                     turn.id.clone(),
                 ))));
             }
+            if self.local_settings.transcript_mode.is_owned()
+                && matches!(turn.status, TurnStatus::Failed | TurnStatus::Interrupted)
+            {
+                cells.push(Arc::new(
+                    history_cell::TurnActivityBoundary::UnsuccessfulEnd,
+                ));
+            }
             if turn.status == TurnStatus::Completed
                 && let Some(mut completion) = if let Some(pane) =
                     self.side_companions.get_mut(&thread_id)
@@ -482,6 +490,8 @@ impl App {
         } else {
             TranscriptHistoryState::Complete
         };
+        self.transcript_view
+            .resume_copy_navigation(&self.transcript_cells);
         let continue_to_start = previous == TranscriptHistoryState::LoadingBeginning;
         if continue_to_start && !self.scrollback_has_older_history {
             if self.transcript_view.is_select_mode() {

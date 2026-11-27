@@ -660,6 +660,10 @@ Use one dimmed logical line: `Worked for 5s • 11:05 AM • 12.4k in • 9.8k c
 - Show provider-reported turn totals, including compaction. Include cached input in input and reasoning in output. Omit unknown counts; never substitute context estimates or session totals. Reuse saved usage. Paginated history may omit counts without migration.
 - `Nag` counts distinct related subagents observed running during a live turn, including descendants and already-running agents. Keep counts across view switches. Omit restored counts without an observed start. Keep tokens parent-only and requests/accounting unchanged.
 
+### Copy by turn
+
+In fullscreen `/copy`, start on the latest completed reply. Use Up/Down to move between turns and Left/Right to select a prompt, code block, or quote within a turn. Enter copies the selection. Preserve `Ctrl+O` and inline copy behavior.
+
 ### Copy session ID
 
 `/copyid` copies only the displayed session ID using the existing clipboard. Do not open `/status`, reply, or show a picker. Allow during tasks, sides, and parent-owned child views. Report missing IDs and clipboard failures. Preserve `/copy` and platform support.

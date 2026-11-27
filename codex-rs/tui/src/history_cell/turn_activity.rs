@@ -6,6 +6,7 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub(crate) enum TurnActivityBoundary {
     Begin(String),
+    UnsuccessfulEnd,
     LegacyAnswer {
         turn_id: Option<String>,
     },

@@ -74,6 +74,7 @@ impl TurnGroups {
                         self.fold(cells, begin..index, &id, &completion);
                     }
                 }
+                Some(TurnActivityBoundary::UnsuccessfulEnd) => {}
                 None => {
                     if let Some(completion) =
                         cell.as_any()

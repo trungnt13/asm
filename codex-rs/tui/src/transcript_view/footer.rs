@@ -23,8 +23,12 @@ impl TranscriptView {
         if let Some(mode) = &self.copy_mode {
             return Some(TranscriptFooter {
                 text: vec![
-                    Line::from(format!("Copy {}", mode.label.to_lowercase())).bold(),
-                    navigation_line("↑/↓/j/k select · g/G ends · enter copy · esc close"),
+                    if mode.awaiting_page.is_some() {
+                        Line::from("Loading older history…").bold()
+                    } else {
+                        Line::from(format!("Copy {}", mode.label.to_lowercase())).bold()
+                    },
+                    navigation_line("↑/↓ turn · ←/→ part · enter copy · esc close"),
                 ]
                 .into(),
                 cursor_column: None,

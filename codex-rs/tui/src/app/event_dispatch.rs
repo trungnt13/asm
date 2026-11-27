@@ -689,6 +689,7 @@ impl App {
                 if !self.transcript_view.begin_copy_mode(&self.transcript_cells, Some(guard)) {
                     self.chat_widget.add_info_message("Nothing to copy".into(), /*hint*/ None);
                 }
+                self.request_owned_history(tui, app_server);
                 tui.frame_requester().schedule_frame();
             }
             AppEvent::CopySelection { text, label, format } => {

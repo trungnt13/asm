@@ -832,7 +832,10 @@ impl TranscriptView {
     }
 
     pub(crate) fn needs_history(&mut self, cells: &[Arc<dyn HistoryCell>]) -> bool {
-        self.search.needs_history(self.history)
+        self.copy_mode
+            .as_ref()
+            .is_some_and(|mode| mode.awaiting_page.is_some())
+            || self.search.needs_history(self.history)
             || (self.search.allows_viewport_paging() && self.near_start(cells))
     }
 

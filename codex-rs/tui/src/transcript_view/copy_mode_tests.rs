@@ -27,20 +27,34 @@ fn payload(view: &mut TranscriptView, cells: &[Arc<dyn HistoryCell>]) -> String 
 #[test]
 fn navigate_copy_resize_and_exit() {
     let cells: Vec<Arc<dyn HistoryCell>> = vec![
+        Arc::new(TurnActivityBoundary::Begin("old".into())),
         Arc::new(AgentMarkdownCell::new(
             "Old answer\n\n```\nold code\n```".into(),
             Path::new("/"),
         )),
+        Arc::new(
+            FinalMessageSeparator::new(
+                /*elapsed_seconds*/ None, /*runtime_metrics*/ None,
+            )
+            .with_turn_id("old".into()),
+        ),
         Arc::new(crate::history_cell::new_user_prompt(
             "User text\n\n> user quote\n\n```\nuser code\n```".into(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
         )),
+        Arc::new(TurnActivityBoundary::Begin("latest".into())),
         Arc::new(crate::history_cell::new_proposed_plan(
             "Latest **plan**\n\n> assistant quote\n\n```rust\nassistant code\n```".into(),
             Path::new("/"),
         )),
+        Arc::new(
+            FinalMessageSeparator::new(
+                /*elapsed_seconds*/ None, /*runtime_metrics*/ None,
+            )
+            .with_turn_id("latest".into()),
+        ),
     ];
     let mut view = TranscriptView::default();
     render(&mut view, &cells, /*width*/ 50, /*height*/ 8);
@@ -56,15 +70,13 @@ fn navigate_copy_resize_and_exit() {
         "user code\n",
         "> user quote\n",
         "User text\n\n> user quote\n\n```\nuser code\n```",
-        "old code\n",
-        "old code\n",
     ] {
-        view.move_copy_target(&cells, KeyCode::Up);
+        view.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), &cells);
         assert_eq!(payload(&mut view, &cells), expected);
         render(&mut view, &cells, /*width*/ 50, /*height*/ 8);
     }
-    for _ in 0..5 {
-        view.move_copy_target(&cells, KeyCode::Down);
+    for _ in 0..4 {
+        view.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), &cells);
     }
     let buffer = render(&mut view, &cells, /*width*/ 50, /*height*/ 8);
     assert!(
@@ -76,10 +88,10 @@ fn navigate_copy_resize_and_exit() {
     insta::assert_snapshot!(text(&buffer), @"
     › User text > user quote ``` user code ```
 
+
       Latest plan
 
       > assistant quote
-
       assistant code
     ");
     insta::assert_snapshot!(
@@ -88,12 +100,12 @@ fn navigate_copy_resize_and_exit() {
             .text
             .to_string(), @"
     Copy code block
-    ↑/↓/j/k select · g/G ends · enter copy · esc close
+    ↑/↓ turn · ←/→ part · enter copy · esc close
     "
     );
     render(&mut view, &cells, /*width*/ 14, /*height*/ 8);
     assert_eq!(payload(&mut view, &cells), "assistant code\n");
-    view.move_copy_target(&cells, KeyCode::Down);
+    view.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), &cells);
     assert_eq!(
         payload(&mut view, &cells),
         "Latest **plan**\n\n> assistant quote\n\n```rust\nassistant code\n```"
@@ -109,12 +121,17 @@ fn navigate_copy_resize_and_exit() {
     assert!(view.is_following());
     view.begin_copy_mode(&cells, /*guard*/ None);
     for (key, expected) in [
-        ('g', "old code\n"),
+        ('g', "Old answer\n\n```\nold code\n```"),
         (
             'G',
             "Latest **plan**\n\n> assistant quote\n\n```rust\nassistant code\n```",
         ),
-        ('k', "assistant code\n"),
+        ('k', "Old answer\n\n```\nold code\n```"),
+        ('h', "old code\n"),
+        (
+            'j',
+            "Latest **plan**\n\n> assistant quote\n\n```rust\nassistant code\n```",
+        ),
     ] {
         view.handle_key(
             KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE),
@@ -183,7 +200,7 @@ fn user_messages_support_vim_navigation_without_an_assistant_response() {
         view.footer_with_navigation(/*width*/ 60, crate::motion::MotionMode::Reduced, "")
             .unwrap().text.to_string(), @"
     Copy user message
-    ↑/↓/j/k select · g/G ends · enter copy · esc close
+    ↑/↓ turn · ←/→ part · enter copy · esc close
     "
     );
 }
@@ -207,7 +224,7 @@ fn marker_only_prompt_is_a_copy_target() {
         view.footer_with_navigation(/*width*/ 50, crate::motion::MotionMode::Reduced, "")
             .unwrap().text.to_string(), @"
     Copy user message
-    ↑/↓/j/k select · g/G ends · enter copy · esc close
+    ↑/↓ turn · ←/→ part · enter copy · esc close
     "
     );
     let Some(ViewAction::CopyAndFollow(selection)) =
