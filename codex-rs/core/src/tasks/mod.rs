@@ -726,6 +726,7 @@ impl Session {
                     reason.clone(),
                     &active_turn.turn_state,
                     /*error*/ None,
+                    std::future::ready(()),
                 )
                 .await;
             }
@@ -750,12 +751,27 @@ impl Session {
         reason: TurnAbortReason,
         error: Option<ErrorEvent>,
     ) -> bool {
+        self.abort_turn_if_active_with_publication(turn_id, reason, error, std::future::ready(()))
+            .await
+    }
+
+    /// Signal the matching task before waiting for an item that must precede TurnAborted.
+    /// Publish the item even if its turn has already finished.
+    pub(crate) async fn abort_turn_if_active_with_publication(
+        self: &Arc<Self>,
+        turn_id: &str,
+        reason: TurnAbortReason,
+        error: Option<ErrorEvent>,
+        publication: impl Future<Output = ()>,
+    ) -> bool {
         let active_turn = self.take_named_active_turn(turn_id, &reason).await;
         let Some(active_turn) = active_turn else {
+            publication.await;
             return false;
         };
 
-        self.finish_turn_abort(active_turn, reason, error).await;
+        self.finish_turn_abort(active_turn, reason, error, publication)
+            .await;
         true
     }
 
@@ -783,11 +799,20 @@ impl Session {
         mut active_turn: ActiveTurn,
         reason: TurnAbortReason,
         error: Option<ErrorEvent>,
+        publication: impl Future<Output = ()>,
     ) {
         let task = active_turn.task.take();
         if let Some(task) = task {
-            self.handle_task_abort(task, reason.clone(), &active_turn.turn_state, error)
-                .await;
+            self.handle_task_abort(
+                task,
+                reason.clone(),
+                &active_turn.turn_state,
+                error,
+                publication,
+            )
+            .await;
+        } else {
+            publication.await;
         }
         // Let interrupted tasks observe cancellation before dropping pending approvals, or an
         // in-flight approval wait can surface as a model-visible rejection before TurnAborted.
@@ -1225,9 +1250,11 @@ impl Session {
         reason: TurnAbortReason,
         turn_state: &Mutex<TurnState>,
         error: Option<ErrorEvent>,
+        publication: impl Future<Output = ()>,
     ) {
         let sub_id = task.turn_context.sub_id.clone();
         if task.cancellation_token.is_cancelled() {
+            publication.await;
             self.emit_turn_abort_lifecycle(reason, task.turn_context.extension_data.as_ref())
                 .await;
             return;
@@ -1235,23 +1262,26 @@ impl Session {
 
         trace!(task_kind = ?task.kind, sub_id, "aborting running task");
         task.cancellation_token.cancel();
-        if reason == TurnAbortReason::Interrupted
-            && task
-                .turn_context
-                .config
-                .features
-                .enabled(Feature::CodeModeInterrupt)
-        {
-            self.services
-                .code_mode_service
-                .interrupt_active_cells()
-                .await;
-        }
-        task.turn_context
-            .turn_metadata_state
-            .cancel_git_enrichment_task();
-        let session_task = task.task;
-
+        let interrupt = async {
+            if reason == TurnAbortReason::Interrupted
+                && task
+                    .turn_context
+                    .config
+                    .features
+                    .enabled(Feature::CodeModeInterrupt)
+            {
+                self.services
+                    .code_mode_service
+                    .interrupt_active_cells()
+                    .await;
+            }
+            task.turn_context
+                .turn_metadata_state
+                .cancel_git_enrichment_task();
+        };
+        // Publication can hold the writer the task needs to drain completed tool results.
+        // Give the task its full grace period once that writer is available.
+        tokio::join!(interrupt, publication);
         let grace =
             if crate::external_runtime::is_native_model(&task.turn_context.model_info().slug) {
                 Duration::from_secs(15)
@@ -1266,6 +1296,7 @@ impl Session {
                 handle.await
             }
         };
+        let session_task = task.task;
         // A task may finish normally between the deadline and the abort.
         if let Err(error) = joined {
             warn!(%error, "task {sub_id} did not finish gracefully");

@@ -603,6 +603,7 @@ impl App {
             )
         });
         store.set_session(session, turns);
+        store.rebase_buffer_after_session_refresh();
         if let Some((active, latest, evicted, reasoning)) = live_turn {
             store.active_turn_id = active;
             store.latest_turn_id = latest;
@@ -619,7 +620,6 @@ impl App {
         if store.output_tps.is_none() {
             store.output_tps = output_tps;
         }
-        store.rebase_buffer_after_session_refresh();
         live_attached
     }
 
