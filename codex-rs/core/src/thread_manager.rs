@@ -1219,6 +1219,7 @@ impl ThreadManager {
             &options.initial_history,
             &source,
         )?;
+        self.state.check_external_alias_collision(&config).await?;
         let originator = self
             .state
             .effective_originator(
@@ -2199,6 +2200,29 @@ impl ThreadManager {
 }
 
 impl ThreadManagerState {
+    async fn check_external_alias_collision(&self, config: &Config) -> CodexResult<()> {
+        let Some(alias) = config
+            .model
+            .as_deref()
+            .and_then(|model| config.external_models.model_alias(model))
+        else {
+            return Ok(());
+        };
+        // A client may already have normalized the selector. Check the startup catalog's
+        // current snapshot so a refresh can't replace the evidence of a known collision.
+        let catalog = self
+            .model_catalog
+            .manager
+            .model_catalog_with_origins(RefreshStrategy::InMemory, config.http_client_factory())
+            .await;
+        if catalog.iter().any(|entry| entry.slug == alias) {
+            return Err(CodexErr::InvalidRequest(format!(
+                "Model selector `{alias}` is both a configured alias and a catalog model ID. Rename the alias in user config."
+            )));
+        }
+        Ok(())
+    }
+
     pub(crate) fn models_manager_for_config(&self, config: &Config) -> SharedModelsManager {
         let credentials = Arc::clone(&self.auth_manager);
         let runtime = crate::runtime_auth::runtime_for_config(
@@ -3023,6 +3047,7 @@ impl ThreadManagerState {
             &initial_history,
             &session_source,
         )?;
+        self.check_external_alias_collision(&config).await?;
         if matches!(
             &session_source,
             SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })

@@ -1747,21 +1747,30 @@ impl ConfigBuilder {
     pub async fn build(self) -> std::io::Result<Config> {
         // Keep the large config-loading future off small runtime thread stacks.
         // Avoid an additional async frame for ordinary config loads.
-        Box::pin(self.build_inner(|_, _, _| Ok(()))).await
+        Box::pin(self.build_inner(|_, _, _, _| Ok(()))).await
     }
 
-    /// Validates the same loaded configuration that will be materialized, before provider
-    /// selection or initialization. Validation cannot alter the loaded configuration.
-    pub async fn build_with_validation(
+    /// Resolves thread overrides against the loaded configuration before provider selection.
+    pub async fn build_with_override_resolution(
         self,
-        validate: impl FnOnce(&ConfigToml, &ConfigOverrides, &ConfigLayerStack) -> std::io::Result<()>,
+        resolve_overrides: impl FnOnce(
+            &ConfigToml,
+            &mut ConfigOverrides,
+            &ConfigLayerStack,
+            &ExternalModels,
+        ) -> std::io::Result<()>,
     ) -> std::io::Result<Config> {
-        Box::pin(self.build_inner(validate)).await
+        Box::pin(self.build_inner(resolve_overrides)).await
     }
 
     async fn build_inner(
         self,
-        validate: impl FnOnce(&ConfigToml, &ConfigOverrides, &ConfigLayerStack) -> std::io::Result<()>,
+        resolve_overrides: impl FnOnce(
+            &ConfigToml,
+            &mut ConfigOverrides,
+            &ConfigLayerStack,
+            &ExternalModels,
+        ) -> std::io::Result<()>,
     ) -> std::io::Result<Config> {
         let Self {
             codex_home,
@@ -1807,13 +1816,20 @@ impl ConfigBuilder {
         )
         .await?;
         let config_toml = config_toml_from_layers(&config_layer_stack).await?;
-        validate(&config_toml, &harness_overrides, &config_layer_stack)?;
-        Config::load_config_with_layer_stack(
+        let external_models = external_models_from_config(&config_toml)?;
+        resolve_overrides(
+            &config_toml,
+            &mut harness_overrides,
+            &config_layer_stack,
+            &external_models,
+        )?;
+        Config::materialize_config(
             LOCAL_FS.as_ref(),
             config_toml,
             harness_overrides,
             codex_home,
             config_layer_stack,
+            Some(external_models),
         )
         .await
     }
@@ -1822,6 +1838,12 @@ impl ConfigBuilder {
     pub(crate) fn without_managed_config_for_tests() -> Self {
         Self::default().loader_overrides(LoaderOverrides::without_managed_config_for_tests())
     }
+}
+
+fn external_models_from_config(config: &ConfigToml) -> std::io::Result<Arc<ExternalModels>> {
+    ExternalModels::from_config(&config.external_models)
+        .map(Arc::new)
+        .map_err(|message| std::io::Error::new(ErrorKind::InvalidData, message))
 }
 
 async fn config_toml_from_layers(layers: &ConfigLayerStack) -> std::io::Result<ConfigToml> {
@@ -3648,10 +3670,28 @@ impl Config {
 
     pub(crate) fn load_config_with_layer_stack(
         fs: &dyn ExecutorFileSystem,
+        cfg: ConfigToml,
+        overrides: ConfigOverrides,
+        codex_home: AbsolutePathBuf,
+        config_layer_stack: ConfigLayerStack,
+    ) -> BoxFuture<'_, std::io::Result<Self>> {
+        Self::materialize_config(
+            fs,
+            cfg,
+            overrides,
+            codex_home,
+            config_layer_stack,
+            /*external_models*/ None,
+        )
+    }
+
+    fn materialize_config(
+        fs: &dyn ExecutorFileSystem,
         mut cfg: ConfigToml,
         overrides: ConfigOverrides,
         codex_home: AbsolutePathBuf,
         config_layer_stack: ConfigLayerStack,
+        external_models: Option<Arc<ExternalModels>>,
     ) -> BoxFuture<'_, std::io::Result<Self>> {
         // Keep the large future off small test thread stacks and share its poll code across callers.
         async move {
@@ -4588,10 +4628,10 @@ impl Config {
 
         let forced_login_method = cfg.forced_login_method;
 
-        let external_models = Arc::new(
-            ExternalModels::from_config(&cfg.external_models)
-                .map_err(|message| std::io::Error::new(ErrorKind::InvalidData, message))?,
-        );
+        let external_models = match external_models {
+            Some(external_models) => external_models,
+            None => external_models_from_config(&cfg)?,
+        };
         let model = model.or(cfg.model);
         let notices = cfg.notice.unwrap_or_default();
         let uses_native_runtime = model

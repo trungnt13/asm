@@ -5989,21 +5989,42 @@ impl ThreadRequestProcessor {
                 &mut typesafe_overrides,
             );
         }
-        let requested_model = typesafe_overrides.model.clone().or_else(|| {
-            request_overrides
-                .as_ref()
-                .and_then(|overrides| overrides.get("model"))
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned)
+        let saved_model = source_thread.model.as_deref().or_else(|| {
+            source_history_items
+                .iter()
+                .rev()
+                .find_map(|item| match item {
+                    RolloutItem::TurnContext(context) => Some(context.model.as_str()),
+                    RolloutItem::EventMsg {
+                        event: EventMsg::ThreadSettingsApplied(event),
+                        ..
+                    } if event.thread_id.is_none_or(|id| id == source_thread_id) => {
+                        Some(event.thread_settings.model.as_str())
+                    }
+                    _ => None,
+                })
         });
         let (inherited_options, inherited_settings) = inherited_fork.unzip();
         let mut options = if let Some(options) = inherited_options {
+            if let Some(saved_model) = saved_model {
+                validate_saved_model_provider(
+                    &options.config.external_models,
+                    saved_model,
+                    &source_thread.model_provider,
+                )
+                .map_err(|error| config_load_error(&error))?;
+            }
             *options
         } else {
-            // Derive a Config using the same logic as new conversation, honoring overrides if provided.
             let config = self
                 .config_manager
-                .load_for_cwd(request_overrides, typesafe_overrides, history_cwd)
+                .load_for_fork(
+                    saved_model,
+                    &source_thread.model_provider,
+                    request_overrides,
+                    typesafe_overrides,
+                    history_cwd,
+                )
                 .await
                 .map_err(|err| config_load_error(&err))?;
             StartThreadOptions {
@@ -6011,15 +6032,6 @@ impl ThreadRequestProcessor {
                 ..StartThreadOptions::new(config)
             }
         };
-        let routes = &options.config.external_models;
-        if let Some(saved_model) = source_thread.model.as_deref()
-            && requested_model.as_deref().is_none_or(|model| {
-                model == saved_model || routes.canonical_model(model) == Some(saved_model)
-            })
-        {
-            validate_saved_model_provider(routes, saved_model, &source_thread.model_provider)
-                .map_err(|error| config_load_error(&error))?;
-        }
         super::app_context_filter::apply(&mut options.config);
         let goals_enabled = options.config.features.enabled(Feature::Goals);
 

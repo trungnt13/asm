@@ -624,15 +624,17 @@ impl StaticModelsManager {
     }
 
     fn model_origin(&self, slug: &str, external: &ExternalModels) -> ModelOrigin {
-        if external.is_configured(slug) {
-            ModelOrigin::ExplicitConfig
-        } else if let StaticCatalogSource::Supplied { models, origin } = &self.source
-            && models.iter().any(|entry| entry.slug == slug)
-        {
-            *origin
-        } else {
-            ModelOrigin::Bundled
-        }
+        let selected_origin = match &self.source {
+            StaticCatalogSource::Supplied { models, origin } => models
+                .iter()
+                .any(|entry| entry.slug == slug)
+                .then_some(*origin),
+            StaticCatalogSource::BoundProvider(_) => None,
+        };
+        external
+            .overlay_origin(slug, self.external_overlay_mode(), selected_origin)
+            .or(selected_origin)
+            .unwrap_or(ModelOrigin::Bundled)
     }
 }
 
@@ -723,7 +725,9 @@ impl ModelsManager for OpenAiModelsManager {
             let mut catalog =
                 state.model_catalog(self.models_for_entry(&state.entry, external, mode));
             for entry in &mut catalog {
-                if let Some(origin) = external.overlay_origin(&entry.slug, mode) {
+                let selected_origin =
+                    (entry.origin == ModelOrigin::Provider).then_some(entry.origin);
+                if let Some(origin) = external.overlay_origin(&entry.slug, mode, selected_origin) {
                     entry.origin = origin;
                 }
             }
@@ -849,8 +853,15 @@ impl ModelsManager for OpenAiModelsManager {
                 };
                 let exact = models.iter().find(|candidate| candidate.slug == model);
                 let resolved = if let Some(metadata) = external.overlay_exact(model, exact, mode) {
-                    Some((metadata, external.overlay_origin(model, mode)))
+                    let selected_origin = exact
+                        .is_some()
+                        .then(|| entry.model_origin(&selected, model));
+                    Some((
+                        metadata,
+                        external.overlay_origin(model, mode, selected_origin),
+                    ))
                 } else if matches!(self.catalog_source, CatalogSource::Default)
+                    && !external.is_configured(model)
                     && let Some((_, metadata)) = external.provider_model(model)
                 {
                     // An exact bundled binding remains usable with discovery off.
@@ -862,7 +873,11 @@ impl ModelsManager for OpenAiModelsManager {
                     let bundled = ExternalModels::bundled();
                     bundled.overlay(models, mode);
                     find_model_from_candidates(model, models).map(|metadata| {
-                        let origin = bundled.overlay_origin(&metadata.slug, mode);
+                        let origin = bundled.overlay_origin(
+                            &metadata.slug,
+                            mode,
+                            /*selected_origin*/ None,
+                        );
                         (metadata, origin)
                     })
                 } else {

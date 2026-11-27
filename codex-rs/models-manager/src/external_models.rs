@@ -26,33 +26,62 @@ struct Entry {
     model_provider: Option<String>,
     alias: Option<String>,
     #[serde(skip)]
-    configured: bool,
+    metadata_patch: Option<BTreeMap<String, Value>>,
+    // Local metadata with the patch applied, for reads without a selected catalog entry.
     #[serde(flatten)]
     model: ModelInfo,
 }
 
 impl Entry {
     fn overlay(&self, existing: Option<&ModelInfo>, mode: OverlayMode) -> Option<ModelInfo> {
-        match mode {
-            OverlayMode::ProviderOwned if self.configured => {
-                let existing = existing?;
-                let mut model = self.model.clone();
-                model.supported_in_api = existing.supported_in_api;
-                model.visibility = existing.visibility;
-                model
-                    .available_access_programs
-                    .clone_from(&existing.available_access_programs);
-                Some(model)
-            }
-            OverlayMode::ConfiguredOnly if self.configured => Some(self.model.clone()),
-            OverlayMode::SupplementCustom if self.configured || existing.is_none() => {
-                Some(self.model.clone())
-            }
-            OverlayMode::PreferBundled => Some(self.model.clone()),
-            OverlayMode::ProviderOwned
-            | OverlayMode::ConfiguredOnly
-            | OverlayMode::SupplementCustom => None,
+        let Some(fields) = &self.metadata_patch else {
+            return match mode {
+                OverlayMode::PreferBundled => Some(self.model.clone()),
+                OverlayMode::SupplementCustom if existing.is_none() => Some(self.model.clone()),
+                OverlayMode::ProviderOwned
+                | OverlayMode::ConfiguredOnly
+                | OverlayMode::SupplementCustom => None,
+            };
+        };
+        let existing = existing.filter(|_| !self.prefers_bundled_external(mode));
+        let Some(base) = existing else {
+            return match mode {
+                OverlayMode::ProviderOwned => None,
+                OverlayMode::ConfiguredOnly
+                | OverlayMode::SupplementCustom
+                | OverlayMode::PreferBundled => Some(self.model.clone()),
+            };
+        };
+        if fields.is_empty() {
+            return None;
         }
+        let mut model = match patch_metadata(base, fields) {
+            Ok(model) => model,
+            Err(error) => {
+                // A selected catalog may lack optional objects the patch augments in the bundle.
+                tracing::warn!(model = %base.slug, %error, "external model metadata patch does not apply to the selected catalog entry");
+                return Some(base.clone());
+            }
+        };
+        if matches!(mode, OverlayMode::ProviderOwned) {
+            model.supported_in_api = base.supported_in_api;
+            model.visibility = base.visibility;
+            model
+                .available_access_programs
+                .clone_from(&base.available_access_programs);
+        }
+        Some(model)
+    }
+
+    fn prefers_bundled_external(&self, mode: OverlayMode) -> bool {
+        matches!(mode, OverlayMode::PreferBundled) && self.has_bundled_external_base()
+    }
+
+    fn has_bundled_external_base(&self) -> bool {
+        BUNDLED
+            .models
+            .iter()
+            .any(|entry| entry.model.slug == self.model.slug)
     }
 }
 
@@ -121,7 +150,7 @@ impl ExternalModels {
         self.provider_model(model).map(|(provider, _)| provider)
     }
 
-    /// Resolve an exact canonical ID without consulting a provider's catalog.
+    /// Return the exact provider binding and local metadata before any provider catalog merge.
     pub fn provider_model(&self, model: &str) -> Option<(&str, &ModelInfo)> {
         let entry = self.entry(model)?;
         Some((entry.model_provider.as_deref()?, &entry.model))
@@ -138,12 +167,28 @@ impl ExternalModels {
     }
 
     pub fn is_configured(&self, model: &str) -> bool {
-        self.entry(model).is_some_and(|entry| entry.configured)
+        self.entry(model)
+            .is_some_and(|entry| entry.metadata_patch.is_some())
     }
 
-    pub(crate) fn overlay_origin(&self, model: &str, mode: OverlayMode) -> Option<ModelOrigin> {
+    pub(crate) fn overlay_origin(
+        &self,
+        model: &str,
+        mode: OverlayMode,
+        selected_origin: Option<ModelOrigin>,
+    ) -> Option<ModelOrigin> {
         let entry = self.entry(model)?;
-        if entry.configured {
+        if let Some(fields) = &entry.metadata_patch {
+            if fields.is_empty() {
+                if !entry.prefers_bundled_external(mode) && selected_origin.is_some() {
+                    return selected_origin;
+                }
+                if entry.has_bundled_external_base()
+                    || BUNDLED_MODELS.iter().any(|entry| entry.slug == model)
+                {
+                    return Some(ModelOrigin::Bundled);
+                }
+            }
             Some(ModelOrigin::ExplicitConfig)
         } else if matches!(mode, OverlayMode::PreferBundled) {
             Some(ModelOrigin::Bundled)
@@ -237,36 +282,44 @@ fn configured_entry(
             .map_err(|err| format!("invalid `multi_agent_version`: {err}"))?;
     }
 
-    let defaults = match bundled {
-        Some(entry) => serde_json::to_value(&entry.model),
-        None => serde_json::to_value(model_info::configured_model_defaults(slug)),
+    let mut model = bundled
+        .map(|entry| &entry.model)
+        .or_else(|| BUNDLED_MODELS.iter().find(|model| model.slug == slug))
+        .cloned()
+        .unwrap_or_else(|| model_info::configured_model_defaults(slug));
+    if !fields.is_empty() {
+        model = patch_metadata(&model, &fields).map_err(|err| err.to_string())?;
     }
-    .expect("ModelInfo must serialize");
-    let Value::Object(mut metadata) = defaults else {
-        unreachable!("ModelInfo must serialize to a JSON object");
-    };
-    merge_metadata(&mut metadata, fields);
-    let model =
-        ModelInfo::deserialize(StrictModelFields(metadata)).map_err(|err| err.to_string())?;
     Ok(Entry {
         model_provider,
         alias,
-        configured: true,
+        metadata_patch: Some(fields),
         model,
     })
 }
 
-fn merge_metadata(
+fn patch_metadata(
+    base: &ModelInfo,
+    fields: &BTreeMap<String, Value>,
+) -> Result<ModelInfo, serde_json::Error> {
+    let Value::Object(mut metadata) = serde_json::to_value(base)? else {
+        unreachable!("ModelInfo must serialize to a JSON object");
+    };
+    merge_metadata(&mut metadata, fields);
+    ModelInfo::deserialize(StrictModelFields(metadata))
+}
+
+fn merge_metadata<'a>(
     metadata: &mut Map<String, Value>,
-    fields: impl IntoIterator<Item = (String, Value)>,
+    fields: impl IntoIterator<Item = (&'a String, &'a Value)>,
 ) {
     for (key, value) in fields {
-        match (metadata.get_mut(&key), value) {
+        match (metadata.get_mut(key), value) {
             (Some(Value::Object(metadata)), Value::Object(fields)) => {
                 merge_metadata(metadata, fields);
             }
             (_, value) => {
-                metadata.insert(key, value);
+                metadata.insert(key.clone(), value.clone());
             }
         }
     }

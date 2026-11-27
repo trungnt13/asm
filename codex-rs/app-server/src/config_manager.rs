@@ -25,6 +25,7 @@ use codex_model_provider_info::GCP_PROVIDER_ID;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_model_provider_info::built_in_model_providers;
 use codex_model_provider_info::merge_configured_model_providers;
+use codex_models_manager::ExternalModels;
 use codex_protocol::openai_models::is_native_runtime_model;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_json_to_toml::json_to_toml;
@@ -595,6 +596,64 @@ impl ConfigManager {
         })
     }
 
+    #[instrument(level = "trace", skip_all)]
+    pub(crate) async fn load_for_fork(
+        &self,
+        saved_model: Option<&str>,
+        saved_provider: &str,
+        request_overrides: Option<HashMap<String, serde_json::Value>>,
+        typesafe_overrides: ConfigOverrides,
+        cwd: Option<PathBuf>,
+    ) -> std::io::Result<Config> {
+        let config_model = request_overrides
+            .as_ref()
+            .and_then(|values| values.get("model"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
+        let config = self
+            .load_with_override_resolution(
+                &self.current_cli_overrides(),
+                request_overrides,
+                typesafe_overrides,
+                cwd,
+                |_, overrides, layers, models| {
+                    let Some(saved_model) = saved_model else {
+                        return Ok(());
+                    };
+                    let requested_model = overrides.model.as_deref().or(config_model.as_deref());
+                    if requested_model.is_some_and(|model| {
+                        model != saved_model && models.canonical_model(model) != Some(saved_model)
+                    }) {
+                        return Ok(());
+                    }
+                    validate_saved_model_provider(models, saved_model, saved_provider)?;
+                    // Only a model choice can opt out of an inherited catalog or native route.
+                    if requested_model.is_none()
+                        && (models.provider_for_model(saved_model).is_some()
+                            || is_native_runtime_model(saved_model))
+                    {
+                        if let Some(required) = layers.required_model_provider()
+                            && required != saved_provider
+                        {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::PermissionDenied,
+                                ModelProviderError::ModelProviderPolicyConflict {
+                                    model_provider: saved_provider.to_owned(),
+                                    required_model_provider: required.to_owned(),
+                                },
+                            ));
+                        }
+                        overrides.model = Some(saved_model.to_owned());
+                        overrides.model_provider = Some(saved_provider.to_owned());
+                    }
+                    Ok(())
+                },
+            )
+            .await?;
+        config.validate_windows_mxc_requirement()?;
+        Ok(config)
+    }
+
     /// Validates saved and requested providers before resume overrides or policy can replace them.
     pub(crate) async fn load_for_resume(
         &self,
@@ -614,12 +673,12 @@ impl ConfigManager {
         if let Some(saved) = saved_provider {
             typesafe_overrides.model_provider = Some(saved.to_owned());
         }
-        self.load_with_validation(
+        self.load_with_override_resolution(
             &self.current_cli_overrides(),
             request_overrides,
             typesafe_overrides,
             cwd,
-            |config, _overrides, layers| {
+            |config, _overrides, layers, _models| {
                 let requested_provider = requested_provider
                     .as_deref()
                     .or(saved_provider)
@@ -735,26 +794,27 @@ impl ConfigManager {
         typesafe_overrides: ConfigOverrides,
         fallback_cwd: Option<PathBuf>,
     ) -> std::io::Result<Config> {
-        self.load_with_validation(
+        self.load_with_override_resolution(
             cli_overrides,
             request_overrides,
             typesafe_overrides,
             fallback_cwd,
-            |_, _, _| Ok(()),
+            |_, _, _, _| Ok(()),
         )
         .await
     }
 
-    async fn load_with_validation(
+    async fn load_with_override_resolution(
         &self,
         cli_overrides: &[(String, TomlValue)],
         request_overrides: Option<HashMap<String, serde_json::Value>>,
         mut typesafe_overrides: ConfigOverrides,
         fallback_cwd: Option<PathBuf>,
-        validate: impl FnOnce(
+        resolve_overrides: impl FnOnce(
             &codex_config::config_toml::ConfigToml,
-            &ConfigOverrides,
+            &mut ConfigOverrides,
             &ConfigLayerStack,
+            &ExternalModels,
         ) -> std::io::Result<()>,
     ) -> std::io::Result<Config> {
         let mcp_ema_cancellation = self.capture_mcp_ema_cancellation();
@@ -786,7 +846,7 @@ impl ConfigManager {
             .fallback_cwd(fallback_cwd)
             .cloud_config_bundle(policy_load.cloud_config.clone())
             .thread_config_loader(Arc::clone(&self.thread_config_loader))
-            .build_with_validation(validate)
+            .build_with_override_resolution(resolve_overrides)
             .await;
         let mut config = result?;
         self.check_application_policy_load(&policy_load)?;

@@ -154,6 +154,20 @@ impl ModelCatalog {
         let catalog = models_manager
             .model_catalog_with_origins(refresh_strategy, config.http_client_factory())
             .await;
+        if let Some(entry) = catalog.iter().find(|entry| {
+            config
+                .external_models
+                .canonical_model(&entry.slug)
+                .is_some()
+        }) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Model selector `{}` is both a configured alias and a catalog model ID. Rename the alias in user config.",
+                    entry.slug
+                ),
+            ));
+        }
         // Preserve first-party display order ahead of bundled entries, which keep
         // the manager's priority order. Configured and third-party catalogs use priority.
         let use_catalog_order = config.model_provider_id == OPENAI_PROVIDER_ID
