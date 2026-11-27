@@ -624,6 +624,16 @@ impl ChatWidget {
             }
             TurnStatus::InProgress => {}
         }
+        if self.local_settings.transcript_mode.is_owned()
+            && matches!(
+                notification.turn.status,
+                TurnStatus::Interrupted | TurnStatus::Failed
+            )
+        {
+            self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
+                history_cell::TurnActivityBoundary::UnsuccessfulEnd,
+            )));
+        }
         if let Some(drafts) = question_drafts
             && !self.has_misalignment_policy_violation()
         {

@@ -647,20 +647,7 @@ impl TranscriptView {
             crate::clipboard_copy::CopyFormat,
         ) -> Result<crate::clipboard_copy::CopyStatus, String>,
     ) -> Result<crate::clipboard_copy::CopyStatus, String> {
-        let override_payload = self.copy_mode.as_ref().and_then(|mode| {
-            if mode.whole {
-                mode.response.as_ref().map(|(_, text)| {
-                    (
-                        text.to_string(),
-                        crate::clipboard_copy::CopyFormat::Markdown,
-                    )
-                })
-            } else {
-                mode.source
-                    .as_ref()
-                    .map(|text| (text.clone(), crate::clipboard_copy::CopyFormat::PlainText))
-            }
-        });
+        let override_payload = self.copy_mode_payload(cells);
         let (text, format) = override_payload.unwrap_or_else(|| {
             if self.marked_block().is_some() {
                 return (text.to_owned(), CopyFormat::Markdown);
