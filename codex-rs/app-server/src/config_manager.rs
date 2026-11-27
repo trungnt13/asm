@@ -610,6 +610,10 @@ impl ConfigManager {
             .and_then(|values| values.get("model"))
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned);
+        let has_provider_override = typesafe_overrides.model_provider.is_some()
+            || request_overrides
+                .as_ref()
+                .is_some_and(|values| values.contains_key("model_provider"));
         let config = self
             .load_with_override_resolution(
                 &self.current_cli_overrides(),
@@ -627,10 +631,11 @@ impl ConfigManager {
                         return Ok(());
                     }
                     validate_saved_model_provider(models, saved_model, saved_provider)?;
-                    // Only a model choice can opt out of an inherited catalog or native route.
-                    if requested_model.is_none()
-                        && (models.provider_for_model(saved_model).is_some()
-                            || is_native_runtime_model(saved_model))
+                    // A removed catalog entry must not turn a same-model fork into a handoff.
+                    if !has_provider_override
+                        || (requested_model.is_none()
+                            && (models.provider_for_model(saved_model).is_some()
+                                || is_native_runtime_model(saved_model)))
                     {
                         if let Some(required) = layers.required_model_provider()
                             && required != saved_provider

@@ -3705,6 +3705,10 @@ impl Config {
 
         validate_model_providers(&cfg.model_providers)
             .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
+        let external_models = match external_models {
+            Some(external_models) => external_models,
+            None => external_models_from_config(&cfg)?,
+        };
         let subagent_model_context_windows = cfg.subagent_model_context_windows
             .iter()
             .map(|(model, tokens)| {
@@ -4628,10 +4632,6 @@ impl Config {
 
         let forced_login_method = cfg.forced_login_method;
 
-        let external_models = match external_models {
-            Some(external_models) => external_models,
-            None => external_models_from_config(&cfg)?,
-        };
         let model = model.or(cfg.model);
         let notices = cfg.notice.unwrap_or_default();
         let uses_native_runtime = model
