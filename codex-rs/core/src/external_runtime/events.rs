@@ -28,8 +28,7 @@ pub(super) struct MessageStream {
     non_reasoning_tokens: Option<i64>,
     pub(super) output_tps: Option<f64>,
     pub(super) context: Option<RequestContext>,
-    /// Cursor child sessions by session ID.
-    pub(super) cursor_children: HashMap<String, super::cursor::CursorChild>,
+    pub(super) cursor_thinking: Option<super::cursor::CursorThinking>,
 }
 
 pub(super) struct RequestContext {

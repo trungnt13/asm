@@ -1,4 +1,4 @@
-//! Run persistent official Claude and Cursor CLI sessions.
+//! Run persistent sessions with the Claude CLI and Cursor SDK.
 //! Callers serialize turns and provide each runtime's tool boundary.
 
 mod claude;
@@ -16,9 +16,10 @@ pub use claude::validate_prompt as validate_claude_prompt;
 pub use claude_owner::ClaudeContinuation;
 pub use claude_owner::ClaudeRuntime;
 pub use claude_steering::ClaudeSteering;
+pub use cursor::CursorEffortRejected;
 pub use cursor::CursorOptions;
+pub use cursor::CursorRunFailed;
 pub use cursor::CursorRuntime;
-pub use cursor::CursorSession;
 
 use serde_json::Value;
 

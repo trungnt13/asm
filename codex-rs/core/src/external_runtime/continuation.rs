@@ -1,6 +1,5 @@
 use super::RuntimeLease;
 use super::RuntimeProcess;
-use super::delivery;
 use super::events;
 use crate::session::TurnInput;
 use crate::session::session::Session;
@@ -145,14 +144,13 @@ pub(super) async fn run(
     runtime
         .linkage
         .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
-    if let Some(bridge) = &runtime.bridge {
-        let step = session
-            .capture_native_messaging_step_context(Arc::clone(turn), cancellation)
-            .await?;
-        bridge
-            .set_turn(Arc::clone(session), step, cancellation.clone())
-            .await?;
-    }
+    let step = session
+        .capture_speculative_step_context(Arc::clone(turn), cancellation)
+        .await?;
+    runtime
+        .bridge
+        .set_turn(Arc::clone(session), step, cancellation.clone())
+        .await?;
     continuation
         .admitted
         .send(())
@@ -160,8 +158,6 @@ pub(super) async fn run(
     let mut stream = events::MessageStream::default();
     stream.activity.server = NativeRuntime::ClaudeCode.id();
     stream.activity.messaging = runtime.checkpoint.messaging;
-    let mut mail_receipts =
-        delivery::CursorMailReceipts::new(runtime.checkpoint.session_id.clone());
     let mut last_message = None;
     let mut cancelled = false;
     let mut submitted = 0;
@@ -205,7 +201,7 @@ pub(super) async fn run(
             frame = continuation.events.recv() => {
                 if let Some(frame) = frame
                     && let Some(text) = super::record_frame(NativeRuntime::ClaudeCode, session, turn,
-                        &frame, &mut stream, &mut mail_receipts).await? { last_message = Some(text); }
+                        &frame, &mut stream).await? { last_message = Some(text); }
             }
         }
     };
@@ -216,7 +212,6 @@ pub(super) async fn run(
             turn,
             &frame,
             &mut stream,
-            &mut mail_receipts,
         )
         .await?
         {
@@ -224,9 +219,7 @@ pub(super) async fn run(
         }
     }
     stream.activity.close(session, turn).await?;
-    if let Some(bridge) = &runtime.bridge {
-        bridge.clear_turn().await?;
-    }
+    runtime.bridge.clear_turn().await?;
     let outcome = result?;
     anyhow::ensure!(
         outcome.submitted_steering_count == submitted,
@@ -356,7 +349,7 @@ pub(super) async fn submit_steering(
         return Ok(false);
     }
     let history = session.clone_history().await;
-    let messages = super::input_messages(history.raw_items(), NativeRuntime::ClaudeCode)?;
+    let messages = super::input_messages(history.raw_items())?;
     drop(history);
     if let Err(error) = super::validate_pending_prompt(
         session,
@@ -364,7 +357,6 @@ pub(super) async fn submit_steering(
         &pending,
         /*boundary*/ None,
         codex_external_runtime::validate_claude_prompt,
-        NativeRuntime::ClaudeCode,
     ) {
         session
             .send_event(
@@ -390,10 +382,7 @@ pub(super) async fn submit_steering(
         )
         .await?;
     }
-    let messages = super::input_messages(
-        session.clone_history().await.raw_items(),
-        NativeRuntime::ClaudeCode,
-    )?;
+    let messages = super::input_messages(session.clone_history().await.raw_items())?;
     let prompt = super::prompt_content(&messages[checkpoint.input_count..])?;
     checkpoint.input_count = messages.len();
     checkpoint.input_prefix = super::input_prefix(&messages)?;

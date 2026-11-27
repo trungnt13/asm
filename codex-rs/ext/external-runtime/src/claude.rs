@@ -5,6 +5,7 @@ use crate::Prompt;
 use crate::frames;
 use crate::process::ExternalProcess;
 use crate::process::STOP_TIMEOUT;
+use crate::process::StderrPolicy;
 use crate::process::TurnGuard;
 use anyhow::Context;
 use anyhow::Result;
@@ -136,6 +137,7 @@ impl ClaudeDriver {
             "ANTHROPIC_AUTH_TOKEN",
             "ANTHROPIC_BASE_URL",
             "ANTHROPIC_PROFILE",
+            "CURSOR_API_KEY",
             "CLAUDE_CODE_USE_BEDROCK",
             "CLAUDE_CODE_USE_VERTEX",
             "CLAUDE_CODE_USE_FOUNDRY",
@@ -247,8 +249,12 @@ impl ClaudeDriver {
             .queued_input_count
             .store(/*val*/ 0, std::sync::atomic::Ordering::SeqCst);
         let mut driver = Self {
-            process: ExternalProcess::spawn(command, frames::FramePolicy::ClaudeImages)
-                .context("starting official Claude CLI")?,
+            process: ExternalProcess::spawn(
+                command,
+                frames::FramePolicy::ClaudeImages,
+                StderrPolicy::CaptureTail,
+            )
+            .context("starting official Claude CLI")?,
             _system_prompt_file: system_prompt_file,
             session_id,
             usable: true,

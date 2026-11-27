@@ -5,7 +5,6 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::ContentItemProvenance;
 use codex_protocol::models::ImageReference;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::openai_models::NativeRuntime;
 use serde_json::Value;
 use serde_json::json;
 
@@ -15,7 +14,6 @@ use crate::session::session::Session;
 
 pub(super) fn input_messages<'a>(
     items: impl IntoIterator<Item = &'a ResponseItem>,
-    runtime: NativeRuntime,
 ) -> anyhow::Result<Vec<Value>> {
     let mut messages = Vec::new();
     for item in items {
@@ -88,10 +86,7 @@ pub(super) fn input_messages<'a>(
                     messages.push(Value::Array(blocks));
                 }
             }
-            ResponseItem::Message { role, .. }
-                if runtime == NativeRuntime::ClaudeCode
-                    && matches!(role.as_str(), "developer" | "user") =>
-            {
+            ResponseItem::Message { role, .. } if matches!(role.as_str(), "developer" | "user") => {
                 let ResponseItem::Message { content, .. } = input::context_item(item)? else {
                     unreachable!("native context is a labeled plaintext message");
                 };
@@ -191,7 +186,6 @@ pub(super) fn validate_pending_prompt(
     pending: &[TurnInput],
     boundary: Option<&Value>,
     validate: impl FnOnce(&codex_external_runtime::Prompt) -> anyhow::Result<()>,
-    runtime: NativeRuntime,
 ) -> anyhow::Result<()> {
     // Preview normalized pending input before recording it or advancing delivery.
     let items = pending
@@ -205,7 +199,7 @@ pub(super) fn validate_pending_prompt(
         })
         .collect::<Vec<_>>();
     let mut messages = messages.to_vec();
-    messages.extend(input_messages(&items, runtime)?);
+    messages.extend(input_messages(&items)?);
     if let Some(boundary) = boundary {
         messages.insert(/*index*/ 0, boundary.clone());
     }

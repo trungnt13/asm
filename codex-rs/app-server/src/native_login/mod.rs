@@ -20,16 +20,14 @@ use codex_app_server_protocol::TurnSteerResponse;
 use codex_app_server_protocol::UserInput;
 use codex_core::CodexThread;
 use codex_protocol::ThreadId;
+use codex_protocol::openai_models::NativeRuntime;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 mod claude;
-mod cursor;
 mod process;
-mod provider;
 
 use self::process::LoginProcess;
-use self::provider::LoginProvider;
 use crate::error_code::invalid_request;
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::ConnectionRequestId;
@@ -45,7 +43,6 @@ struct LoginSession {
     generation: uuid::Uuid,
     model: String,
     selected_model: String,
-    provider: LoginProvider,
     cwd: PathBuf,
     process: Option<LoginProcess>,
 }
@@ -72,9 +69,13 @@ impl NativeLogin {
             [UserInput::Text { text, .. }] => Some(text.trim()),
             _ => None,
         };
-        let requested_provider = text.and_then(LoginProvider::from_command);
-        let start = requested_provider.is_some();
-        let authorization_code = text.is_some_and(claude::is_authorization_code);
+        if text.is_some_and(|text| text.eq_ignore_ascii_case("cursor login")) {
+            return Err(invalid_request(
+                "Cursor uses `CURSOR_API_KEY` from the ASM backend environment. Set it there and restart the backend. Do not paste the key into chat.",
+            ));
+        }
+        let start = text.is_some_and(|text| text.eq_ignore_ascii_case("claude login"));
+        let code = text.is_some_and(claude::is_authorization_code);
         let pending_entry = self.sessions.lock().await.get(&thread_id).cloned();
         let guard_path = thread
             .config()
@@ -102,30 +103,18 @@ impl NativeLogin {
                 None => config.model.clone(),
             },
         };
-        let provider = match requested_provider {
-            Some(provider) => Some(provider),
-            None => match &pending_entry {
-                Some(entry) => Some(entry.lock().await.provider),
-                None => LoginProvider::from_model(&selected_model),
-            },
-        };
-        let code = match provider {
-            Some(LoginProvider::Cursor) => {
-                pending && text.is_some_and(|text| LoginProvider::Cursor.accepts_reply(text))
-            }
-            Some(LoginProvider::Claude) | None => authorization_code,
-        };
-        if !pending
-            && !start
-            && !(provider.is_some() && (start || code || thread.native_login_required()))
-            && !authorization_code
-        {
+        let claude_model = matches!(
+            NativeRuntime::for_model(&selected_model),
+            Some((NativeRuntime::ClaudeCode, _))
+        );
+        if !(pending || start || code || (claude_model && thread.native_login_required())) {
             return Ok(false);
         }
-        let Some(provider) = provider else {
+        if !(start || pending_entry.is_some() || claude_model) {
+            // Old markers are provider-neutral, including those from retired Cursor logins.
             if pending && !cancel {
                 return Err(invalid_request(
-                    "No active native login. Send `claude login` or `cursor login` to restart, or `cancel`. Nothing from this exchange is sent to a model.",
+                    "No active native login. Send `claude login` to restart, or `cancel`. Nothing from this exchange is sent to a model.",
                 ));
             }
             if durable_pending {
@@ -135,9 +124,9 @@ impl NativeLogin {
                 ));
             }
             return Err(invalid_request(
-                "No active native login. Send `claude login` or `cursor login` to obtain a sign-in link. Nothing from this exchange was sent to a model.",
+                "No active native login. Send `claude login` to obtain a sign-in link. Nothing from this exchange was sent to a model.",
             ));
-        };
+        }
         if matches!(
             config.session_source,
             codex_protocol::protocol::SessionSource::SubAgent(_)
@@ -156,7 +145,6 @@ impl NativeLogin {
                     generation: uuid::Uuid::new_v4(),
                     model: config.model.clone(),
                     selected_model: selected_model.clone(),
-                    provider,
                     cwd: config.cwd().as_path().to_path_buf(),
                     process: None,
                 }))
@@ -173,15 +161,14 @@ impl NativeLogin {
             && !cancel
             && (session.model != config.model
                 || session.selected_model != selected_model
-                || session.provider != provider
                 || session.cwd != config.cwd().as_path())
         {
             session.process = None;
             return Err(invalid_request(
-                "Native login configuration changed. Send `claude login` or `cursor login` to restart.",
+                "Native login configuration changed. Send `claude login` to restart.",
             ));
         }
-        if !cancel && let Some(message) = provider.environment_error() {
+        if !cancel && let Some(message) = claude::environment_error() {
             session.process = None;
             return Err(invalid_request(message));
         }
@@ -254,18 +241,16 @@ impl NativeLogin {
             if !thread.native_login_required() {
                 self.sessions.lock().await.remove(&thread_id);
             }
-            "Native login cancelled. Send `claude login` or `cursor login` to sign in again."
-                .to_owned()
+            "Native login cancelled. Send `claude login` to sign in again.".to_owned()
         } else if start || (!pending && !code) {
             session.process = None;
             session.owner = owner;
             session.model = selected_model.clone();
             session.selected_model = selected_model.clone();
-            session.provider = provider;
             session.cwd = config.cwd().as_path().to_path_buf();
             session.generation = uuid::Uuid::new_v4();
             let result = tokio::select! {
-                result = LoginProcess::start(config.cwd().as_path(), provider) => result,
+                result = LoginProcess::start(config.cwd().as_path()) => result,
                 _ = disconnect.cancelled() => Err(()),
             };
             match result {
@@ -283,17 +268,17 @@ impl NativeLogin {
                             session.process = None;
                         }
                     });
-                    provider.instructions(&url)
+                    claude::instructions(&url)
                 }
                 Err(()) => {
-                    "Native subscription login could not start. Send `claude login` or `cursor login` to try again."
+                    "Native subscription login could not start. Send `claude login` to try again."
                         .to_owned()
                 }
             }
         } else if session.process.is_none() {
-            "No active native login. Send `claude login` or `cursor login` to obtain a new sign-in link. Nothing from this exchange is sent to a model.".to_owned()
+            "No active native login. Send `claude login` to obtain a new sign-in link. Nothing from this exchange is sent to a model.".to_owned()
         } else if !code {
-            "Login is pending. Send only `done` for Cursor or the one-time Claude authorization code, `claude login` or `cursor login` to restart, or `cancel`. Nothing from this login exchange is sent to a model.".to_owned()
+            "Login is pending. Send only the one-time Claude authorization code, `claude login` to restart, or `cancel`. Nothing from this login exchange is sent to a model.".to_owned()
         } else if let Some(process) = session.process.take().filter(|process| !process.expired()) {
             let result = tokio::select! {
                 result = process.submit(text.unwrap_or_default()) => result,
@@ -302,7 +287,7 @@ impl NativeLogin {
             match result {
                 Ok(()) => match clear_login_guard(&guard_path).await {
                     Ok(()) => {
-                        if LoginProvider::from_model(&selected_model) == Some(provider) {
+                        if claude_model {
                             thread.finish_native_login();
                         }
                         self.sessions.lock().await.remove(&thread_id);
@@ -310,10 +295,10 @@ impl NativeLogin {
                     }
                     Err(_) => login_guard_error().message,
                 },
-                Err(()) => "Native subscription login did not complete. Send `claude login` or `cursor login` to restart; do not resend this code.".to_owned(),
+                Err(()) => "Native subscription login did not complete. Send `claude login` to restart; do not resend this code.".to_owned(),
             }
         } else {
-            "No active native login. Send `claude login` or `cursor login` to obtain a new sign-in link. This code was not sent to a model.".to_owned()
+            "No active native login. Send `claude login` to obtain a new sign-in link. This code was not sent to a model.".to_owned()
         };
         drop(session);
         let completed_at_ms: i64 = SystemTime::now()

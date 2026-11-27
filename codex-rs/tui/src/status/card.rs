@@ -434,7 +434,7 @@ impl StatusHistoryCell {
         });
 
         let token_usage = StatusTokenUsageData {
-            reported: native_runtime != Some(NativeRuntime::CursorAgent),
+            reported: native_runtime != Some(NativeRuntime::CursorAgent) || token_info.is_some(),
             total: total_usage.blended_total(),
             input: total_usage.non_cached_input(),
             output: total_usage.output_tokens,

@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
-use super::provider::LoginProvider;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Child;
@@ -15,13 +14,14 @@ use tokio::time::timeout;
 use tokio::time::timeout_at;
 use url::Url;
 
+use super::claude;
+
 const OUTPUT_LIMIT: usize = 64 * 1024;
 const LOGIN_LIFETIME: Duration = Duration::from_secs(300);
 
 pub(super) struct LoginProcess {
     child: Child,
     stdin: Option<ChildStdin>,
-    provider: LoginProvider,
     stdout: ChildStdout,
     cwd: PathBuf,
     output_bytes: usize,
@@ -30,9 +30,9 @@ pub(super) struct LoginProcess {
 
 impl LoginProcess {
     #[tracing::instrument(skip_all)]
-    pub(super) async fn start(cwd: &Path, provider: LoginProvider) -> Result<(Self, String), ()> {
-        let mut child = command(cwd, provider)
-            .args(provider.login_args())
+    pub(super) async fn start(cwd: &Path) -> Result<(Self, String), ()> {
+        let mut child = command(cwd)
+            .args(claude::LOGIN_ARGS)
             .stdin(Stdio::piped())
             .spawn()
             .map_err(|_| ())?;
@@ -47,7 +47,7 @@ impl LoginProcess {
                     return Err(());
                 }
                 output.extend_from_slice(&chunk[..count]);
-                if let Some(url) = subscription_url(&output, provider) {
+                if let Some(url) = subscription_url(&output) {
                     return Ok(url);
                 }
             }
@@ -58,7 +58,6 @@ impl LoginProcess {
             Self {
                 child,
                 stdin,
-                provider,
                 stdout,
                 cwd: cwd.to_path_buf(),
                 output_bytes: output.len(),
@@ -74,17 +73,15 @@ impl LoginProcess {
 
     #[tracing::instrument(skip_all)]
     pub(super) async fn submit(mut self, code: &str) -> Result<(), ()> {
-        if self.expired() || !self.provider.accepts_reply(code) {
+        if self.expired() || !claude::is_authorization_code(code) {
             return Err(());
         }
         let deadline = self.deadline.min(Instant::now() + Duration::from_secs(30));
         timeout_at(deadline, async {
-            if let Some(code) = self.provider.stdin_reply(code) {
-                let stdin = self.stdin.as_mut().ok_or(())?;
-                stdin.write_all(code.as_bytes()).await.map_err(|_| ())?;
-                stdin.write_all(b"\n").await.map_err(|_| ())?;
-                stdin.flush().await.map_err(|_| ())?;
-            }
+            let stdin = self.stdin.as_mut().ok_or(())?;
+            stdin.write_all(code.as_bytes()).await.map_err(|_| ())?;
+            stdin.write_all(b"\n").await.map_err(|_| ())?;
+            stdin.flush().await.map_err(|_| ())?;
             let mut chunk = [0_u8; 1024];
             loop {
                 let count = self.stdout.read(&mut chunk).await.map_err(|_| ())?;
@@ -106,8 +103,8 @@ impl LoginProcess {
         timeout_at(
             deadline.min(Instant::now() + Duration::from_secs(10)),
             async {
-                let mut child = command(&self.cwd, self.provider)
-                    .args(self.provider.status_args())
+                let mut child = command(&self.cwd)
+                    .args(claude::STATUS_ARGS)
                     .spawn()
                     .map_err(|_| ())?;
                 let stdout = child.stdout.take().ok_or(())?;
@@ -121,7 +118,7 @@ impl LoginProcess {
                     return Err(());
                 }
                 let status: serde_json::Value = serde_json::from_slice(&output).map_err(|_| ())?;
-                if self.provider.authenticated(&status) {
+                if claude::authenticated(&status) {
                     Ok(())
                 } else {
                     Err(())
@@ -133,7 +130,7 @@ impl LoginProcess {
     }
 }
 
-fn subscription_url(output: &[u8], provider: LoginProvider) -> Option<String> {
+fn subscription_url(output: &[u8]) -> Option<String> {
     let output = std::str::from_utf8(output).ok()?;
     for (start, _) in output.match_indices("https://") {
         let candidate = &output[start..];
@@ -150,7 +147,7 @@ fn subscription_url(output: &[u8], provider: LoginProvider) -> Option<String> {
             || url.password().is_some()
             || url.port().is_some()
             || url.fragment().is_some()
-            || !provider.valid_url(&url)
+            || !claude::valid_url(&url)
         {
             continue;
         }
@@ -159,8 +156,9 @@ fn subscription_url(output: &[u8], provider: LoginProvider) -> Option<String> {
     None
 }
 
-fn command(cwd: &Path, provider: LoginProvider) -> Command {
-    let mut command = provider.command(cwd);
+fn command(cwd: &Path) -> Command {
+    let mut command = claude::command(cwd);
+    command.env_remove("CURSOR_API_KEY");
     command.env_remove("ENABLE_BETA_TRACING_DETAILED");
     command.env_remove("ENABLE_ENHANCED_TELEMETRY_BETA");
     command.env_remove("DEBUG");

@@ -6,6 +6,7 @@ use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelMessages;
 use codex_protocol::openai_models::ModelVisibility;
+use codex_protocol::openai_models::NativeRuntime;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::openai_models::TruncationMode;
 use codex_protocol::openai_models::TruncationPolicyConfig;
@@ -21,7 +22,7 @@ pub const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
 const PERSONALITY_SECTION_HEADER: &str = "# Personality";
 
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
-    if model.slug.starts_with("claude-code/") {
+    if NativeRuntime::for_model(&model.slug).is_some() {
         model.shell_type = ConfigShellToolType::UnifiedExec;
         model.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
         model.tool_mode = Some(ToolMode::CodeModeOnly);

@@ -3,7 +3,6 @@ use anyhow::ensure;
 use codex_history::ResponseItemEnvelope;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::openai_models::NativeRuntime;
 use serde_json::Value;
 use serde_json::json;
 
@@ -23,14 +22,12 @@ pub(super) fn inherited_prefix(
 
 pub(super) fn reference_message(
     inherited: &[ResponseItemEnvelope],
-    runtime: NativeRuntime,
 ) -> anyhow::Result<(usize, Option<Value>)> {
     if inherited.is_empty() {
         return Ok((0, None));
     }
     let mut inputs =
-        super::input_messages(inherited.iter().map(|item| item.item.as_ref()), runtime)?
-            .into_iter();
+        super::input_messages(inherited.iter().map(|item| item.item.as_ref()))?.into_iter();
     let count = inputs.len();
     let text_block = |text: &str| json!({"type": "text", "text": text});
     let mut blocks = vec![text_block(

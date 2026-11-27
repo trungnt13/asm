@@ -1011,12 +1011,13 @@ impl Session {
             .as_deref()
             .and_then(codex_protocol::openai_models::NativeRuntime::for_model)
             .map(|(runtime, _)| runtime);
-        if config.has_role_base_instructions
-            && native_runtime == Some(codex_protocol::openai_models::NativeRuntime::CursorAgent)
+        let cursor_runtime = Some(codex_protocol::openai_models::NativeRuntime::CursorAgent);
+        if matches!(&conversation_history, InitialHistory::Resumed(_))
+            && (native_runtime == cursor_runtime
+                || history_native_runtime(&conversation_history) == cursor_runtime)
         {
             return Err(CodexErr::InvalidRequest(
-                "Cursor Agent cannot replace its base instructions; use an ASM-managed model or role developer_instructions"
-                    .to_string(),
+                crate::external_runtime::CURSOR_COLD_RESUME.to_owned(),
             ));
         }
         let uses_native_runtime = native_runtime.is_some();
@@ -4824,7 +4825,6 @@ impl Session {
                 cancellation_token,
                 required_servers,
                 required_plugins,
-                turn::StepToolRouting::ResponsesApi,
             )
             .await?;
         self.set_last_known_step_context(&step_context).await;
@@ -4843,29 +4843,6 @@ impl Session {
             cancellation_token,
             /*required_servers*/ &[],
             /*required_plugins*/ &HashSet::new(),
-            turn::StepToolRouting::ResponsesApi,
-        )
-        .await
-    }
-
-    /// Prepares native messaging discovery without building the discarded API router.
-    #[tracing::instrument(level = "trace", skip_all)]
-    pub(crate) async fn capture_native_messaging_step_context(
-        self: &Arc<Self>,
-        turn_context: Arc<TurnContext>,
-        cancellation_token: &CancellationToken,
-    ) -> CodexResult<Arc<StepContext>> {
-        let routing = if turn_context.model_info().slug.starts_with("claude-code/") {
-            turn::StepToolRouting::ResponsesApi
-        } else {
-            turn::StepToolRouting::NativeMessaging
-        };
-        self.capture_step_context_inner(
-            turn_context,
-            cancellation_token,
-            /*required_servers*/ &[],
-            /*required_plugins*/ &HashSet::new(),
-            routing,
         )
         .await
     }
@@ -4892,7 +4869,6 @@ impl Session {
         cancellation_token: &CancellationToken,
         required_servers: &[String],
         required_plugins: &HashSet<String>,
-        routing: turn::StepToolRouting,
     ) -> CodexResult<Arc<StepContext>> {
         // Read the step's model and record its environments together so an update cannot split them.
         // Match apply_turn_settings and activate_turn_environments: active_turn before state.
@@ -5190,7 +5166,6 @@ impl Session {
                 &mcp,
                 &extension_data,
                 prepared_recommendations,
-                routing,
                 &dynamic_tools,
             )
             .await?;

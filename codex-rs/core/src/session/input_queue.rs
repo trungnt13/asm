@@ -309,39 +309,6 @@ impl InputQueue {
         pending.drain(..).collect()
     }
 
-    #[tracing::instrument(level = "trace", skip_all)]
-    pub(crate) async fn take_current_turn_mail(
-        &self,
-        turn_state: &Mutex<TurnState>,
-    ) -> Vec<InputQueueEntry> {
-        // Do not cross queued user input or followups that carry next-turn options.
-        let mut state = turn_state.lock().await;
-        let count = state
-            .pending_input
-            .items
-            .iter()
-            .take_while(|entry| {
-                matches!(&entry.input, TurnInput::InterAgentCommunication(mail)
-                if !mail.trigger_turn)
-            })
-            .count();
-        let mut items: Vec<_> = state.pending_input.items.drain(..count).collect();
-        if !state.pending_input.items.is_empty() {
-            return items;
-        }
-        let mut pending = self.mailbox_pending_mails.lock().await;
-        self.read_mailbox(&mut pending);
-        while pending
-            .front()
-            .is_some_and(|mail| !mail.communication.trigger_turn)
-        {
-            if let Some(mail) = pending.pop_front() {
-                items.push(TurnInput::InterAgentCommunication(mail.communication).into());
-            }
-        }
-        items
-    }
-
     pub(crate) async fn pending_wake_options(&self) -> Option<TurnStartOptions> {
         let mut mails = self.mailbox_pending_mails.lock().await;
         self.read_mailbox(&mut mails);
