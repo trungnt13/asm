@@ -676,7 +676,7 @@ strip = "symbols"
 [profile.release]
 panic = "abort"
 lto = "thin"
-debug = "line-tables-only"
+debug = "none"
 split-debuginfo = "off"
 strip = true
 
