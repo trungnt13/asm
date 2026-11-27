@@ -234,6 +234,7 @@ Before fetching, verify the upstream URL. Sync on a task branch and submit a PR.
 ## Platforms and CI
 
 - Support Apple Silicon macOS (`aarch64-apple-darwin`) and Linux (Ubuntu). Exclude Intel macOS (`x86_64-apple-darwin`) from support, validation, and releases. Do not add or require its CI jobs or release artifacts. Preserve inherited Intel-compatible source without promising support.
+- Use `panic = "abort"` in the release profile on both release targets. Accept process exit instead of recovering from a Rust panic to reduce binary size.
 - Do not add other platforms to fork CI or releases. Preserve other inherited code and workflows unless removal is requested. Get approval for other inherited workflow changes.
 - Inspect triggers: [V8 canary](../.github/workflows/v8-canary.yml) runs on PRs; expensive builds depend on relevant changes. [CLA](../.github/workflows/cla.yml) restricts its job to `openai`.
 - Use standard GitHub-hosted runners. Get explicit approval for paid larger runners. For Apple Silicon, V8 canary uses `macos-15` and two Bazel jobs to limit runner memory use.
