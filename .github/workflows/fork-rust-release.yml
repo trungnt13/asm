@@ -85,7 +85,6 @@ jobs:
     env:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: "off"
-      CARGO_PROFILE_RELEASE_STRIP: "debuginfo"
     strategy:
       fail-fast: false
       matrix:
@@ -205,6 +204,11 @@ jobs:
           done) >> "${GITHUB_WORKSPACE}/diagnostics/resources-${TARGET}.log" 2>&1 &
           sampler_pid=$!
           trap 'kill "$sampler_pid" 2>/dev/null || true' EXIT
+          # Older pinned candidates used debuginfo-only stripping.
+          full_strip=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["profile"]["release"]["strip"] is True)')
+          if [[ "$full_strip" != True ]]; then
+            export CARGO_PROFILE_RELEASE_STRIP=debuginfo
+          fi
           # A resumed immutable candidate retains its original package contract.
           if [[ "$TARGET" == *-linux-gnu ]] && grep -Fq 'codex-package.json' "${GITHUB_WORKSPACE}/.github/scripts/smoke-codex-archive.py"; then
             env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 cargo build --locked --release --target "$TARGET" --bin bwrap
