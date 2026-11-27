@@ -73,6 +73,7 @@ struct Ready {
     model: String,
     effort: Option<String>,
     baseline_effort: Option<String>,
+    effort_choices: Vec<String>,
 }
 
 impl CursorRuntime {
@@ -154,8 +155,8 @@ impl CursorRuntime {
         self.ready.effort.as_deref()
     }
 
-    pub fn baseline_effort(&self) -> Option<&str> {
-        self.ready.baseline_effort.as_deref()
+    pub fn reasoning_efforts(&self) -> impl Iterator<Item = &str> {
+        self.ready.effort_choices.iter().map(String::as_str)
     }
 
     pub fn session_id(&self) -> &str {
@@ -184,8 +185,9 @@ impl CursorRuntime {
             ensure!(
                 ready.id == self.ready.id
                     && ready.model == self.ready.model
-                    && ready.baseline_effort == self.ready.baseline_effort,
-                "Cursor SDK did not confirm the existing session, model, and baseline effort"
+                    && ready.baseline_effort == self.ready.baseline_effort
+                    && ready.effort_choices == self.ready.effort_choices,
+                "Cursor SDK did not confirm the existing session, model, and effort capabilities"
             );
             self.ready = ready;
             Ok(())
@@ -298,6 +300,16 @@ impl Ready {
         };
         let effort = read_effort("effort")?;
         let baseline_effort = read_effort("baselineEffort")?;
+        let effort_choices: Vec<String> = serde_json::from_value(frame["effortChoices"].clone())
+            .context("Cursor SDK did not report reasoning effort choices")?;
+        ensure!(
+            !effort_choices.iter().any(String::is_empty)
+                && [effort, baseline_effort]
+                    .into_iter()
+                    .flatten()
+                    .all(|value| effort_choices.iter().any(|choice| choice == value)),
+            "Cursor SDK reported inconsistent reasoning effort choices"
+        );
         ensure!(
             effort == requested_effort.or(baseline_effort)
                 || (requested_effort == Some("none")
@@ -310,6 +322,7 @@ impl Ready {
             model: model.to_owned(),
             effort: effort.map(str::to_owned),
             baseline_effort: baseline_effort.map(str::to_owned),
+            effort_choices,
         })
     }
 }

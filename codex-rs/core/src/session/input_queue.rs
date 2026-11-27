@@ -309,6 +309,46 @@ impl InputQueue {
         pending.drain(..).collect()
     }
 
+    pub(crate) async fn take_current_turn_mail(
+        &self,
+        turn_state: &Mutex<TurnState>,
+    ) -> Vec<InputQueueEntry> {
+        // Don't move mail across a user steer, follow-up or another ordered input.
+        let mut state = turn_state.lock().await;
+        let queue = &mut state.pending_input;
+        let count = queue
+            .items
+            .iter()
+            .take_while(|entry| entry.input.is_queue_only_mail())
+            .count();
+        let mut items: Vec<_> = queue.items.drain(..count).collect();
+        if queue.items.is_empty() {
+            queue.notified_activity = None;
+        } else {
+            if count != 0
+                && queue.notified_activity == Some(InputQueueActivity::Mailbox)
+                && !queue
+                    .items
+                    .iter()
+                    .any(|entry| entry.input.wait_activity() == InputQueueActivity::Mailbox)
+            {
+                queue.notified_activity = None;
+            }
+            return items;
+        }
+        let mut pending = self.mailbox_pending_mails.lock().await;
+        self.read_mailbox(&mut pending);
+        while pending
+            .front()
+            .is_some_and(|mail| !mail.communication.trigger_turn)
+        {
+            if let Some(mail) = pending.pop_front() {
+                items.push(TurnInput::InterAgentCommunication(mail.communication).into());
+            }
+        }
+        items
+    }
+
     pub(crate) async fn pending_wake_options(&self) -> Option<TurnStartOptions> {
         let mut mails = self.mailbox_pending_mails.lock().await;
         self.read_mailbox(&mut mails);

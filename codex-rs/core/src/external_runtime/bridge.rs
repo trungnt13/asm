@@ -405,7 +405,7 @@ async fn serve_json(State(state): State<Arc<BridgeState>>, request: Request) -> 
         Err(error) => {
             let result =
                 json!({"isError":true,"content":[{"type":"text","text":error.to_string()}]});
-            bounded_tool_response(result).unwrap_or_else(|error| {
+            bounded_tool_response(&result).unwrap_or_else(|error| {
                 Json(json!({"isError":true,"content":[{"type":"text","text":error.to_string()}]}))
                     .into_response()
             })
@@ -413,7 +413,7 @@ async fn serve_json(State(state): State<Arc<BridgeState>>, request: Request) -> 
     }
 }
 
-fn bounded_tool_response(result: Value) -> anyhow::Result<Response> {
+fn bounded_tool_response(result: &Value) -> anyhow::Result<Response> {
     let has_image = result["content"]
         .as_array()
         .is_some_and(|content| content.iter().any(|item| item["type"] == "image"));
@@ -569,7 +569,7 @@ async fn invoke_message_tool(
         if let Some((mut text, mut success)) = local_result {
             let to_response = |text: &str, success: bool| {
                 bounded_tool_response(
-                    json!({"isError":!success,"notDispatched":!success,"content":[{"type":"text","text":text}]}),
+                    &json!({"isError":!success,"notDispatched":!success,"content":[{"type":"text","text":text}]}),
                 )
             };
             let response = match to_response(&text, success) {
@@ -715,8 +715,11 @@ async fn invoke_message_tool(
     drop(handoff_lease);
     let mut item = Arc::unwrap_or_clone(output.item);
     let result = convert_output(&item);
-    let response = match result.and_then(bounded_tool_response) {
-        Ok(response) => response,
+    let (mut body, response) = match result.and_then(|body| {
+        let response = bounded_tool_response(&body)?;
+        Ok((body, response))
+    }) {
+        Ok(pair) => pair,
         Err(error) => {
             let payload = match &mut item {
                 ResponseItem::FunctionCallOutput { output, .. }
@@ -732,15 +735,24 @@ async fn invoke_message_tool(
                 "{execution}, but its output was not delivered: {error}. Do not rerun the tool just to recover the output."
             );
             payload.body = FunctionCallOutputBody::Text(text.clone());
-            bounded_tool_response(json!({
+            let body = json!({
                 "isError": payload.success == Some(false),
                 "content": [{"type":"text","text":text}]
-            }))?
+            });
+            let response = bounded_tool_response(&body)?;
+            (body, response)
         }
     };
     session
         .record_conversation_items(&step.turn, &step.settings.model_info, &[item])
         .await;
+    if let Some(mailbox) = step.turn.extension_data.get::<super::CursorMailbox>()
+        && mailbox.take_wake()
+        && !turn.cancel.is_cancelled()
+    {
+        mailbox.append(&session, &step.turn, &mut body).await?;
+        return bounded_tool_response(&body);
+    }
     Ok(response)
 }
 

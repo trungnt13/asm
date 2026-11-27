@@ -112,6 +112,9 @@ pub(super) async fn complete_response(
         .send_token_count_event(turn, stream.output_tps)
         .await;
     session.flush_rollout().await?;
+    if !interrupted && let Some(mailbox) = turn.extension_data.remove::<super::CursorMailbox>() {
+        mailbox.confirm(&result, &mut runtime.checkpoint)?;
+    }
     save_reconciled_checkpoint(runtime, generation, !interrupted && failure.is_none())?;
     if interrupted {
         if let Err(error) = budget_result {

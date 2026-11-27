@@ -9,7 +9,8 @@ async fn cursor_interrupt_is_clean_beside_an_unreadable_process() -> anyhow::Res
 for line in sys.stdin:
     kind = json.loads(line)["type"]
     if kind == "init":
-        frame = {"type": "ready", "id": "cursor", "model": "auto", "effort": None, "baselineEffort": None}
+        frame = {"type": "ready", "id": "cursor", "model": "auto", "effort": None,
+                 "baselineEffort": None, "effortChoices": []}
     elif kind == "prompt":
         frame = {"type": "assistant_delta", "text": "working"}
     elif kind == "cancel":

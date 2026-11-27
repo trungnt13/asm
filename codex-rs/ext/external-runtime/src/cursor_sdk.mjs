@@ -17,7 +17,7 @@ delete process.env.CURSOR_API_KEY;
 const sdkRoot = process.env.ASM_CURSOR_SDK_ROOT ?? join(homedir(), ".local/share/asm/cursor-sdk");
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 let agent, active, bridge, baseInstructions;
-let selection, catalog, effortId, baselineEffort, effectiveEffort;
+let selection, effortId, effortChoices, baselineEffort, effectiveEffort;
 let firstPrompt = true;
 
 class Rejection extends Error {
@@ -39,7 +39,7 @@ process.on("unhandledRejection", () => { emit({ type: "error", code: "sdk_error"
 
 function ready() {
   emit({ type: "ready", id: agent.agentId, model: selection.id, effort: effectiveEffort,
-    baselineEffort, version: sdkVersion });
+    baselineEffort, effortChoices, version: sdkVersion });
 }
 
 function setEffort(value) {
@@ -48,10 +48,7 @@ function setEffort(value) {
     throw new Rejection("invalid_effort");
   }
   const effort = value ?? baselineEffort;
-  if (effortId && effort !== null) {
-    if (!catalog.parameters.some((option) => option.id === effortId &&
-        option.values.some(({ value }) => value === effort))) throw new Rejection("invalid_effort");
-  }
+  if (effort !== null && !effortChoices.includes(effort)) throw new Rejection("invalid_effort");
   const params = selection.params.filter(({ id }) => id !== effortId);
   if (effortId && effort !== null) params.push({ id: effortId, value: effort });
   selection = { id: selection.id, params };
@@ -108,6 +105,7 @@ async function toolDefinitions(activeTurn) {
           if (isError && !result.notDispatched) {
             result.content.unshift({ type: "text", text: "ASM tool failed. Do not retry an uncertain operation." });
           }
+          if (result.mailBatch === true) activeTurn.receivedMailBatches++;
           return { content: result.content, isError };
         } catch {
           throw new Error("ASM tool result unavailable; its outcome may be unknown. Do not retry automatically.");
@@ -140,7 +138,7 @@ async function init(frame) {
   if (!parsed) throw new Rejection("invalid_model");
   const models = await sdk.Cursor.models.list({ apiKey });
   const id = parsed[1];
-  catalog = models.find((model) => model.id === id) ??
+  const catalog = models.find((model) => model.id === id) ??
     (id === "auto" ? models.find((model) => model.id === "default") : undefined);
   if (!catalog) throw new Rejection("invalid_model");
   const params = (parsed[2]?.split(",") ?? []).map((param) => {
@@ -151,8 +149,11 @@ async function init(frame) {
   });
   if (new Set(params.map(({ id }) => id)).size !== params.length) throw new Rejection("invalid_model");
   selection = { id: catalog.id, params };
-  effortId = ["thought_level", "reasoning_effort", "reasoning", "effort"]
-    .find((id) => catalog.parameters?.some((option) => option.id === id));
+  const effortOption = ["thought_level", "reasoning_effort", "reasoning", "effort"]
+    .map((id) => catalog.parameters?.find((option) => option.id === id))
+    .find(Boolean);
+  effortId = effortOption?.id;
+  effortChoices = [...new Set(effortOption?.values.map(({ value }) => value) ?? [])];
   const defaultParams = catalog.variants?.find((variant) => variant.isDefault)?.params;
   baselineEffort = (params.find(({ id }) => id === effortId) ??
     defaultParams?.find(({ id }) => id === effortId))?.value ?? null;
@@ -224,7 +225,7 @@ async function prompt(frame, turn) {
     if (!displayedText && result.result) emit({ type: "assistant_delta", text: result.result });
     emit({ type: "assistant_end" });
     emit({ type: "result", status: result.status, uuid: result.id, usage: result.usage,
-      code: result.error && errorCode(result.error) });
+      receivedMailBatches: turn.receivedMailBatches, code: result.error && errorCode(result.error) });
   } catch (error) {
     emit({ type: "result", status: "error", code: errorCode(error) });
   } finally {
@@ -244,7 +245,7 @@ try {
         emit({ type: "error", code: errorCode(error) });
       }
     } else if (frame.type === "prompt" && agent && !active) {
-      active = { stop: new AbortController() };
+      active = { stop: new AbortController(), receivedMailBatches: 0 };
       void prompt(frame, active);
     } else if (frame.type === "cancel" && active) {
       active.cancelled = true;

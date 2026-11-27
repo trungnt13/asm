@@ -8,6 +8,8 @@ mod continuation;
 use completion::complete_response;
 use completion::save_reconciled_checkpoint;
 mod cursor;
+mod cursor_mail;
+pub(crate) use cursor_mail::CursorMailbox;
 mod deletion;
 mod events;
 mod fork;
@@ -564,13 +566,16 @@ async fn run_conversation(
                 native_runtime,
             )
             .await?;
-            bridge
-                .set_turn(
-                    Arc::clone(session),
-                    Arc::clone(&prepared.step),
-                    cancellation.clone(),
-                )
-                .await?;
+            if native_runtime == NativeRuntime::ClaudeCode {
+                // Claude attests its tool inventory during startup, before prompt admission.
+                bridge
+                    .set_turn(
+                        Arc::clone(session),
+                        Arc::clone(&prepared.step),
+                        cancellation.clone(),
+                    )
+                    .await?;
+            }
             let message = match native_runtime {
                 NativeRuntime::ClaudeCode => {
                     "Claude Code supplies inference and conversation state. ASM owns tools, instructions, skills, sandbox and approvals."
@@ -696,6 +701,7 @@ async fn run_conversation(
                     .map_err(input_rejection)?;
                     drop(messages);
                     if first_prompt {
+                        let cursor_efforts;
                         let supported = match &runtime.runtime {
                             RuntimeProcess::Claude(process)
                                 if !process.has_background_work()
@@ -703,7 +709,11 @@ async fn run_conversation(
                             {
                                 &["low", "medium", "high", "xhigh", "max"][..]
                             }
-                            RuntimeProcess::Claude(_) | RuntimeProcess::Cursor(_) => &[],
+                            RuntimeProcess::Claude(_) => &[],
+                            RuntimeProcess::Cursor(process) => {
+                                cursor_efforts = process.reasoning_efforts().collect::<Vec<_>>();
+                                cursor_efforts.as_slice()
+                            }
                         };
                         *decision_eligible = session.native_system1_eligible(turn, supported);
                         if *decision_eligible
@@ -756,8 +766,11 @@ async fn run_conversation(
                                     .is_some_and(|previous| Some(previous) != requested.as_deref())
                             }
                             RuntimeProcess::Cursor(process) => {
+                                let changed = process
+                                    .current_effort()
+                                    .is_some_and(|previous| Some(previous) != requested.as_deref());
                                 process.set_effort(requested.as_deref()).await?;
-                                false
+                                changed
                             }
                         };
                         if changed && decision_effort.is_some() {
@@ -797,7 +810,7 @@ async fn run_conversation(
             prompt = prompt_content(&pending_messages)?;
         }
         drop(pending_messages);
-        if needs_binding {
+        if needs_binding || native_runtime == NativeRuntime::CursorAgent {
             runtime
                 .bridge
                 .set_turn(Arc::clone(session), prepared_step, cancellation.clone())
@@ -831,6 +844,8 @@ async fn run_conversation(
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             baseline.cursor_submitted = baseline.rendered.clone();
+            turn.extension_data
+                .insert(CursorMailbox::new(runtime.checkpoint.input_count));
         }
         let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(/*buffer*/ 32);
         let mut stream = events::MessageStream::default();
