@@ -8710,7 +8710,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "description": "Add or override external models by canonical model ID. Accepted only in user configuration. Entries use the bundled catalog's metadata fields, plus an optional alias and a named model provider.",
+      "description": "Add or override external models by canonical model ID. Accepted only in user configuration. Entries may set catalog metadata, an alias, and a named model provider. Providers with `model_catalog_url` accept only aliases and provider bindings, not metadata overrides.",
       "type": "object"
     },
     "features": {

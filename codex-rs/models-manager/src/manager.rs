@@ -602,11 +602,14 @@ impl StaticModelsManager {
         self
     }
 
-    fn external_overlay_mode(&self) -> OverlayMode {
+    fn external_overlay_mode(&self) -> Option<OverlayMode> {
         match &self.load_external_models_json {
-            Some(enabled) if enabled.load(Ordering::SeqCst) => OverlayMode::SupplementCustom,
-            Some(_) => OverlayMode::ConfiguredOnly,
-            None => OverlayMode::ProviderOwned,
+            Some(enabled) if enabled.load(Ordering::SeqCst) => Some(OverlayMode::SupplementCustom),
+            Some(_) => Some(OverlayMode::ConfiguredOnly),
+            None if matches!(self.source, StaticCatalogSource::BoundProvider(_)) => {
+                Some(OverlayMode::ConfiguredOnly)
+            }
+            None => None,
         }
     }
 
@@ -860,7 +863,7 @@ impl ModelsManager for OpenAiModelsManager {
                         metadata,
                         external.overlay_origin(model, mode, selected_origin),
                     ))
-                } else if matches!(self.catalog_source, CatalogSource::Default)
+                } else if mode.is_some()
                     && !external.is_configured(model)
                     && let Some((_, metadata)) = external.provider_model(model)
                 {
@@ -868,7 +871,7 @@ impl ModelsManager for OpenAiModelsManager {
                     Some((metadata.clone(), Some(ModelOrigin::Bundled)))
                 } else if let Some(metadata) = exact {
                     Some((metadata.clone(), None))
-                } else if matches!(self.catalog_source, CatalogSource::Default) {
+                } else if mode.is_some() {
                     // Match legacy prefixes and namespaces against the unconfigured catalog.
                     let bundled = ExternalModels::bundled();
                     bundled.overlay(models, mode);
@@ -910,13 +913,13 @@ impl ModelsManager for OpenAiModelsManager {
 }
 
 impl OpenAiModelsManager {
-    fn external_overlay_mode(&self) -> OverlayMode {
+    fn external_overlay_mode(&self) -> Option<OverlayMode> {
         match self.catalog_source {
-            CatalogSource::ExplicitProvider(_) => OverlayMode::ProviderOwned,
+            CatalogSource::ExplicitProvider(_) => None,
             CatalogSource::Default if self.load_external_models_json.load(Ordering::SeqCst) => {
-                OverlayMode::PreferBundled
+                Some(OverlayMode::PreferBundled)
             }
-            CatalogSource::Default => OverlayMode::ConfiguredOnly,
+            CatalogSource::Default => Some(OverlayMode::ConfiguredOnly),
         }
     }
 
@@ -931,7 +934,7 @@ impl OpenAiModelsManager {
         &self,
         entry: &'a ModelsCacheEntry,
         external: &ExternalModels,
-        mode: OverlayMode,
+        mode: Option<OverlayMode>,
     ) -> SelectedCatalog<'a> {
         let mut selected = self.select_catalog(entry);
         let models = match &mut selected {

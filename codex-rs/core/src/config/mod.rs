@@ -4445,6 +4445,20 @@ impl Config {
             merge_configured_model_providers(built_in_model_providers(openai_base_url), cfg.model_providers)
                 .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message))?;
 
+        for model in cfg.external_models.keys() {
+            if external_models.has_metadata_overrides(model)
+                && let Some(provider) = external_models.provider_for_model(model)
+                && model_providers.get(provider).is_some_and(|info| info.model_catalog_url.is_some())
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "external_models.{model}: provider `{provider}` owns its model catalog; only `alias` and `model_provider` may be configured"
+                    ),
+                ));
+            }
+        }
+
         if let Some(provider) = model_providers.get_mut(GCP_PROVIDER_ID) {
             apply_default_gcp_auth(provider, &resolved_cwd);
         }

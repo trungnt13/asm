@@ -592,8 +592,9 @@ pub struct ConfigToml {
     pub load_external_models_json: Option<bool>,
 
     /// Add or override external models by canonical model ID. Accepted only in
-    /// user configuration. Entries use the bundled catalog's metadata fields,
-    /// plus an optional alias and a named model provider.
+    /// user configuration. Entries may set catalog metadata, an alias, and a
+    /// named model provider. Providers with `model_catalog_url` accept only
+    /// aliases and provider bindings, not metadata overrides.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub external_models: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
 

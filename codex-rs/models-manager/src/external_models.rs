@@ -38,39 +38,24 @@ impl Entry {
             return match mode {
                 OverlayMode::PreferBundled => Some(self.model.clone()),
                 OverlayMode::SupplementCustom if existing.is_none() => Some(self.model.clone()),
-                OverlayMode::ProviderOwned
-                | OverlayMode::ConfiguredOnly
-                | OverlayMode::SupplementCustom => None,
+                OverlayMode::ConfiguredOnly | OverlayMode::SupplementCustom => None,
             };
         };
         let existing = existing.filter(|_| !self.prefers_bundled_external(mode));
         let Some(base) = existing else {
-            return match mode {
-                OverlayMode::ProviderOwned => None,
-                OverlayMode::ConfiguredOnly
-                | OverlayMode::SupplementCustom
-                | OverlayMode::PreferBundled => Some(self.model.clone()),
-            };
+            return Some(self.model.clone());
         };
         if fields.is_empty() {
             return None;
         }
-        let mut model = match patch_metadata(base, fields) {
-            Ok(model) => model,
+        match patch_metadata(base, fields) {
+            Ok(model) => Some(model),
             Err(error) => {
                 // A selected catalog may lack optional objects the patch augments in the bundle.
                 tracing::warn!(model = %base.slug, %error, "external model metadata patch does not apply to the selected catalog entry");
-                return Some(base.clone());
+                Some(base.clone())
             }
-        };
-        if matches!(mode, OverlayMode::ProviderOwned) {
-            model.supported_in_api = base.supported_in_api;
-            model.visibility = base.visibility;
-            model
-                .available_access_programs
-                .clone_from(&base.available_access_programs);
         }
-        Some(model)
     }
 
     fn prefers_bundled_external(&self, mode: OverlayMode) -> bool {
@@ -171,12 +156,19 @@ impl ExternalModels {
             .is_some_and(|entry| entry.metadata_patch.is_some())
     }
 
+    pub fn has_metadata_overrides(&self, model: &str) -> bool {
+        self.entry(model)
+            .and_then(|entry| entry.metadata_patch.as_ref())
+            .is_some_and(|fields| !fields.is_empty())
+    }
+
     pub(crate) fn overlay_origin(
         &self,
         model: &str,
-        mode: OverlayMode,
+        mode: Option<OverlayMode>,
         selected_origin: Option<ModelOrigin>,
     ) -> Option<ModelOrigin> {
+        let mode = mode?;
         let entry = self.entry(model)?;
         if let Some(fields) = &entry.metadata_patch {
             if fields.is_empty() {
@@ -210,12 +202,15 @@ impl ExternalModels {
         &self,
         slug: &str,
         existing: Option<&ModelInfo>,
-        mode: OverlayMode,
+        mode: Option<OverlayMode>,
     ) -> Option<ModelInfo> {
-        self.entry(slug)?.overlay(existing, mode)
+        self.entry(slug)?.overlay(existing, mode?)
     }
 
-    pub(crate) fn overlay(&self, models: &mut Cow<'_, [ModelInfo]>, mode: OverlayMode) {
+    pub(crate) fn overlay(&self, models: &mut Cow<'_, [ModelInfo]>, mode: Option<OverlayMode>) {
+        let Some(mode) = mode else {
+            return;
+        };
         let overlay: Vec<_> = self
             .entries
             .iter()
@@ -238,7 +233,6 @@ impl ExternalModels {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum OverlayMode {
-    ProviderOwned,
     ConfiguredOnly,
     SupplementCustom,
     PreferBundled,
