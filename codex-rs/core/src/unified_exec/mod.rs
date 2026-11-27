@@ -35,6 +35,7 @@ use rand::Rng;
 use rand::rng;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
@@ -173,6 +174,7 @@ impl ProcessStore {
 }
 
 pub(crate) struct UnifiedExecProcessManager {
+    pub(crate) launch_failure_writes: TaskTracker,
     process_store: Mutex<ProcessStore>,
     background_terminal_timeout_bounds: BackgroundTerminalTimeoutBounds,
 }
@@ -180,6 +182,7 @@ pub(crate) struct UnifiedExecProcessManager {
 impl UnifiedExecProcessManager {
     pub(crate) fn new(background_terminal_timeout_bounds: BackgroundTerminalTimeoutBounds) -> Self {
         Self {
+            launch_failure_writes: TaskTracker::new(),
             process_store: Mutex::new(ProcessStore::default()),
             background_terminal_timeout_bounds,
         }
