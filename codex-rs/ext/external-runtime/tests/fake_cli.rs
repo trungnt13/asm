@@ -16,7 +16,7 @@ rules = json.load(open(os.path.join(os.path.dirname(__file__), "rules.json")))
 seen = {}
 for line in sys.stdin:
     frame = json.loads(line)
-    kind = frame.get("method") or frame.get("request", {}).get("subtype") or frame.get("type")
+    kind = frame.get("request", {}).get("subtype") or frame.get("type")
     seen[kind] = frame.get("id", frame.get("request_id", frame.get("uuid")))
     for reply in next((rules.pop(i)[1] for i, rule in enumerate(rules) if rule[0] == kind), []):
         text = json.dumps(reply)
@@ -155,51 +155,4 @@ async fn claude_submits_input_queued_while_the_idle_frame_is_forwarded() -> anyh
     });
     assert_eq!(outcome?.submitted_steering_count, 1);
     runtime.shutdown().await
-}
-
-#[cfg(target_os = "linux")]
-#[tokio::test]
-async fn cursor_interrupt_is_clean_beside_an_unreadable_process() -> anyhow::Result<()> {
-    let options = json!([{"id": "model", "currentValue": "auto", "options": [{"value": "auto"}]}]);
-    let reply = |request: &str, result: Value| {
-        let id = format!("${request}");
-        json!([request, [{"jsonrpc": "2.0", "id": id, "result": result}]])
-    };
-    let directory = fake_cli(json!([
-        reply("initialize", json!({"protocolVersion": 1,
-            "agentCapabilities": {"sessionCapabilities": {"subagents": {}}}})),
-        reply("session/new", json!({"sessionId": "cursor", "configOptions": options})),
-        reply("session/set_config_option", json!({"configOptions": options})),
-        ["session/prompt", [{"jsonrpc": "2.0", "method": "session/update", "params": {
-            "sessionId": "cursor", "update": {"sessionUpdate": "agent_message_chunk"}}}]],
-        ["session/cancel", [{"jsonrpc": "2.0", "id": "$session/prompt",
-            "result": {"stopReason": "cancelled"}}]],
-    ]))?;
-    let mut runtime = CursorRuntime::spawn(CursorOptions {
-        executable: directory.path().join("cli"),
-        cwd: directory.path().to_owned(),
-        model: "auto".to_owned(),
-        effort: None,
-        role_instructions: None,
-        session: CursorSession::New,
-        config_dir: directory.path().join("config"),
-        bridge_directory: None,
-    })
-    .await?;
-    // Like `sshd: user@notty`: same user, born after the CLI, with a hidden environment.
-    let hide = "import ctypes, os, time; os.setsid(); ctypes.CDLL(None).prctl(4, 0, 0, 0, 0); time.sleep(30)";
-    let mut bystander = std::process::Command::new("python3")
-        .args(["-c", hide])
-        .spawn()?;
-    while std::fs::read(format!("/proc/{}/environ", bystander.id())).is_ok() {
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-
-    let prompt = Prompt::Text("hello".to_owned());
-    let run = async |events, cancel| runtime.run_turn(&prompt, events, cancel).await;
-    let stopped = drive(run, true).await;
-    bystander.kill()?;
-    bystander.wait()?;
-    assert!(stopped?.interrupted);
-    Ok(())
 }

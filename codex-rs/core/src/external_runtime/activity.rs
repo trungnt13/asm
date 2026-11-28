@@ -118,7 +118,7 @@ impl ActivityStream {
         Ok(())
     }
 
-    pub(super) async fn start(
+    async fn start(
         &mut self,
         session: &Session,
         turn: &TurnContext,
@@ -157,19 +157,7 @@ impl ActivityStream {
         Ok(())
     }
 
-    /// Applies a native update's title or arguments to a running call before completion.
-    pub(super) fn update(&mut self, key: &str, name: &Value, input: &Value) {
-        if let Some(call) = self.calls.get_mut(key) {
-            if name.is_string() {
-                call["tool"] = name.clone();
-            }
-            if !input.is_null() {
-                call["arguments"] = input.clone();
-            }
-        }
-    }
-
-    pub(super) async fn finish(
+    async fn finish(
         &mut self,
         session: &Session,
         turn: &TurnContext,

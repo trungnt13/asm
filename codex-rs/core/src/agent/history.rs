@@ -1,6 +1,7 @@
 //! Loads stored agent context and prepares the history a child inherits when it forks.
 
 use crate::agent::control::LocalAgentRuntime;
+use crate::agent::types::NativeForkCut;
 use crate::agent::types::SpawnAgentOptions;
 use crate::compact_remote_v2::retained_client_items;
 use crate::config::Config;
@@ -414,43 +415,50 @@ pub(super) async fn prepare_forked_history(
     let parent_history_mode = parent.history_mode;
     let destination_history_mode = matches!(parent_history_mode, ThreadHistoryMode::Paginated)
         .then_some(ThreadHistoryMode::Paginated);
-    let native_cut = options.native_fork_cut.as_ref();
-    let mut forked_rollout_items = if let Some(history) = native_cut {
-        history.get_rollout_items().to_vec()
-    } else {
-        // Flush asynchronous rollout writes before snapshotting stored history.
-        parent_thread.ensure_rollout_materialized().await;
-        parent_thread.flush_rollout().await?;
-        load_agent_model_context(state, parent_thread_id, parent_history_mode)
-            .await?
-            .items
+    let retain = |item: &ResponseItemEnvelope| item.child_retention() != Some(false);
+    let max_history_bytes = config.handoff.max_history_bytes.get();
+    let project_rollout = |history: &InitialHistory| {
+        crate::handoff::project(history, parent_history_mode, max_history_bytes, retain)
     };
-    if multi_agent_version == MultiAgentVersion::V2
-        && (native_cut.is_some()
-            || requires_handoff(Some(&parent.model), &parent.model_provider_id, config))
-    {
-        if native_cut.is_none()
-            && is_native_model(&parent.model)
-            && parent_thread.has_active_turn().await
-        {
+    let hidden_handoff = |items: Vec<ResponseItemEnvelope>| {
+        let history =
+            InitialHistory::Forked(items.into_iter().map(RolloutItem::ResponseItem).collect());
+        (
+            history,
+            destination_history_mode,
+            Some(PortableHistory::Hidden),
+        )
+    };
+    if multi_agent_version == MultiAgentVersion::V2 {
+        if let Some(cut) = &options.native_fork_cut {
+            let items = match cut {
+                NativeForkCut::Rollout(history) => project_rollout(history),
+                NativeForkCut::LivePrefix { items, len } => {
+                    let prefix = items.get(..*len).ok_or_else(|| {
+                        CodexErr::InvalidRequest("Invalid active native history prefix".into())
+                    })?;
+                    crate::handoff::project_items(prefix, max_history_bytes, retain)
+                }
+            }?;
+            return Ok(hidden_handoff(items));
+        }
+        if is_native_model(&parent.model) && parent_thread.has_active_turn().await {
             return Err(CodexErr::InvalidRequest(
                 "Cannot fork without a verified active native history snapshot".into(),
             ));
         }
-        let history = InitialHistory::Forked(forked_rollout_items);
-        let items = crate::handoff::project(
-            &history,
-            parent_history_mode,
-            config.handoff.max_history_bytes.get(),
-            |item| item.child_retention() != Some(false),
-        )?;
-        let history =
-            InitialHistory::Forked(items.into_iter().map(RolloutItem::ResponseItem).collect());
-        return Ok((
-            history,
-            destination_history_mode,
-            Some(PortableHistory::Hidden),
-        ));
+    }
+    // Flush asynchronous rollout writes before snapshotting stored history.
+    parent_thread.ensure_rollout_materialized().await;
+    parent_thread.flush_rollout().await?;
+    let mut forked_rollout_items =
+        load_agent_model_context(state, parent_thread_id, parent_history_mode)
+            .await?
+            .items;
+    if multi_agent_version == MultiAgentVersion::V2
+        && requires_handoff(Some(&parent.model), &parent.model_provider_id, config)
+    {
+        return project_rollout(&InitialHistory::Forked(forked_rollout_items)).map(hidden_handoff);
     }
 
     let multi_agent_v2_usage_hint_texts_to_filter: Vec<String> =

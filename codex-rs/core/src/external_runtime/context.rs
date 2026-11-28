@@ -29,9 +29,12 @@ impl Session {
                 .additional_context_baseline
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let (snapshot, updates) =
-                WorldState::render_section(section, baseline.as_ref(), std::iter::empty());
-            *baseline = Some(snapshot);
+            let (snapshot, updates) = WorldState::render_section(
+                section,
+                baseline.rendered.as_deref(),
+                std::iter::empty(),
+            );
+            baseline.rendered = Some(Arc::new(snapshot));
             updates
         };
         self.annotated_additional_context_updates(updates)

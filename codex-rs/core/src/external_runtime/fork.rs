@@ -49,13 +49,10 @@ pub(crate) async fn prepare_temporary_fork(
             "Claude Code side conversations keep main's model; do not override it",
         ));
     }
-    let messages = input_messages(
-        history.iter().filter_map(|item| match item {
-            RolloutItem::ResponseItem(envelope) => Some(envelope.item.as_ref()),
-            _ => None,
-        }),
-        codex_protocol::openai_models::NativeRuntime::ClaudeCode,
-    )
+    let messages = input_messages(history.iter().filter_map(|item| match item {
+        RolloutItem::ResponseItem(envelope) => Some(envelope.item.as_ref()),
+        _ => None,
+    }))
     .map_err(|error| refuse(&error.to_string()))?;
     if messages.len() != checkpoint.input_count
         || input_prefix(&messages).ok().as_deref() != Some(checkpoint.input_prefix.as_str())

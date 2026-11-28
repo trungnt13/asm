@@ -17,21 +17,22 @@ const IMAGE_FRAME_LIMIT: usize = 32 * FRAME_LIMIT;
 
 #[derive(Clone, Copy)]
 pub(crate) enum FramePolicy {
-    CursorImages,
+    CursorSdk,
     ClaudeImages,
 }
 
 impl FramePolicy {
     fn max_size(self) -> usize {
         match self {
-            Self::ClaudeImages | Self::CursorImages => IMAGE_FRAME_LIMIT,
+            Self::ClaudeImages => IMAGE_FRAME_LIMIT,
+            Self::CursorSdk => FRAME_LIMIT,
         }
     }
 
-    fn frame_limit(self, frame: &Value) -> usize {
-        let has_image = match self {
-            Self::ClaudeImages => {
-                frame["type"] == "user"
+    fn output_limit(self, frame: &Value) -> usize {
+        match self {
+            Self::ClaudeImages
+                if frame["type"] == "user"
                     && frame["message"]["content"]
                         .as_array()
                         .is_some_and(|content| {
@@ -42,30 +43,29 @@ impl FramePolicy {
                                             parts.iter().any(|part| part["type"] == "image")
                                         }))
                             })
-                        })
+                        }) =>
+            {
+                IMAGE_FRAME_LIMIT
             }
-            Self::CursorImages => {
-                (frame["method"] == "session/prompt"
-                    && frame["params"]["prompt"].as_array().is_some_and(|content| {
-                        content.iter().any(|block| block["type"] == "image")
-                    }))
-                    || (frame["method"] == "session/update"
-                        && frame["params"]["update"]["sessionUpdate"] == "user_message_chunk"
-                        && frame["params"]["update"]["content"]["type"] == "image")
-            }
-        };
-        if has_image {
-            IMAGE_FRAME_LIMIT
-        } else {
-            FRAME_LIMIT
+            Self::ClaudeImages | Self::CursorSdk => FRAME_LIMIT,
         }
     }
 
     pub(crate) fn input_limit(self, frame: &Value) -> usize {
-        let limit = self.frame_limit(frame);
+        let limit = match self {
+            Self::ClaudeImages => self.output_limit(frame),
+            Self::CursorSdk
+                if frame["type"] == "prompt"
+                    && frame["blocks"].as_array().is_some_and(|blocks| {
+                        blocks.iter().any(|block| block["type"] == "image")
+                    }) =>
+            {
+                IMAGE_FRAME_LIMIT
+            }
+            Self::CursorSdk => FRAME_LIMIT,
+        };
         if limit == IMAGE_FRAME_LIMIT {
-            // Replayed user messages add native metadata. Reserve the ordinary
-            // frame budget so input accepted here also fits the stdout reader.
+            // Keep the shared native image input budget. Claude may echo frames with metadata.
             limit - FRAME_LIMIT
         } else {
             limit
@@ -128,7 +128,7 @@ async fn read_frame(
             let frame = serde_json::from_slice(&bytes)
                 .context("native CLI emitted an invalid stream-json frame")?;
             anyhow::ensure!(
-                bytes.len() <= policy.frame_limit(&frame),
+                bytes.len() <= policy.output_limit(&frame),
                 "native CLI stdout frame exceeded its content size limit"
             );
             return Ok(Some(frame));

@@ -156,9 +156,9 @@
     {
       "slug": "cursor-agent/claude-opus-5-5",
       "alias": "cursor/opus-5.5",
-      "tool_mode": "direct",
+      "tool_mode": "code_mode_only",
       "display_name": "Opus 5.5 · Cursor",
-      "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
+      "description": "Runs through the Cursor SDK with ASM tools and permissions.",
       "default_reasoning_level": "medium",
       "supported_reasoning_levels": [
         {
@@ -210,9 +210,9 @@
     {
       "slug": "cursor-agent/claude-sonnet-5-5",
       "alias": "cursor/sonnet-5.5",
-      "tool_mode": "direct",
+      "tool_mode": "code_mode_only",
       "display_name": "Sonnet 5.5 · Cursor",
-      "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
+      "description": "Runs through the Cursor SDK with ASM tools and permissions.",
       "default_reasoning_level": "high",
       "supported_reasoning_levels": [
         {
@@ -264,9 +264,9 @@
     {
       "slug": "cursor-agent/claude-haiku-5-5",
       "alias": "cursor/haiku-5.5",
-      "tool_mode": "direct",
+      "tool_mode": "code_mode_only",
       "display_name": "Haiku 5.5 · Cursor",
-      "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
+      "description": "Runs through the Cursor SDK with ASM tools and permissions.",
       "default_reasoning_level": "high",
       "supported_reasoning_levels": [
         {
@@ -318,9 +318,9 @@
     {
       "slug": "cursor-agent/auto-smart",
       "alias": "cursor/auto-smart",
-      "tool_mode": "direct",
+      "tool_mode": "code_mode_only",
       "display_name": "Auto · Cursor",
-      "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
+      "description": "Runs through the Cursor SDK with ASM tools and permissions.",
       "default_reasoning_level": null,
       "supported_reasoning_levels": [],
       "shell_type": "disabled",

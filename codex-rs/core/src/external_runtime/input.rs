@@ -143,7 +143,9 @@ pub(super) fn prepare_input(input: &mut Vec<TurnInput>) -> anyhow::Result<usize>
                     skipped += 1;
                     continue;
                 }
-                envelope.item = context_item(original)?.into();
+                if !matches!(original, ResponseItem::AgentMessage { .. }) {
+                    envelope.item = context_item(original)?.into();
+                }
             }
             TurnInput::UserInput { content, .. } => {
                 for part in content {

@@ -8,6 +8,7 @@ use codex_model_provider_info::WireApi;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
+use codex_protocol::openai_models::NativeRuntime;
 use codex_tools::LoadableToolSpec;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ResponsesApiTool;
@@ -22,7 +23,7 @@ use std::sync::Arc;
 
 pub(crate) fn enabled(turn: &TurnContext, model: &ModelInfo) -> bool {
     (turn.config.model_provider_id == "fireworks"
-        || model.slug.starts_with("claude-code/")
+        || NativeRuntime::for_model(&model.slug).is_some()
         || turn.provider.info().wire_api == WireApi::GeminiInteractions
         || (turn.provider.info().wire_api == WireApi::ChatCompletions
             && turn

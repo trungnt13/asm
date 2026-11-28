@@ -16,16 +16,12 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::Response;
 use axum::routing::post;
-use codex_message_board::MessageBoardTool;
-use codex_prompts::ResolvedModelMessages;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ImageReference;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::NativeRuntime;
-use codex_protocol::openai_models::ToolMode;
-use codex_protocol::protocol::MultiAgentVersion;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
@@ -38,18 +34,13 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use super::active_handoff::CursorHandoffInvocation;
 use super::active_handoff::HandoffInvocation;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::tools::context::ToolPayload;
-use crate::tools::handlers::extension_tools::ExtensionToolAdapter;
 use crate::tools::parallel::ToolCallRuntime;
-use crate::tools::registry::ToolExposure;
-use crate::tools::registry::ToolRegistry;
 use crate::tools::router::ToolCall;
-use crate::tools::router::ToolRouter;
-use crate::tools::spec_plan::extension_tool_executors;
-use crate::tools::spec_plan::register_multi_agent_v2_communication_tools;
 use crate::turn_diff_tracker::TurnDiffTracker;
 
 const MAX_REQUEST_BYTES: usize = 1024 * 1024;
@@ -68,8 +59,6 @@ pub(super) struct ExternalMessageBridge {
     stop: CancellationToken,
     server: Option<JoinHandle<std::io::Result<()>>>,
     directory: tempfile::TempDir,
-    pub(super) mail_delivery:
-        tokio::sync::mpsc::Receiver<tokio::sync::oneshot::Sender<Vec<String>>>,
 }
 
 struct BridgeState {
@@ -81,7 +70,6 @@ struct BridgeState {
     requests: Semaphore,
     stop: CancellationToken,
     message_tools: Mutex<Option<Vec<MessageTool>>>,
-    mail_delivery: tokio::sync::mpsc::Sender<tokio::sync::oneshot::Sender<Vec<String>>>,
 }
 
 struct BridgeTurn {
@@ -89,11 +77,9 @@ struct BridgeTurn {
     stop: CancellationToken,
     step: Arc<StepContext>,
     cancel: CancellationToken,
-    tools: Vec<MessageTool>,
     execution: Arc<Semaphore>,
     tracker: crate::tools::context::SharedTurnDiffTracker,
     worker: Option<Mutex<crate::tools::code_mode::CodeModeDispatchWorker>>,
-    mail_delivery: tokio::sync::mpsc::Sender<tokio::sync::oneshot::Sender<Vec<String>>>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -109,7 +95,6 @@ impl ExternalMessageBridge {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
         let authority = listener.local_addr()?.to_string();
         let stop = CancellationToken::new();
-        let (mail_tx, mail_delivery) = tokio::sync::mpsc::channel(/*buffer*/ 1);
         let mut directory_builder = tempfile::Builder::new();
         directory_builder.prefix("asm-native-tools-");
         #[cfg(unix)]
@@ -121,7 +106,6 @@ impl ExternalMessageBridge {
         let state = Arc::new(BridgeState {
             runtime,
             ready: tokio::sync::watch::channel(/*init*/ None).0,
-            mail_delivery: mail_tx,
             authority,
             token: Uuid::new_v4().to_string(),
             turn: Mutex::new(/*t*/ None),
@@ -135,7 +119,7 @@ impl ExternalMessageBridge {
             .route("/call", post(serve_json))
             .with_state(Arc::clone(&state));
         let descriptor = json!({"url":format!("http://{}",state.authority), "token":state.token,
-            "unboundedCalls":runtime == NativeRuntime::ClaudeCode,
+            "unboundedCalls":true,
             "timeoutMs":u64::try_from(max_wait.saturating_mul(ADMITTED_REQUESTS).saturating_add(TOOL_TIMEOUT_MARGIN).as_millis()).unwrap_or(u64::MAX)});
         use std::io::Write;
         let mut file = std::fs::OpenOptions::new();
@@ -147,20 +131,22 @@ impl ExternalMessageBridge {
         }
         file.open(directory.path().join("descriptor.json"))?
             .write_all(&serde_json::to_vec(&descriptor)?)?;
-        std::fs::create_dir(directory.path().join(".claude-plugin"))?;
-        std::fs::create_dir(directory.path().join("hooks"))?;
-        std::fs::write(
-            directory.path().join(".claude-plugin/plugin.json"),
-            r#"{"name":"asm","version":"1.0.0"}"#,
-        )?;
-        std::fs::write(
-            directory.path().join("hooks/hooks.json"),
-            r#"{"modules":["./register.js"]}"#,
-        )?;
-        std::fs::write(
-            directory.path().join("hooks/register.js"),
-            include_str!("../../assets/native-tools/register.js"),
-        )?;
+        if runtime == NativeRuntime::ClaudeCode {
+            std::fs::create_dir(directory.path().join(".claude-plugin"))?;
+            std::fs::create_dir(directory.path().join("hooks"))?;
+            std::fs::write(
+                directory.path().join(".claude-plugin/plugin.json"),
+                r#"{"name":"asm","version":"1.0.0"}"#,
+            )?;
+            std::fs::write(
+                directory.path().join("hooks/hooks.json"),
+                r#"{"modules":["./register.js"]}"#,
+            )?;
+            std::fs::write(
+                directory.path().join("hooks/register.js"),
+                include_str!("../../assets/native-tools/register.js"),
+            )?;
+        }
         let shutdown = stop.clone();
         let server = tokio::spawn(async move {
             axum::serve(listener, app)
@@ -172,7 +158,6 @@ impl ExternalMessageBridge {
             stop,
             server: Some(server),
             directory,
-            mail_delivery,
         })
     }
 
@@ -199,53 +184,38 @@ impl ExternalMessageBridge {
     pub(super) async fn set_turn(
         &self,
         session: Arc<Session>,
-        mut step: Arc<StepContext>,
+        step: Arc<StepContext>,
         cancel: CancellationToken,
     ) -> anyhow::Result<()> {
         if self.stop.is_cancelled() {
             bail!("Native messaging bridge is stopped");
         }
-        let managed = step.settings.model_info.slug.starts_with("claude-code/");
-        if !managed
-            && (step.turn.parent_thread_id.is_none()
-                || !step.turn.session_source.is_non_root_agent()
-                || step.turn.multi_agent_version != MultiAgentVersion::V2)
-        {
-            bail!("Native messaging is available only to native V2 child agents");
-        }
-        let mut message_tools = if managed {
-            bridge_tools(step.tool_router.model_visible_specs().as_ref())?
-        } else {
-            let (router, tools) = build_message_tools(&session, &step)?;
-            Arc::get_mut(&mut step)
-                .context("Native messaging requires an exclusively owned captured step")?
-                .tool_router = Arc::new(router);
-            tools
+        let mut message_tools = bridge_tools(step.tool_router.model_visible_specs().as_ref())?;
+        message_tools.retain(|tool| {
+            matches!(
+                tool.name.name.as_str(),
+                codex_code_mode::PUBLIC_TOOL_NAME | codex_code_mode::WAIT_TOOL_NAME
+            )
+        });
+        let direct_tool_description = match self.state.runtime {
+            NativeRuntime::ClaudeCode => {
+                "Call with {} (omit name) to discover CURRENT direct-tool schemas and Code Mode exec definitions. ALL_TOOLS and tool_search cover only tools nested inside Code Mode; direct-only tools, including configured agent tools, are absent there. Discover here before declaring a tool unavailable. Call a listed direct tool using its exact name and arguments; other tools use exec/wait."
+            }
+            NativeRuntime::CursorAgent => {
+                "Compatibility for ASM direct-only tools not exposed by Code Mode. Use exec for workspace tasks. Only when a task needs a direct-only tool, call with {} to list its schemas, or pass name and arguments to invoke it."
+            }
         };
-        let tools = message_tools.clone();
-        if managed {
-            message_tools.retain(|tool| {
-                matches!(
-                    tool.name.name.as_str(),
-                    codex_code_mode::PUBLIC_TOOL_NAME | codex_code_mode::WAIT_TOOL_NAME
-                )
-            });
-            message_tools.push(MessageTool {
+        message_tools.push(MessageTool {
                 name: ToolName::plain("direct_tool"), custom: false,
-                spec: json!({"name":"direct_tool","description":"Call with {} (omit name) to discover CURRENT direct-tool schemas and Code Mode exec definitions. ALL_TOOLS and tool_search cover only tools nested inside Code Mode; direct-only tools, including configured agent tools, are absent there. Discover here before declaring a tool unavailable. Call a listed direct tool using its exact name and arguments; other tools use exec/wait.","inputSchema":{"type":"object","properties":{"name":{"type":"string","description":"Omit to discover the current catalog; otherwise use an exact listed direct-tool name."},"arguments":{"type":"object","description":"Arguments matching the selected direct tool schema."}},"additionalProperties":false}}),
+                spec: json!({"name":"direct_tool","description":direct_tool_description,"inputSchema":{"type":"object","properties":{"name":{"type":"string","description":"Omit to discover the current catalog; otherwise use an exact listed direct-tool name."},"arguments":{"type":"object","description":"Arguments matching the selected direct tool schema."}},"additionalProperties":false}}),
             });
-        }
         {
             let mut original = self.state.message_tools.lock().await;
             if original.as_ref().is_some_and(|original| {
-                if managed {
-                    original
-                        .iter()
-                        .map(|tool| (&tool.name, tool.custom))
-                        .ne(message_tools.iter().map(|tool| (&tool.name, tool.custom)))
-                } else {
-                    *original != message_tools
-                }
+                original
+                    .iter()
+                    .map(|tool| (&tool.name, tool.custom))
+                    .ne(message_tools.iter().map(|tool| (&tool.name, tool.custom)))
             }) {
                 bail!("Native messaging definitions changed; start a new thread");
             }
@@ -263,11 +233,9 @@ impl ExternalMessageBridge {
         );
         *turn = Some(Arc::new(BridgeTurn {
             session: Arc::downgrade(&session),
-            mail_delivery: self.state.mail_delivery.clone(),
             stop: self.stop.clone(),
             step,
             cancel: cancel.child_token(),
-            tools,
             execution: Arc::new(Semaphore::new(/*permits*/ 1)),
             tracker,
             worker: worker.map(Mutex::new),
@@ -438,19 +406,15 @@ async fn serve_json(State(state): State<Arc<BridgeState>>, request: Request) -> 
         Err(error) => {
             let result =
                 json!({"isError":true,"content":[{"type":"text","text":error.to_string()}]});
-            if state.runtime == NativeRuntime::ClaudeCode {
-                bounded_claude_response(result).unwrap_or_else(|error| {
-                    Json(json!({"isError":true,"content":[{"type":"text","text":error.to_string()}]}))
-                        .into_response()
-                })
-            } else {
-                Json(result).into_response()
-            }
+            bounded_tool_response(&result).unwrap_or_else(|error| {
+                Json(json!({"isError":true,"content":[{"type":"text","text":error.to_string()}]}))
+                    .into_response()
+            })
         }
     }
 }
 
-fn bounded_claude_response(result: Value) -> anyhow::Result<Response> {
+fn bounded_tool_response(result: &Value) -> anyhow::Result<Response> {
     let has_image = result["content"]
         .as_array()
         .is_some_and(|content| content.iter().any(|item| item["type"] == "image"));
@@ -524,83 +488,9 @@ fn bridge_tools(specs: &[ToolSpec]) -> anyhow::Result<Vec<MessageTool>> {
         tools
             .iter()
             .any(|tool| tool.name.name == codex_code_mode::PUBLIC_TOOL_NAME),
-        "Claude requires ASM Code Mode tools"
+        "Native runtimes require ASM Code Mode tools"
     );
     Ok(tools)
-}
-
-fn build_message_tools(
-    session: &Session,
-    step: &StepContext,
-) -> anyhow::Result<(ToolRouter, Vec<MessageTool>)> {
-    let config = &step.turn.config.multi_agent_v2;
-    let mut registry = ToolRegistry::with_tool_policy(Arc::clone(&session.tool_policy));
-    // Reuse the canonical collaboration gates, minus spawning. A native child's model
-    // metadata must not hide them, so the model-catalog check does not apply here.
-    if !config.disable_native_tools {
-        register_multi_agent_v2_communication_tools(
-            &step.turn,
-            ResolvedModelMessages::from_model(&step.settings.model_info),
-            ToolExposure::Direct,
-            &mut registry,
-        );
-    }
-    // The board extension binds its tools to this caller at thread start, when the board is
-    // enabled for it. Expose only its discussion tools, never other extension tools.
-    let namespace = config.tool_namespace.as_deref();
-    let board_tools = MessageBoardTool::DISCUSSION
-        .map(|tool| ToolName::new(namespace.map(str::to_owned), tool.name()));
-    for executor in extension_tool_executors(session, &step.extension_data) {
-        if board_tools.contains(&executor.tool_name()) {
-            registry.register_external(Arc::new(ExtensionToolAdapter::new(executor)));
-        }
-    }
-    if let Some(name) = registry.first_collision() {
-        bail!("Messaging tool {name} is defined twice; ASM cannot tell which to expose");
-    }
-    let mut tools = Vec::new();
-    let mut specs = Vec::new();
-    for registered in registry.entries() {
-        let name = registered.runtime.tool_name();
-        let spec = registered.spec().as_ref().clone();
-        let tool = match spec.clone() {
-            ToolSpec::Function(tool) => tool,
-            ToolSpec::Namespace(mut namespace) if namespace.tools.len() == 1 => {
-                let Some(ResponsesApiNamespaceTool::Function(tool)) = namespace.tools.pop() else {
-                    bail!("Messaging tool must use function arguments");
-                };
-                tool
-            }
-            _ => bail!("Messaging tool must use function arguments"),
-        };
-        let wire_name = match &name.namespace {
-            Some(namespace) => format!("{namespace}__{}", name.name),
-            None => name.name.clone(),
-        };
-        if wire_name.len() > 64
-            || !wire_name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-        {
-            bail!("Messaging namespace is not tool-name compatible");
-        }
-        tools.push(MessageTool {
-            name,
-            custom: false,
-            spec: json!({"name":wire_name,"description":tool.description,"inputSchema":tool.parameters}),
-        });
-        specs.push(spec);
-    }
-    let router = ToolRouter::from_parts(
-        registry,
-        specs,
-        ToolMode::Direct,
-        Default::default(),
-        /*exec_definitions*/ None,
-        /*tool_namespaces_info*/ None,
-        &[],
-    );
-    Ok((router, tools))
 }
 
 #[tracing::instrument(level = "trace", skip_all, err)]
@@ -618,30 +508,16 @@ async fn invoke_message_tool(
         bail!("ASM turn cancelled");
     }
     let session = turn.session.upgrade().context("ASM thread stopped")?;
-    let managed = turn
-        .step
-        .settings
-        .model_info
-        .slug
-        .starts_with("claude-code/");
-    let step = if managed {
-        session
-            .capture_step_context(Arc::clone(&turn.step.turn), &turn.cancel)
-            .await?
-    } else {
-        Arc::clone(&turn.step)
-    };
-    let tools = if managed {
-        bridge_tools(step.tool_router.model_visible_specs().as_ref())?
-    } else {
-        turn.tools.clone()
-    };
+    let step = session
+        .capture_step_context(Arc::clone(&turn.step.turn), &turn.cancel)
+        .await?;
+    let tools = bridge_tools(step.tool_router.model_visible_specs().as_ref())?;
     let mut name = params
         .get("name")
         .and_then(Value::as_str)
         .context("Missing tool name")?
         .to_owned();
-    let handoff_lease = if managed
+    let handoff_lease = if native_runtime == NativeRuntime::ClaudeCode
         && let Some(tool_use_id) = params["nativeToolUseId"]
             .as_str()
             .filter(|id| !id.is_empty())
@@ -654,10 +530,22 @@ async fn invoke_message_tool(
             active,
         });
         Some(lease)
+    } else if native_runtime == NativeRuntime::CursorAgent
+        && let Some(tool_use_id) = params["nativeToolUseId"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+    {
+        let active = turn.cancel.child_token();
+        let lease = active.clone().drop_guard();
+        step.extension_data.insert(CursorHandoffInvocation {
+            tool_use_id: tool_use_id.to_owned(),
+            active,
+        });
+        Some(lease)
     } else {
         None
     };
-    if name == "direct_tool" && step.settings.model_info.slug.starts_with("claude-code/") {
+    if name == "direct_tool" {
         let direct = tools.iter().filter(|tool| {
             !matches!(
                 tool.name.name.as_str(),
@@ -677,7 +565,10 @@ async fn invoke_message_tool(
                             "Omit model and reasoning_effort to inherit the current execution settings. When specifying model, use its canonical ASM slug, not a backend-only alias."
                         }
                     },
-                    "tools": tools.iter().map(|tool| &tool.spec).collect::<Vec<_>>()
+                    "tools": match native_runtime {
+                        NativeRuntime::ClaudeCode => tools.iter().map(|tool| &tool.spec).collect::<Vec<_>>(),
+                        NativeRuntime::CursorAgent => direct.map(|tool| &tool.spec).collect::<Vec<_>>(),
+                    }
                 });
                 Some((serde_json::to_string(&catalog)?, true))
             }
@@ -690,8 +581,8 @@ async fn invoke_message_tool(
         };
         if let Some((mut text, mut success)) = local_result {
             let to_response = |text: &str, success: bool| {
-                bounded_claude_response(
-                    json!({"isError":!success,"notDispatched":!success,"content":[{"type":"text","text":text}]}),
+                bounded_tool_response(
+                    &json!({"isError":!success,"notDispatched":!success,"content":[{"type":"text","text":text}]}),
                 )
             };
             let response = match to_response(&text, success) {
@@ -702,7 +593,15 @@ async fn invoke_message_tool(
                     to_response(&text, success)?
                 }
             };
-            let call_id = format!("claude-{}", Uuid::new_v4());
+            let call_id = format!(
+                "{}-{}",
+                if native_runtime == NativeRuntime::ClaudeCode {
+                    "claude"
+                } else {
+                    "cursor"
+                },
+                Uuid::new_v4()
+            );
             let items = [
                 ResponseItem::FunctionCall {
                     status: None,
@@ -739,7 +638,7 @@ async fn invoke_message_tool(
             Some(namespace) => name == format!("{namespace}__{}", tool.name.name),
             None => name == tool.name.name,
         })
-        .context("Only exposed messaging tools are allowed")?;
+        .context("Only exposed ASM tools are allowed")?;
     let arguments = params
         .get("arguments")
         .cloned()
@@ -747,7 +646,15 @@ async fn invoke_message_tool(
     if !arguments.is_object() {
         bail!("Tool arguments must be an object");
     }
-    let call_id = format!("claude-{}", Uuid::new_v4());
+    let call_id = format!(
+        "{}-{}",
+        if native_runtime == NativeRuntime::ClaudeCode {
+            "claude"
+        } else {
+            "cursor"
+        },
+        Uuid::new_v4()
+    );
     let arguments = arguments.to_string();
     let custom = tool
         .custom
@@ -821,68 +728,45 @@ async fn invoke_message_tool(
     drop(handoff_lease);
     let mut item = Arc::unwrap_or_clone(output.item);
     let result = convert_output(&item);
-    if native_runtime == NativeRuntime::ClaudeCode {
-        let response = match result.and_then(bounded_claude_response) {
-            Ok(response) => response,
-            Err(error) => {
-                let payload = match &mut item {
-                    ResponseItem::FunctionCallOutput { output, .. }
-                    | ResponseItem::CustomToolCallOutput { output, .. } => output,
-                    _ => return Err(error),
-                };
-                let execution = match payload.success {
-                    Some(true) => "ASM tool succeeded",
-                    Some(false) => "ASM tool failed",
-                    None => "ASM tool returned",
-                };
-                let text = format!(
-                    "{execution}, but its output was not delivered: {error}. Do not rerun the tool just to recover the output."
-                );
-                payload.body = FunctionCallOutputBody::Text(text.clone());
-                bounded_claude_response(json!({
-                    "isError": payload.success == Some(false),
-                    "content": [{"type":"text","text":text}]
-                }))?
-            }
-        };
-        session
-            .record_conversation_items(&step.turn, &step.settings.model_info, &[item])
-            .await;
-        return Ok(response);
-    }
+    let (mut body, response) = match result.and_then(|body| {
+        let response = bounded_tool_response(&body)?;
+        Ok((body, response))
+    }) {
+        Ok(pair) => pair,
+        Err(error) => {
+            let payload = match &mut item {
+                ResponseItem::FunctionCallOutput { output, .. }
+                | ResponseItem::CustomToolCallOutput { output, .. } => output,
+                _ => return Err(error),
+            };
+            let execution = match payload.success {
+                Some(true) => "ASM tool succeeded",
+                Some(false) => "ASM tool failed",
+                None => "ASM tool returned",
+            };
+            let text = format!(
+                "{execution}, but its output was not delivered: {error}. Do not rerun the tool just to recover the output."
+            );
+            payload.body = FunctionCallOutputBody::Text(text.clone());
+            let body = json!({
+                "isError": payload.success == Some(false),
+                "content": [{"type":"text","text":text}]
+            });
+            let response = bounded_tool_response(&body)?;
+            (body, response)
+        }
+    };
     session
         .record_conversation_items(&step.turn, &step.settings.model_info, &[item])
         .await;
-    let mut result = result?;
-    anyhow::ensure!(
-        serde_json::to_vec(&result)?.len() <= MAX_IMAGE_RESULT_BYTES,
-        "Native tool result exceeds the image transport budget"
-    );
-    if tool.name.name == "wait_agent"
-        && step.settings.model_info.slug.starts_with("cursor-agent/")
-        && result["isError"] == false
+    if let Some(mailbox) = step.turn.extension_data.get::<super::CursorMailbox>()
+        && mailbox.take_wake()
+        && !turn.cancel.is_cancelled()
     {
-        let (reply, delivered) = tokio::sync::oneshot::channel();
-        let delivery = async {
-            turn.mail_delivery
-                .send(reply)
-                .await
-                .context("Cursor mailbox delivery stopped")?;
-            delivered.await.context("Cursor mailbox delivery stopped")
-        };
-        let messages = tokio::select! {
-            biased;
-            _ = turn.cancel.cancelled() => bail!("ASM turn cancelled"),
-            messages = delivery => messages?,
-        };
-        for text in messages {
-            result["content"]
-                .as_array_mut()
-                .context("Missing tool result content")?
-                .push(json!({"type":"text","text":text}));
-        }
+        mailbox.append(&session, &step.turn, &mut body).await?;
+        return bounded_tool_response(&body);
     }
-    Ok(Json(result).into_response())
+    Ok(response)
 }
 
 fn convert_output(item: &ResponseItem) -> anyhow::Result<Value> {

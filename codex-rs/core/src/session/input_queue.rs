@@ -309,24 +309,31 @@ impl InputQueue {
         pending.drain(..).collect()
     }
 
-    #[tracing::instrument(level = "trace", skip_all)]
     pub(crate) async fn take_current_turn_mail(
         &self,
         turn_state: &Mutex<TurnState>,
     ) -> Vec<InputQueueEntry> {
-        // Do not cross queued user input or followups that carry next-turn options.
+        // Don't move mail across a user steer, follow-up or another ordered input.
         let mut state = turn_state.lock().await;
-        let count = state
-            .pending_input
+        let queue = &mut state.pending_input;
+        let count = queue
             .items
             .iter()
-            .take_while(|entry| {
-                matches!(&entry.input, TurnInput::InterAgentCommunication(mail)
-                if !mail.trigger_turn)
-            })
+            .take_while(|entry| entry.input.is_queue_only_mail())
             .count();
-        let mut items: Vec<_> = state.pending_input.items.drain(..count).collect();
-        if !state.pending_input.items.is_empty() {
+        let mut items: Vec<_> = queue.items.drain(..count).collect();
+        if queue.items.is_empty() {
+            queue.notified_activity = None;
+        } else {
+            if count != 0
+                && queue.notified_activity == Some(InputQueueActivity::Mailbox)
+                && !queue
+                    .items
+                    .iter()
+                    .any(|entry| entry.input.wait_activity() == InputQueueActivity::Mailbox)
+            {
+                queue.notified_activity = None;
+            }
             return items;
         }
         let mut pending = self.mailbox_pending_mails.lock().await;

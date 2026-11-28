@@ -68,6 +68,7 @@ use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelInfo;
+use codex_protocol::openai_models::NativeRuntime;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_tools::IndirectNamespacePrefixes;
@@ -729,7 +730,14 @@ fn collab_tools_enabled(turn_context: &TurnContext, model_info: &ModelInfo) -> b
                     .config
                     .subagent_collaboration_disabled(&turn_context.session_source)
                 && (turn_context.session_source.get_agent_path().is_none()
-                    || model_info.multi_agent_version == Some(MultiAgentVersion::V2))
+                    || match model_info.multi_agent_version {
+                        Some(MultiAgentVersion::V2) => true,
+                        Some(MultiAgentVersion::Disabled | MultiAgentVersion::V1) => false,
+                        None => matches!(
+                            NativeRuntime::for_model(&model_info.slug),
+                            Some((NativeRuntime::CursorAgent, _))
+                        ),
+                    })
         }
     }
 }

@@ -71,7 +71,7 @@ async fn call_native_tool() -> anyhow::Result<Value> {
         .build_direct()?;
     let request = client.post(format!("{url}{route}")).bearer_auth(token);
     // Canonical tools own their deadlines and ASM cancels them with their turn.
-    // Cursor messaging and startup metadata retain their bounded transport timeout.
+    // Startup metadata retains its bounded transport timeout.
     let request = if route == "/call" && descriptor["unboundedCalls"] == true {
         request
     } else {

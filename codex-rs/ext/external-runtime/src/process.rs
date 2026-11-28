@@ -22,7 +22,12 @@ use uuid::Uuid;
 
 pub(super) const STOP_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 5);
 
-/// Native CLI process leading its own process group, with framed stdout and a bounded stderr tail.
+pub(super) enum StderrPolicy {
+    CaptureTail,
+    Discard,
+}
+
+/// Owns a native process group and reads its framed output.
 pub(super) struct ExternalProcess {
     pub(super) child: Child,
     pub(super) marker: String,
@@ -59,13 +64,20 @@ impl Drop for TurnGuard {
 
 impl ExternalProcess {
     /// Starts `command` as the leader of a new process group that dies with ASM.
-    pub(super) fn spawn(mut command: Command, frame_policy: frames::FramePolicy) -> Result<Self> {
+    pub(super) fn spawn(
+        mut command: Command,
+        frame_policy: frames::FramePolicy,
+        stderr_policy: StderrPolicy,
+    ) -> Result<Self> {
         let marker = Uuid::new_v4().to_string();
         command.env(cleanup::OWNER_ENV, &marker);
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(match stderr_policy {
+                StderrPolicy::CaptureTail => Stdio::piped(),
+                StderrPolicy::Discard => Stdio::null(),
+            })
             .kill_on_drop(/*kill_on_drop*/ true);
         #[cfg(unix)]
         {
@@ -89,17 +101,13 @@ impl ExternalProcess {
             .stdout
             .take()
             .context("native CLI stdout unavailable")?;
-        let stderr_pipe = child
-            .stderr
-            .take()
-            .context("native CLI stderr unavailable")?;
         let (sender, frames) = mpsc::channel(/*buffer*/ 32);
         let stderr = Arc::new(Mutex::new(VecDeque::new()));
         let stdout_reader = tokio::spawn(frames::read_frames(stdout, sender, frame_policy));
-        let stderr_reader = Some(tokio::spawn(frames::drain_stderr(
-            stderr_pipe,
-            Arc::clone(&stderr),
-        )));
+        let stderr_reader = child
+            .stderr
+            .take()
+            .map(|pipe| tokio::spawn(frames::drain_stderr(pipe, Arc::clone(&stderr))));
         Ok(Self {
             child,
             marker,
@@ -163,6 +171,9 @@ impl ExternalProcess {
     }
 
     pub(super) async fn terminate(&mut self) -> Result<()> {
+        if self.cleanup_complete {
+            return Ok(());
+        }
         let pid = self.child.id();
         if self.pre_cleanup_process.is_none() {
             self.pre_cleanup_process = Some(match self.child.try_wait() {
@@ -176,11 +187,16 @@ impl ExternalProcess {
         let cleanup = tokio::task::spawn_blocking(move || cleanup::kill_owned(pid, &marker, birth))
             .await
             .context("native cleanup task failed")?;
-        self.cleanup_complete = cleanup.is_ok();
-        if let Ok(Ok(status)) = timeout(STOP_TIMEOUT, self.child.wait()).await {
+        let exit = timeout(STOP_TIMEOUT, self.child.wait())
+            .await
+            .context("native CLI exit after cleanup timed out")
+            .and_then(|exit| exit.context("waiting for native CLI exit"));
+        if let Ok(status) = &exit {
             self.exit_status = Some(status.to_string());
         }
-        cleanup
+        cleanup?;
+        self.cleanup_complete = exit.is_ok();
+        exit.map(|_| ())
     }
 
     pub(super) async fn shutdown(&mut self) -> Result<()> {

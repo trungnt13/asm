@@ -239,7 +239,7 @@ pub(crate) async fn prepare(
         && crate::external_runtime::is_native_model(&step_context.settings.model_info.slug)
     {
         Some(
-            crate::external_runtime::active_handoff_history(step_context)
+            crate::external_runtime::active_handoff_history(session, step_context)
                 .await
                 .map_err(|err| err.with_agent_context(AgentErrorContext::ForkHistory))?,
         )

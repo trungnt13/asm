@@ -107,6 +107,13 @@ impl Handler {
                 },
             )],
         );
+        if outcome == WaitOutcome::MailboxActivity
+            && let Some(mailbox) = turn
+                .extension_data
+                .get::<crate::external_runtime::CursorMailbox>()
+        {
+            mailbox.notify_wait();
+        }
         let mut result = WaitAgentResult::from_outcome(outcome, requested_timeout_ms, timeout_ms);
         let reminder = match outcome {
             WaitOutcome::Steered => codex_tools::WaitReminder::Interrupted,

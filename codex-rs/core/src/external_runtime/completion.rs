@@ -1,12 +1,15 @@
 use super::ConfirmedInterrupt;
 use super::ExternalSession;
 use super::RuntimeProcess;
+use super::cursor::reported_usage;
 use super::events;
 use crate::session::TokenUsageContext;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
+use codex_protocol::error::Result as CodexResult;
 use codex_protocol::openai_models::NativeRuntime;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::WarningEvent;
 use serde_json::Value;
 
@@ -68,58 +71,50 @@ pub(super) async fn complete_response(
         runtime.usage_baseline = None;
     }
     if cursor {
-        runtime.usage_baseline = None;
-        if has_result {
-            let response_id = result["uuid"]
-                .as_str()
-                .map(str::to_owned)
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let usage = reported_usage(&result);
+        if has_result && usage.is_none() && !interrupted {
             session
-                .record_observed_response_completed(
+                .send_event(
                     turn,
-                    &response_id,
-                    /*usage*/ None,
-                    /*usage_metadata*/ None,
+                    EventMsg::Warning(WarningEvent {
+                        message: "Cursor SDK did not report token usage for this response."
+                            .to_owned(),
+                    }),
                 )
                 .await;
         }
-        budget_error = session
-            .record_token_usage_info(
-                turn,
-                settings,
-                crate::client_common::SamplingUsage {
-                    provider: None,
-                    charge: Default::default(),
-                },
-                TokenUsageContext::SpendingOnly,
-            )
+        budget_error = record_cursor_usage(session, turn, result["uuid"].as_str(), usage)
             .await
             .err();
-    }
-    let budget_result = budget_error.map_or(Ok(()), Err);
-    let model_context_window = stream.context.as_ref().and_then(|context| {
-        result["modelUsage"].get(&context.model)?["contextWindow"]
-            .as_i64()
-            .filter(|window| *window > 0 && context.usage.input_tokens <= *window)
-    });
-    if !cursor && (stream.context.is_none() || model_context_window.is_none()) {
-        session.send_event(turn, EventMsg::Warning(WarningEvent {
+    } else {
+        let model_context_window = stream.context.as_ref().and_then(|context| {
+            result["modelUsage"].get(&context.model)?["contextWindow"]
+                .as_i64()
+                .filter(|window| *window > 0 && context.usage.input_tokens <= *window)
+        });
+        if stream.context.is_none() || model_context_window.is_none() {
+            session.send_event(turn, EventMsg::Warning(WarningEvent {
                 message: "Claude context fill is unavailable: the latest main request usage or its model context window was not reported.".to_owned(),
             })).await;
+        }
+        session
+            .set_reported_context_usage(
+                stream
+                    .context
+                    .map(|context| context.usage)
+                    .unwrap_or_default(),
+                model_context_window,
+            )
+            .await;
     }
-    session
-        .set_reported_context_usage(
-            stream
-                .context
-                .map(|context| context.usage)
-                .unwrap_or_default(),
-            model_context_window,
-        )
-        .await;
+    let budget_result = budget_error.map_or(Ok(()), Err);
     session
         .send_token_count_event(turn, stream.output_tps)
         .await;
     session.flush_rollout().await?;
+    if !interrupted && let Some(mailbox) = turn.extension_data.remove::<super::CursorMailbox>() {
+        mailbox.confirm(&result, &mut runtime.checkpoint)?;
+    }
     save_reconciled_checkpoint(runtime, generation, !interrupted && failure.is_none())?;
     if interrupted {
         if let Err(error) = budget_result {
@@ -135,6 +130,46 @@ pub(super) async fn complete_response(
     }
     budget_result?;
     Ok(())
+}
+
+#[tracing::instrument(skip_all)]
+pub(super) async fn record_cursor_usage(
+    session: &Session,
+    turn: &TurnContext,
+    response_id: Option<&str>,
+    usage: Option<TokenUsage>,
+) -> CodexResult<()> {
+    if let Some(response_id) = response_id {
+        session
+            .record_observed_response_completed(
+                turn,
+                response_id,
+                usage.as_ref(),
+                /*usage_metadata*/ None,
+            )
+            .await;
+    }
+    let result = session
+        .record_token_usage_info(
+            turn,
+            &turn.initial_settings,
+            crate::client_common::SamplingUsage {
+                provider: usage.clone(),
+                charge: Default::default(),
+            },
+            TokenUsageContext::SpendingOnly,
+        )
+        .await;
+    // Keep spending counters for the status line, but never treat them as context fill.
+    if usage.is_some() || session.token_usage_info().await.is_some() {
+        session
+            .set_reported_context_usage(
+                usage.unwrap_or_default(),
+                /*model_context_window*/ None,
+            )
+            .await;
+    }
+    result
 }
 
 pub(super) fn save_reconciled_checkpoint(
@@ -156,7 +191,7 @@ pub(super) fn save_reconciled_checkpoint(
             },
         ),
         RuntimeProcess::Cursor(_) => {
-            checkpoint.in_flight = false;
+            checkpoint.in_flight = !successful;
             checkpoint.fork_point = None;
             linkage.save(checkpoint, path)
         }

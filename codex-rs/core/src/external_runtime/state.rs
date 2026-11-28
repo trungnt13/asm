@@ -16,8 +16,6 @@ pub(super) struct Checkpoint {
     pub(super) format_version: u8,
     pub(super) model: String,
     pub(super) effort: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) cursor_baseline_effort: Option<String>,
     #[serde(default)]
     pub(super) auto_compact_window: Option<i64>,
     pub(super) cwd: PathBuf,
@@ -41,12 +39,7 @@ impl Checkpoint {
         messages: &[serde_json::Value],
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
-            self.format_version
-                == if model.starts_with("claude-code/") {
-                    3
-                } else {
-                    2
-                },
+            self.format_version == 3,
             "incompatible native session linkage; start a new chat"
         );
         anyhow::ensure!(
@@ -143,7 +136,7 @@ pub(crate) struct ExternalSession {
     pub(super) runtime: RuntimeProcess,
     pub(super) foreground_idle: bool,
     pub(super) page_context: codex_config::PageContextPolicy,
-    pub(super) bridge: Option<ExternalMessageBridge>,
+    pub(super) bridge: ExternalMessageBridge,
     pub(super) checkpoint: Checkpoint,
     pub(super) checkpoint_path: PathBuf,
     pub(super) linkage: Linkage,
@@ -227,12 +220,11 @@ pub(super) enum SessionStart {
 impl ExternalSession {
     #[tracing::instrument(skip_all)]
     pub(super) async fn spawn_runtime(
-        bridge: Option<&ExternalMessageBridge>,
-        role_instructions: Option<String>,
+        bridge: &ExternalMessageBridge,
+        system_instructions: String,
         session_kind: codex_external_runtime::ClaudeSessionKind,
         queued_input_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-        checkpoint: &mut Checkpoint,
-        checkpoint_path: &std::path::Path,
+        checkpoint: &Checkpoint,
         session: SessionStart,
         linkage: &Linkage,
     ) -> anyhow::Result<RuntimeProcess> {
@@ -240,29 +232,18 @@ impl ExternalSession {
         let (runtime, model) =
             NativeRuntime::for_model(&checkpoint.model).context("not a native runtime model")?;
         if runtime == NativeRuntime::CursorAgent {
-            let session = match session {
-                SessionStart::New { .. } => codex_external_runtime::CursorSession::New,
-                SessionStart::Resume { id } => codex_external_runtime::CursorSession::Load { id },
-                SessionStart::Fork { .. } => {
-                    anyhow::bail!("Cursor Agent has no native session fork")
-                }
-            };
+            anyhow::ensure!(
+                matches!(session, SessionStart::New { .. }),
+                super::CURSOR_COLD_RESUME
+            );
             let runtime = CursorRuntime::spawn(codex_external_runtime::CursorOptions {
-                executable: PathBuf::from("agent"),
                 cwd: checkpoint.cwd.clone(),
                 model: model.to_owned(),
                 effort: checkpoint.effort.clone(),
-                role_instructions,
-                session,
-                config_dir: checkpoint_path.with_extension("cursor-config"),
-                bridge_directory: bridge.map(|bridge| bridge.directory().to_owned()),
+                system_instructions,
+                bridge_directory: bridge.directory().to_owned(),
             })
             .await?;
-            if checkpoint.cursor_baseline_effort.is_none() {
-                checkpoint.cursor_baseline_effort = runtime.baseline_effort().map(str::to_owned);
-            }
-            // Cursor assigns new session IDs; link before the first prompt is submitted.
-            checkpoint.session_id = runtime.session_id().to_owned();
             return Ok(RuntimeProcess::Cursor(Box::new(runtime)));
         }
         let model = if model.starts_with("sonnet-") || model.starts_with("opus-") {
@@ -280,7 +261,6 @@ impl ExternalSession {
                 codex_external_runtime::ClaudeSession::Fork { parent, at, id }
             }
         };
-        let bridge = bridge.context("Claude requires the ASM tool bridge")?;
         let mut runtime = ClaudeRuntime::spawn(codex_external_runtime::ClaudeOptions {
             executable: PathBuf::from("claude"),
             cwd: checkpoint.cwd.clone(),
@@ -288,7 +268,7 @@ impl ExternalSession {
             effort: checkpoint.effort.clone(),
             auto_compact_window: checkpoint.auto_compact_window,
             session_kind,
-            system_prompt: role_instructions.context("Claude requires ASM system instructions")?,
+            system_prompt: system_instructions,
             session,
             bridge_directory: bridge.directory().to_owned(),
             queued_input_count,
@@ -368,12 +348,18 @@ pub(crate) struct RuntimeSlot {
     pub(crate) authentication_required: std::sync::atomic::AtomicBool,
     // Native prompt admission and Page filtering happen after rendering this context.
     // Do not put this tentative baseline in the persisted Responses world state.
-    pub(super) additional_context_baseline: std::sync::Mutex<Option<WorldStateSnapshot>>,
+    pub(super) additional_context_baseline: std::sync::Mutex<AdditionalContextBaseline>,
     state: std::sync::Mutex<SlotState>,
     returned: tokio::sync::Notify,
     pub(crate) continuation_admission: tokio::sync::Semaphore,
     pub(super) continuation_listener: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     pub(crate) turn_finished: tokio::sync::Notify,
+}
+
+#[derive(Default)]
+pub(super) struct AdditionalContextBaseline {
+    pub(super) rendered: Option<std::sync::Arc<WorldStateSnapshot>>,
+    pub(super) cursor_submitted: Option<std::sync::Arc<WorldStateSnapshot>>,
 }
 
 impl Default for RuntimeSlot {
