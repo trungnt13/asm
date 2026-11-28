@@ -117,14 +117,15 @@ mapfile -t pgo_env < "$output/pgo.env"
   --bin codex --bin codex-code-mode-host --bin codex-exec-server --timings 2>&1 | tee "$output/build.log"
 
 mkdir -p "$output/staging"
-archive="$output/staging/$name"
+attempt=$(mktemp -d "$output/staging/attempt.XXXXXX")
+archive="$attempt/$name"
 "${build_env[@]}" "CODEX_REPO_ROOT=$root" "$python" ../scripts/build_codex_package.py --force --target "$target" --cargo-profile release \
   --entrypoint-bin "$release_dir/codex" --code-mode-host-bin "$release_dir/codex-code-mode-host" \
   --exec-server-bin "$release_dir/codex-exec-server" --bwrap-bin "$release_dir/bwrap" \
-  --package-dir "$output/staging/package"
+  --package-dir "$attempt/package"
 cd "$root"
-PYTHON="$python" bash .github/scripts/package-asm-linux-voice.sh "$output/staging/package" "$version" "$archive"
-"${build_env[@]}" "$python" .github/scripts/smoke-codex-archive.py "$archive" | tee "$output/smoke.log"
+PYTHON="$python" bash .github/scripts/package-asm-linux-voice.sh "$attempt/package" "$version" "$archive"
+"${build_env[@]}" "$python" .github/scripts/smoke-codex-archive.py "$archive" | tee "$attempt/smoke.log"
 digest=$(sha256sum "$archive")
 printf '%s\n%s\n' "$sha" "${digest%% *}" > "$archive.provenance"
 mv -- "$archive.provenance" "$output/$name.provenance"

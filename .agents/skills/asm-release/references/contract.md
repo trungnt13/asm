@@ -69,8 +69,8 @@ Before first partial release, deploy platform-aware `tngo-workflow/setup.py`. Se
 
 ## Installer
 
-- Use only `trungnt13/asm` GitHub `v*` releases for macOS ARM64/Linux x86_64 musl. Before installing the complete package, verify GitHub digests and host `SHA256SUMS-<target>`. Use legacy `SHA256SUMS` only when host manifest is absent, never after invalid digests/manifests.
-- Reject incomplete two-binary archives. Keep older complete canonical packages without declared `execServer` compatible. If declared, require its exact regular executable; reject undeclared exec-server. Historical incomplete releases keep pinned installers.
+- Use only `trungnt13/asm` GitHub `v*` releases for macOS ARM64/Linux x86_64 musl. Before installing the complete package, verify GitHub digests and host `SHA256SUMS-<target>`. Only Apple Silicon macOS may use aggregate `SHA256SUMS` when the host manifest is absent, never after invalid digests/manifests.
+- Reject incomplete two-binary archives. Require a declared `execServer` and its exact regular executable on Linux. On Apple Silicon macOS, accept older complete packages without the declaration only when no exec-server is present.
 - Reject unsupported architectures. The Linux CLI installs and runs without glibc. A Linux release without musl assets is not installable. Preserve immutable assets, target-qualified package directories, and shared config/state. Do not fall back on invalid advertised checksums.
 - Preserve `--release`, `CODEX_HOME`, `CODEX_INSTALL_DIR`, locking, and safe `current` selection. Store in `packages/asm-standalone`. Preserve upstream packages/update markers, shared Codex config/state, and `codex` command.
 - Only the owner installs externally. No OpenAI/CDN/legacy npm downloads, daemon-only installs, or `auto-update-version` writes. Do not port upstream standalone-release pruning. Preserve fork packages/layout.

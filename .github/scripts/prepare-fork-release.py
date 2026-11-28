@@ -380,9 +380,6 @@ def next_release_version(upstream):
     counter_pattern = re.compile(
         rf"v{re.escape(stem)}\.([1-9][0-9]*){re.escape(plus + metadata)}"
     )
-    family = {
-        tag for tag in occupied if tag == f"v{base}" or counter_pattern.fullmatch(tag)
-    }
     counter = max(
         (
             int(match[1])
@@ -404,7 +401,6 @@ def next_release_version(upstream):
         )
     # Historical versions still occupy SemVer space, but only musl releases can resume.
     musl_tags = {tag for tag, order in versions.items() if order > cutover}
-    proof_tags = {tag for tag in musl_tags if tag in family or versions[tag] == highest}
     # A failed initialization can leave a candidate before its tag or draft exists.
     for reference, sha in candidates.items():
         if not any(tags.get(tag) == sha for tag in versions):
@@ -418,7 +414,7 @@ def next_release_version(upstream):
         if not tags.get(tag) or not release or not published_assets_complete(release):
             raise ValueError(f"Incomplete release {tag}; resume its original run")
         # Older complete releases need not depend on retained Actions logs forever.
-        if tag not in proof_tags:
+        if versions[tag] != highest:
             continue
         references = [
             reference for reference, sha in candidates.items() if sha == tags[tag]

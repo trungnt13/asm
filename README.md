@@ -4,14 +4,14 @@ ASM is Trung Ngo's personal fork of [OpenAI Codex](https://github.com/openai/cod
 
 ## Install or update ASM
 
-Release targets are macOS Apple Silicon and Linux x86_64 with glibc 2.35+ (Ubuntu 22.04 or newer). Linux uses system OpenSSL 3 and liblzma (`libssl3` and `liblzma5` on Ubuntu 22.04), plus the standard C/C++ runtime libraries and CA certificates. MUSL-only systems such as Alpine are not supported by the GNU builds.
+New releases support Apple Silicon macOS and x86-64 Linux. On Linux, the static musl CLI runs on Ubuntu 22.04 and Alpine without glibc or system OpenSSL. The separate voice helper requires glibc 2.35+ and working host audio.
 
 ```sh
 curl -fsSL https://github.com/trungnt13/asm/releases/latest/download/install.sh | sh
 codex
 ```
 
-The installer downloads verified ASM release assets and installs `codex` with its `codex-code-mode-host` helper. Updates are manual: rerun the installer when you want to update. OpenAI installers, npm, and Homebrew packages install upstream Codex, not this fork. Older MUSL-only ASM releases require the installer shipped with that release; the GNU installer does not fall back to MUSL or remove old packages.
+The installer downloads verified ASM release assets and installs `codex` with its `codex-code-mode-host` helper. Updates are manual: rerun the installer when you want to update. OpenAI installers, npm, and Homebrew packages install upstream Codex, not this fork. Until [Latest](https://github.com/trungnt13/asm/releases/latest) includes a musl archive, its Linux download is still the pre-migration build and does not run on Alpine. The new installer does not fall back to those Linux archives.
 
 ## Reference
 
