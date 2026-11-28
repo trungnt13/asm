@@ -2210,12 +2210,12 @@ impl ThreadManagerState {
         };
         // A client may already have normalized the selector. Check the startup catalog's
         // current snapshot so a refresh can't replace the evidence of a known collision.
-        let catalog = self
+        if self
             .model_catalog
             .manager
-            .model_catalog_with_origins(RefreshStrategy::InMemory, config.http_client_factory())
-            .await;
-        if catalog.iter().any(|entry| entry.slug == alias) {
+            .catalog_contains_model(alias)
+            .await
+        {
             return Err(CodexErr::InvalidRequest(format!(
                 "Model selector `{alias}` is both a configured alias and a catalog model ID. Rename the alias in user config."
             )));

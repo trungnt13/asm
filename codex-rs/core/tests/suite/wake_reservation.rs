@@ -94,6 +94,10 @@ impl ModelsManager for GatedModelsManager {
         self.inner.model_catalog_with_origins(strategy, factory)
     }
 
+    fn catalog_contains_model<'a>(&'a self, model: &'a str) -> ModelsManagerFuture<'a, bool> {
+        self.inner.catalog_contains_model(model)
+    }
+
     fn get_remote_models(&self) -> ModelsManagerFuture<'_, Vec<ModelInfo>> {
         self.inner.get_remote_models()
     }

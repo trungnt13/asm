@@ -267,6 +267,9 @@ pub trait ModelsManager: fmt::Debug + Send + Sync {
         http_client_factory: HttpClientFactory,
     ) -> ModelsManagerFuture<'_, Vec<CatalogModel>>;
 
+    /// Check exact membership without refreshing the catalog.
+    fn catalog_contains_model<'a>(&'a self, model: &'a str) -> ModelsManagerFuture<'a, bool>;
+
     /// Best-effort refresh when the in-memory catalog belongs to different credentials.
     /// Static catalogs need no refresh. Failures follow the catalog's fallback policy.
     fn refresh_after_auth_change(
@@ -584,11 +587,7 @@ impl StaticModelsManager {
         match &self.source {
             StaticCatalogSource::Supplied { models, .. } => {
                 let mut combined = models.clone();
-                if self
-                    .load_external_models_json
-                    .as_ref()
-                    .is_some_and(|enabled| enabled.load(Ordering::SeqCst))
-                {
+                if self.supplements_bundled_models() {
                     combined.extend(
                         crate::external_models::models()
                             .filter(|entry| !models.iter().any(|model| model.slug == entry.slug))
@@ -599,17 +598,17 @@ impl StaticModelsManager {
             }
             StaticCatalogSource::BoundProvider { provider, routes } => {
                 crate::external_models::models()
-                    .filter(|model| {
-                        let bound = match routes.get() {
-                            Some(routes) => routes.provider_for_model(&model.slug),
-                            None => crate::external_models::provider_for_model(&model.slug),
-                        };
-                        bound == Some(provider.as_str())
-                    })
+                    .filter(|model| bundled_model_is_bound(&model.slug, provider, routes))
                     .cloned()
                     .collect()
             }
         }
+    }
+
+    fn supplements_bundled_models(&self) -> bool {
+        self.load_external_models_json
+            .as_ref()
+            .is_some_and(|enabled| enabled.load(Ordering::SeqCst))
     }
 
     fn model_origin(&self, slug: &str) -> ModelOrigin {
@@ -721,6 +720,19 @@ impl ModelsManager for OpenAiModelsManager {
                 }
             }
             catalog
+        })
+    }
+
+    fn catalog_contains_model<'a>(&'a self, model: &'a str) -> ModelsManagerFuture<'a, bool> {
+        Box::pin(async move {
+            let state = self.remote_models.read().await;
+            self.select_catalog(&state.entry)
+                .into_models()
+                .iter()
+                .any(|entry| entry.slug == model)
+                || (matches!(self.catalog_source, CatalogSource::Default)
+                    && self.load_external_models_json.load(Ordering::SeqCst)
+                    && crate::external_models::bundled_model(model).is_some())
         })
     }
 
@@ -1310,6 +1322,21 @@ impl ModelsManager for StaticModelsManager {
         })
     }
 
+    fn catalog_contains_model<'a>(&'a self, model: &'a str) -> ModelsManagerFuture<'a, bool> {
+        let contains = match &self.source {
+            StaticCatalogSource::Supplied { models, .. } => {
+                models.iter().any(|entry| entry.slug == model)
+                    || (self.supplements_bundled_models()
+                        && crate::external_models::bundled_model(model).is_some())
+            }
+            StaticCatalogSource::BoundProvider { provider, routes } => {
+                crate::external_models::bundled_model(model).is_some()
+                    && bundled_model_is_bound(model, provider, routes)
+            }
+        };
+        Box::pin(std::future::ready(contains))
+    }
+
     #[tracing::instrument(skip_all, fields(model = model))]
     fn get_model_info<'a>(
         &'a self,
@@ -1393,6 +1420,18 @@ impl ModelsManager for StaticModelsManager {
     ) -> ModelsManagerFuture<'_, ()> {
         Box::pin(async {})
     }
+}
+
+fn bundled_model_is_bound(
+    model: &str,
+    provider: &str,
+    routes: &OnceLock<Arc<ExternalModels>>,
+) -> bool {
+    let bound = match routes.get() {
+        Some(routes) => routes.provider_for_model(model),
+        None => crate::external_models::provider_for_model(model),
+    };
+    bound == Some(provider)
 }
 
 fn replace_with_bundled_external_models(models: &mut Cow<'_, [ModelInfo]>) {

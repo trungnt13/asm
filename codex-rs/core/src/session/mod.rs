@@ -2907,6 +2907,15 @@ impl Session {
             .clone()
     }
 
+    pub(crate) async fn config_and_model(&self) -> (Arc<Config>, String) {
+        let state = self.state.lock().await;
+        let config = &state.session_configuration;
+        (
+            Arc::clone(&config.original_config_do_not_use),
+            config.step_settings.collaboration_mode.model().to_owned(),
+        )
+    }
+
     pub(crate) async fn inherited_instructions(&self) -> SessionInstructions {
         self.services
             .agents_md_manager

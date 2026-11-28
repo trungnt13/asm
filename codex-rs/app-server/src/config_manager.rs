@@ -3,6 +3,7 @@ use codex_arg0::Arg0DispatchPaths;
 use codex_cloud_config::managed_config_bundle_loader;
 use codex_config::CloudConfigBundleLoader;
 use codex_config::ConfigLayerStack;
+use codex_config::ConfigRequirementsToml;
 use codex_config::ConfigServerResolution;
 use codex_config::LoaderOverrides;
 use codex_config::ThreadConfigLoader;
@@ -397,9 +398,12 @@ impl ConfigManager {
         &self,
         current: &Config,
     ) -> std::io::Result<()> {
+        let requirements = self.load_managed_provider_requirements().await?;
+        Self::validate_thread_model_provider(current, requirements)
+    }
+
+    async fn load_managed_provider_requirements(&self) -> std::io::Result<ConfigRequirementsToml> {
         let policy_load = self.refresh_application_network_policy().await?;
-        // Existing threads retain their session route; only managed
-        // requirements can invalidate it.
         let requirements = load_managed_requirements_state(
             LOCAL_FS.as_ref(),
             &self.codex_home,
@@ -411,6 +415,14 @@ impl ConfigManager {
         )
         .await?;
         self.check_application_policy_load(&policy_load)?;
+        Ok(requirements)
+    }
+
+    fn validate_thread_model_provider(
+        current: &Config,
+        requirements: ConfigRequirementsToml,
+    ) -> std::io::Result<()> {
+        // Existing threads retain their session route unless managed requirements invalidate it.
         let selection_changed = requirements
             .model_provider
             .as_ref()
@@ -488,16 +500,16 @@ impl ConfigManager {
         &self,
         thread: &CodexThread,
     ) -> std::io::Result<()> {
-        let current = thread.config().await;
-        self.check_thread_model_provider(&current).await?;
-        let settings = thread.thread_settings_snapshot().await;
-        let model = &settings.model;
+        let requirements = self.load_managed_provider_requirements().await?;
+        let (current, model) = thread.config_and_model().await;
+        Self::validate_thread_model_provider(&current, requirements)?;
+        let model = model.as_str();
         if !is_native_runtime_model(model)
             && current.external_models.provider_for_model(model).is_none()
         {
             return Ok(());
         }
-        let provider = &settings.model_provider_id;
+        let provider = &current.model_provider_id;
         let configured = self
             .load_latest_config(Some(current.cwd.to_path_buf()))
             .await?;
