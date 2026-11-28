@@ -10,7 +10,7 @@ from pathlib import Path
 def release_tag(target: str, version: str) -> str:
     if target == "x86_64-unknown-linux-musl":
         generation = "musl.1"
-    elif target in ("x86_64-unknown-linux-gnu", "aarch64-apple-darwin"):
+    elif target == "aarch64-apple-darwin":
         generation = "glibc2.35.2"
     else:
         raise ValueError(f"unsupported fork V8 target {target}")

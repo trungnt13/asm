@@ -19,8 +19,8 @@ from codex_package.layout import validate_package_dir
 from codex_package.targets import PACKAGE_VARIANTS
 from codex_package.targets import TARGET_SPECS
 
-LINUX_GNU = "x86_64-unknown-linux-gnu"
 LINUX_MUSL = "x86_64-unknown-linux-musl"
+GNU_VOICE_TARGET = "x86_64-unknown-linux-gnu"
 VOICE_DIR = "codex-resources/voice"
 VOICE_HELPER = f"{VOICE_DIR}/bin/codex-voice-host"
 VOICE_NOTICES = {
@@ -46,7 +46,7 @@ def verify_voice_package(package, version):
     commit = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=repo_root, text=True
     ).strip()
-    libraries = runtime_files(voice, LINUX_GNU, public_release=True)
+    libraries = runtime_files(voice, GNU_VOICE_TARGET, public_release=True)
     receipt = json.loads((voice / "runtime.json").read_text())
     expected = {f"{VOICE_DIR}/{name}": checksum for name, checksum in libraries.items()}
     for name in VOICE_NOTICES:
@@ -80,13 +80,13 @@ def verify_voice_package(package, version):
             "schemaVersion": 1,
             "buildCommit": commit,
             "appTarget": LINUX_MUSL,
-            "voiceTarget": LINUX_GNU,
+            "voiceTarget": GNU_VOICE_TARGET,
             "appVersion": version,
         }
     ):
         raise SystemExit("Voice package does not match the exact candidate and runtime")
     binaries = {
-        voice / name: inspect(voice / name, LINUX_GNU)
+        voice / name: inspect(voice / name, GNU_VOICE_TARGET)
         for name in libraries
         if name != "runtime.json"
     }
@@ -149,9 +149,9 @@ def smoke_voice_runtime(executable, commit):
 
 archive_path = Path(sys.argv[1])
 inspect_only = len(sys.argv) > 2 and sys.argv[2] == "--inspect-only"
-release_targets = {"aarch64-apple-darwin", LINUX_GNU, LINUX_MUSL}
+release_targets = {"aarch64-apple-darwin", LINUX_MUSL}
 target = archive_path.name.removeprefix("codex-").removesuffix(".tar.gz")
-is_v3 = target in {f"{LINUX_GNU}-v3", f"{LINUX_MUSL}-v3"}
+is_v3 = target == f"{LINUX_MUSL}-v3"
 target = target.removesuffix("-v3") if is_v3 else target
 if (
     target not in release_targets
@@ -284,29 +284,26 @@ with tarfile.open(archive_path, "r:gz") as archive:
                     ["readelf", "--version-info", "--wide", executable], text=True
                 )
                 glibc_versions = set(re.findall(r"Name: (GLIBC_\S+)", versions))
-                if any(
+                dependencies = subprocess.check_output(
+                    ["readelf", "--dynamic", "--wide", executable], text=True
+                )
+                libraries = re.findall(r"\(NEEDED\).*?\[(.*?)\]", dependencies)
+                if name not in voice_binaries:
+                    if re.search(r"\bINTERP\b", headers) or libraries or glibc_versions:
+                        raise SystemExit(f"{name} is not static")
+                elif any(
                     not re.fullmatch(r"GLIBC_[0-9]+(?:\.[0-9]+)+", value)
                     or tuple(int(part) for part in value[6:].split(".")) > (2, 35)
                     for value in glibc_versions
                 ):
                     raise SystemExit(
-                        f"{name} exceeds the glibc 2.35 baseline: {sorted(glibc_versions)}"
+                        f"{name} exceeds the voice glibc 2.35 baseline: {sorted(glibc_versions)}"
                     )
-                dependencies = subprocess.check_output(
-                    ["readelf", "--dynamic", "--wide", executable], text=True
-                )
-                libraries = re.findall(r"\(NEEDED\).*?\[(.*?)\]", dependencies)
-                if target == LINUX_MUSL and name not in voice_binaries:
-                    if re.search(r"\bINTERP\b", headers) or libraries or glibc_versions:
-                        raise SystemExit(f"{name} is not static")
-                elif name != "codex-path/rg" and (
-                    not glibc_versions
-                    or (
-                        name in executables
-                        and "/lib64/ld-linux-x86-64.so.2" not in headers
-                    )
+                elif not glibc_versions or (
+                    name == VOICE_HELPER
+                    and "/lib64/ld-linux-x86-64.so.2" not in headers
                 ):
-                    raise SystemExit(f"{name} is not a GNU x86_64 binary")
+                    raise SystemExit(f"{name} is not an expected GNU voice binary")
                 print(
                     f"{name} glibc_versions={sorted(glibc_versions)} needed={libraries}"
                 )

@@ -15,10 +15,8 @@ Leave Cargo profiles unchanged. Use one Cargo job for Linux PGO. Build Bubblewra
 separately without PGO. CI does not need training credentials or histories. Publish the indexed
 profile as a dependency, not as a CLI release.
 
-[`setup.py`](../../../../scripts/pgo/setup.py) fetches the profile pinned in
-a verified target-specific manifest (`agent-linux-musl.json` for new Linux releases;
-[`agent-linux.json`](../../../../scripts/pgo/agent-linux.json) for historical GNU).
-Never relabel or silently fall back to the GNU profile for musl. Use Python 3.11+ and
+[`setup.py`](../../../../scripts/pgo/setup.py) fetches the musl profile pinned
+in `agent-linux-musl.json`. Use Python 3.11+ and
 `llvm-tools-preview` from the consuming compiler. Fail if the selected profile
 is missing or incompatible. Training versions record provenance; they do not
 gate reuse. Keep compiler matching logs and verify the package and real-provider

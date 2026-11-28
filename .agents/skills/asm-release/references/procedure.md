@@ -13,7 +13,7 @@
 
 ## Recovery
 
-After interruption, rerun failed jobs. For a new resume dispatch, use `main`, `publish_release=true`, and `resume_run_id=<original run ID>`. Preserve original version/commit despite upstream advances. Never invent versions or replace tags. Report failures needing owner decisions.
+After interruption, rerun failed jobs. If a registered candidate needs a new dispatch, use `main`, `publish_release=true`, and `resume_run_id=<original run ID>`. If a direct-tag release needs a new dispatch, use the exact existing `v*` tag and omit `resume_run_id`. Preserve the original version and commit. Never invent versions or replace tags. Report failures needing owner decisions.
 
 Only with explicit approval, supersede a source-defective failed unpublished candidate with a new immutable candidate. Record old run/source/tag and draft assets in `.github/scripts/superseded-fork-releases.json`. Preparation must verify that record and reject publication or asset drift. Preserve old candidate/tag/assets and occupied version. Never apply this exception to published or partially ready releases.
 
@@ -21,7 +21,7 @@ The owner separately approved superseding cancelled run `42465703649` on 2026-11
 
 ## Completion
 
-A platform is ready after its checked archive and platform checksum manifest are published. Candidate completion requires `release`, both `verify_native` jobs, and `sync_main` success for that candidate. Legacy `v*` pushes/dispatches require publication and both native checks, not `sync_main`. Inspect recorded checks/current metadata; do not repeat successful checks on unchanged artifacts. Builds, tag pushes, and version labels do not prove publication.
+A platform is ready after its checked archive and platform checksum manifest are published. Candidate completion requires `release`, both `verify_native` jobs, and `sync_main` success for that candidate. Direct `v*` builds require publication and both native checks, not `sync_main`. Inspect recorded checks/current metadata; do not repeat successful checks on unchanged artifacts. Builds, tag pushes, and version labels do not prove publication.
 
 A release request includes Linux v3. Follow the [v3 upload steps](linux.md#linux-v3-package). Report the release complete only after v3 passes or the owner approves a skip. Report an approved skip explicitly.
 

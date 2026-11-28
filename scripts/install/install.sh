@@ -6,8 +6,6 @@ RELEASE="${CODEX_RELEASE:-latest}"
 NON_INTERACTIVE="${CODEX_NON_INTERACTIVE:-false}"
 DAEMON_ONLY="${CODEX_INSTALL_DAEMON_ONLY:-0}"
 
-linux_release_target="x86_64-unknown-linux-musl"
-linux_legacy_target="x86_64-unknown-linux-gnu"
 voice_root="codex-resources/voice"
 voice_dirs="$voice_root $voice_root/bin $voice_root/lib $voice_root/lib/gstreamer-1.0 $voice_root/licenses"
 voice_files="bin/codex-voice-host manifest.json runtime.json NOTICE.md sources.json
@@ -81,7 +79,7 @@ parse_args() {
         cat <<EOF
 Usage: install.sh [--release VERSION]
 
-Linux defaults to musl. To roll back to an older GNU package, specify its exact release version.
+On Linux, the selected release must provide a musl package.
 
 Environment:
   CODEX_RELEASE          Version to install; overridden by --release.
@@ -344,47 +342,22 @@ release_asset_digest() {
   printf '%s\n' "$digest"
 }
 
-linux_asset_family_exists() {
-  release_asset_exists "codex-$1.tar.gz" || release_asset_exists "SHA256SUMS-$1" ||
-    release_asset_exists "codex-$1-v3.tar.gz" || release_asset_exists "SHA256SUMS-$1-v3"
-}
-
 select_release_assets() {
-  v3_manifest=""
+  asset_target="$vendor_target"
   if [ "$os" = linux ]; then
-    if linux_asset_family_exists "$linux_release_target"; then
-      if linux_asset_family_exists "$linux_legacy_target"; then
-        echo "ASM release $resolved_version mixes GNU and musl assets." >&2
-        return 1
-      fi
-      v3_manifest="SHA256SUMS-x86_64-unknown-linux-musl-v3"
-    elif linux_asset_family_exists "$linux_legacy_target"; then
-      if [ "$normalized_version" = latest ]; then
-        echo "ASM release $resolved_version contains only GNU Linux assets; use --release $resolved_version for an explicit rollback." >&2
-        return 1
-      fi
-      require_linux_glibc
-      vendor_target="$linux_legacy_target"
-      v3_manifest="SHA256SUMS-x86_64-unknown-linux-gnu-v3"
-    fi
-    if [ "$vendor_target" = "$linux_release_target" ] &&
-      { ! release_asset_exists "codex-$vendor_target.tar.gz" uploaded ||
-        ! release_asset_exists "SHA256SUMS-$vendor_target" uploaded; }; then
-      echo "Missing the ready ASM musl archive or target checksum manifest for $resolved_version." >&2
+    if ! release_asset_exists "codex-$vendor_target.tar.gz" uploaded ||
+      ! release_asset_exists "SHA256SUMS-$vendor_target" uploaded; then
+      echo "ASM release $resolved_version does not provide a ready Linux x86_64 musl package (archive and target checksum manifest required). This installer only supports musl on Linux." >&2
       return 1
     fi
-  fi
-
-  asset_target="$vendor_target"
-  if [ -n "$v3_manifest" ] && release_asset_exists "$v3_manifest" uploaded &&
-    linux_x86_64_v3_supported; then
-    asset_target="$vendor_target-v3"
+    if release_asset_exists "SHA256SUMS-$vendor_target-v3" uploaded && linux_x86_64_v3_supported; then
+      asset_target="$vendor_target-v3"
+    fi
   fi
 
   package_asset="codex-$asset_target.tar.gz"
   checksum_asset="SHA256SUMS-$asset_target"
-  if [ "$asset_target" = "$vendor_target" ] && [ "$vendor_target" != "$linux_release_target" ] &&
-    ! release_asset_exists "$checksum_asset"; then
+  if [ "$os" = darwin ] && ! release_asset_exists "$checksum_asset"; then
     checksum_asset="SHA256SUMS"
   fi
   if ! release_asset_exists "$package_asset" uploaded || ! release_asset_exists "$checksum_asset" uploaded; then
@@ -453,20 +426,6 @@ verify_archive_digest() {
     echo "expected: $verify_expected_digest" >&2
     echo "actual:   $verify_actual_digest" >&2
     return 1
-  fi
-}
-
-require_linux_glibc() {
-  libc_version="$(getconf GNU_LIBC_VERSION 2>/dev/null || true)"
-  if ! printf '%s\n' "$libc_version" | awk '
-    /^glibc [0-9]+\.[0-9]+$/ {
-      split($2, version, ".")
-      supported = version[1] > 2 || (version[1] == 2 && version[2] >= 35)
-    }
-    END { exit !supported }
-  '; then
-    echo "ASM Linux releases require glibc 2.35 or newer (Ubuntu 22.04+); detected ${libc_version:-unknown or unsupported libc}." >&2
-    exit 1
   fi
 }
 
@@ -920,10 +879,7 @@ package_files_are_complete() {
   done
   executable_paths="bin/codex bin/codex-code-mode-host codex-path/rg"
   if [ "$os" = linux ]; then
-    executable_paths="$executable_paths codex-resources/bwrap"
-  fi
-  if [ "$expected_target" = "$linux_release_target" ]; then
-    executable_paths="$executable_paths $voice_root/bin/codex-voice-host"
+    executable_paths="$executable_paths codex-resources/bwrap $voice_root/bin/codex-voice-host"
     for directory in $voice_dirs; do
       [ -d "$package_dir/$directory" ] && [ ! -L "$package_dir/$directory" ] || return 1
     done
@@ -949,7 +905,7 @@ package_files_are_complete() {
     [ -f "$package_dir/$exec_server_path" ] &&
       [ ! -L "$package_dir/$exec_server_path" ] &&
       [ -x "$package_dir/$exec_server_path" ] || return 1
-  elif [ "$expected_target" = "$linux_release_target" ] ||
+  elif [ "$os" = linux ] ||
     [ -e "$package_dir/bin/codex-exec-server" ] || [ -L "$package_dir/bin/codex-exec-server" ]; then
     return 1
   fi
@@ -965,12 +921,11 @@ install_fork_release() {
   # otherwise be a link or device that writes outside the staging directory.
   tar -tzf "$archive_path" >"$tmp_dir/archive-members" || return 1
   tar -tvzf "$archive_path" >"$tmp_dir/archive-types" || return 1
-  if ! LC_ALL=C awk -v target="$vendor_target" -v musl="$linux_release_target" \
-    -v os="$os" -v voice="$voice_root" -v voice_dirs="$voice_dirs" -v voice_files="$voice_files" '
+  if ! LC_ALL=C awk -v os="$os" -v voice="$voice_root" -v voice_dirs="$voice_dirs" -v voice_files="$voice_files" '
     function member_type(name) {
       if (name in required) return required[name]
       if (name in optional) return optional[name]
-      if (target == musl && name ~ /^codex-resources\/voice\/lib\/(gstreamer-1\.0\/)?[A-Za-z0-9_+.-]+\.so(\.[0-9]+)*$/) return "-"
+      if (os == "linux" && name ~ /^codex-resources\/voice\/lib\/(gstreamer-1\.0\/)?[A-Za-z0-9_+.-]+\.so(\.[0-9]+)*$/) return "-"
       return ""
     }
     BEGIN {
@@ -981,8 +936,8 @@ install_fork_release() {
       required["bin/codex"] = "-"
       required["bin/codex-code-mode-host"] = "-"
       required["codex-path/rg"] = "-"
-      if (os == "linux") required["codex-resources/bwrap"] = "-"
-      if (target == musl) {
+      if (os == "linux") {
+        required["codex-resources/bwrap"] = "-"
         required["bin/codex-exec-server"] = "-"
         count = split(voice_dirs, dirs)
         for (i = 1; i <= count; i++) required[dirs[i] "/"] = "d"
@@ -1097,7 +1052,7 @@ case "$os:$machine" in
     platform_label="macOS (Apple Silicon)"
     ;;
   linux:x86_64 | linux:amd64)
-    vendor_target="$linux_release_target"
+    vendor_target="x86_64-unknown-linux-musl"
     platform_label="Linux (x64)"
     ;;
   *)
@@ -1193,7 +1148,7 @@ print_launch_instructions
 printf 'ASM CLI %s installed successfully.\n' "$resolved_version"
 step "Use this ASM installer for manual updates; the inherited in-app updater targets OpenAI."
 step "The package includes rg and required platform resources; use a system shell."
-if [ "$vendor_target" = "$linux_release_target" ]; then
+if [ "$os" = linux ]; then
   step "Voice requires glibc 2.35+ and host audio support; the core CLI does not require glibc."
 fi
 maybe_launch_codex_now

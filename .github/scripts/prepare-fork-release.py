@@ -16,12 +16,13 @@ AUTHOR = "Trung Ngo"
 EMAIL = "1390402+trungnt13@users.noreply.github.com"
 RELEASE_WORKFLOW = ".github/workflows/fork-rust-release.yml"
 CANDIDATE_SUBJECT = "Prepare ASM {version} release"
-LINUX_GNU = "x86_64-unknown-linux-gnu"
 LINUX_MUSL = "x86_64-unknown-linux-musl"
-PUBLICATION_JOBS = {
-    "Complete and verify immutable release",
-    "Publish and verify immutable release",
+LAST_PRE_MUSL_RELEASE = "v0.174.1-alpha.8"
+NATIVE_CHECKS = {
+    "Verify published aarch64-apple-darwin binaries",
+    f"Verify published {LINUX_MUSL} binaries",
 }
+PUBLICATION_JOB = "Complete and verify immutable release"
 SYNC_JOB = "Advance main only after release verification"
 
 
@@ -33,24 +34,11 @@ def git_file(revision, path):
     return subprocess.check_output(["git", "show", f"{revision}:{path}"], text=True)
 
 
-def installer_linux_target(installer):
-    declarations = [
-        line
-        for line in installer.splitlines()
-        if line.startswith("linux_release_target=")
-    ]
-    if declarations == [f'linux_release_target="{LINUX_MUSL}"']:
-        return LINUX_MUSL
-    if declarations:
-        raise ValueError("Invalid pinned Linux release target")
-    return LINUX_GNU  # Only installers pinned before the musl cutover lack the declaration.
-
-
-def native_checks(linux_target):
-    return {
-        "Verify published aarch64-apple-darwin binaries",
-        f"Verify published {linux_target} binaries",
-    }
+def require_musl_source(revision):
+    if not git(
+        "ls-tree", "--name-only", revision, ".github/scripts/package-asm-linux-voice.sh"
+    ):
+        raise ValueError("Release source predates the musl package contract")
 
 
 def api(path, *arguments, allow_missing=False):
@@ -198,32 +186,29 @@ def complete_candidate(tag, revision):
     if release and not release["draft"]:
         if not tag_sha:
             raise ValueError("Published release has no matching remote tag")
-        installer = git_file(revision, "scripts/install/install.sh")
-        return published_assets_complete(release, installer_linux_target(installer))
+        return published_assets_complete(release)
     return False
 
 
-def published_assets_complete(release, linux_target):
+def published_assets_complete(release):
     assets = release.get("assets", [])
     names = {asset["name"] for asset in assets}
-    legacy = {
+    required = {
         "codex-aarch64-apple-darwin.tar.gz",
-        f"codex-{linux_target}.tar.gz",
+        f"codex-{LINUX_MUSL}.tar.gz",
         "SHA256SUMS",
         "install.sh",
-    }
-    staged = legacy | {
         "SHA256SUMS-aarch64-apple-darwin",
-        f"SHA256SUMS-{linux_target}",
+        f"SHA256SUMS-{LINUX_MUSL}",
     }
-    v3_archive = f"codex-{linux_target}-v3.tar.gz"
-    v3_manifest = f"SHA256SUMS-{linux_target}-v3"
-    if release["draft"] or len(names) != len(assets):
+    v3_archive = f"codex-{LINUX_MUSL}-v3.tar.gz"
+    v3_manifest = f"SHA256SUMS-{LINUX_MUSL}-v3"
+    if (
+        release["draft"]
+        or len(names) != len(assets)
+        or names - {v3_archive, v3_manifest} != required
+    ):
         return False
-    base = names - {v3_archive, v3_manifest}
-    if base != staged and not (linux_target == LINUX_GNU and names == legacy):
-        return False
-    required = base
     if any(
         asset["name"] == v3_manifest and asset.get("state") == "uploaded"
         for asset in assets
@@ -243,25 +228,30 @@ def publication_run_succeeded(run):
         run["path"] == RELEASE_WORKFLOW
         and run["status"] == "completed"
         and run["conclusion"] == "success"
+        and (run.get("head_repository") or {}).get("full_name") == REPOSITORY
     )
 
 
-def completed_publication(run, candidate, tag, candidate_ref, linux_target):
+def completed_publication(run, candidate, tag, candidate_ref):
     if not publication_run_succeeded(run):
         return False
-    jobs = api(
-        f"repos/{REPOSITORY}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100"
-    )["jobs"]
-    succeeded = {job["name"] for job in jobs if job["conclusion"] == "success"}
-    if (
-        not (native_checks(linux_target) | {SYNC_JOB}) <= succeeded
-        or not succeeded & PUBLICATION_JOBS
+    if not candidate_ref and not (
+        run["event"] in {"push", "workflow_dispatch"}
+        and run["head_branch"] == tag
+        and run["head_sha"] == candidate
     ):
+        return False
+    jobs = latest_unskipped_jobs(run["id"])
+    succeeded = {name for name, job in jobs.items() if job["conclusion"] == "success"}
+    if not (NATIVE_CHECKS | {PUBLICATION_JOB}) <= succeeded:
+        return False
+    if not candidate_ref:
+        return True
+    if SYNC_JOB not in succeeded:
         return False
     if run["id"] == int(candidate_ref.rsplit("-", 1)[1]):
         return run["event"] == "workflow_dispatch" and run["head_branch"] == "main"
-    sync_job = next(job for job in jobs if job["name"] == SYNC_JOB)
-    return sync_job_matches(sync_job, candidate, tag, re.escape(candidate_ref))
+    return sync_job_matches(jobs[SYNC_JOB], candidate, tag, re.escape(candidate_ref))
 
 
 def sync_job_matches(sync_job, candidate, tag, ref_pattern):
@@ -293,13 +283,10 @@ def sync_job_matches(sync_job, candidate, tag, ref_pattern):
 def verify_base_release(run_id, tag, revision):
     if not re.fullmatch(r"[1-9][0-9]*", run_id):
         raise ValueError("Release run ID must be a positive decimal integer")
+    require_musl_source(revision)
     path = f"repos/{REPOSITORY}/actions/runs/{run_id}"
     run = api(path)
-    if (
-        not publication_run_succeeded(run)
-        or str(run["id"]) != run_id
-        or (run.get("head_repository") or {}).get("full_name") != REPOSITORY
-    ):
+    if not publication_run_succeeded(run) or str(run["id"]) != run_id:
         raise ValueError(f"Run {run_id} is not a successful fork release workflow")
     candidate = run["event"] == "workflow_dispatch" and run["head_branch"] == "main"
     if not candidate:
@@ -309,7 +296,9 @@ def verify_base_release(run_id, tag, revision):
             or run["head_sha"] != revision
         ):
             raise ValueError(f"Run {run_id} does not identify {tag} at {revision}")
-        candidate_refs = api(f"repos/{REPOSITORY}/git/matching-refs/heads/agent/release-")
+        candidate_refs = api(
+            f"repos/{REPOSITORY}/git/matching-refs/heads/agent/release-"
+        )
         # Older frozen refs may be removed after the next successful release.
         subject = git("show", "-s", "--format=%s", revision)
         if any(ref["object"]["sha"] == revision for ref in candidate_refs) or (
@@ -319,11 +308,29 @@ def verify_base_release(run_id, tag, revision):
                 f"{tag} requires the successful candidate run with main sync"
             )
 
+    latest = latest_unskipped_jobs(run_id)
+    succeeded = {name for name, job in latest.items() if job["conclusion"] == "success"}
+    if not (NATIVE_CHECKS | {PUBLICATION_JOB}) <= succeeded:
+        raise ValueError(f"Run {run_id} lacks successful publication and native checks")
+    if candidate and (
+        SYNC_JOB not in succeeded
+        or not sync_job_matches(
+            latest[SYNC_JOB], revision, tag, r"refs/heads/agent/release-[1-9][0-9]*"
+        )
+    ):
+        raise ValueError(
+            f"Run {run_id} does not prove main sync for {tag} at {revision}"
+        )
+
+
+def latest_unskipped_jobs(run_id):
     # Partial reruns retain successful jobs that did not run again.
     latest = {}
     page = 1
     while True:
-        jobs = api(f"{path}/jobs?filter=all&per_page=100&page={page}")["jobs"]
+        jobs = api(
+            f"repos/{REPOSITORY}/actions/runs/{run_id}/jobs?filter=all&per_page=100&page={page}"
+        )["jobs"]
         for job in jobs:
             name = job["name"]
             if job["conclusion"] == "skipped":
@@ -335,21 +342,8 @@ def verify_base_release(run_id, tag, revision):
             ):
                 latest[name] = job
         if len(jobs) < 100:
-            break
+            return latest
         page += 1
-    succeeded = {name for name, job in latest.items() if job["conclusion"] == "success"}
-    linux_target = installer_linux_target(
-        git_file(revision, "scripts/install/install.sh")
-    )
-    if not native_checks(linux_target) <= succeeded or not succeeded & PUBLICATION_JOBS:
-        raise ValueError(f"Run {run_id} lacks successful publication and native checks")
-    if candidate and (
-        SYNC_JOB not in succeeded
-        or not sync_job_matches(
-            latest[SYNC_JOB], revision, tag, r"refs/heads/agent/release-[1-9][0-9]*"
-        )
-    ):
-        raise ValueError(f"Run {run_id} does not prove main sync for {tag} at {revision}")
 
 
 def next_release_version(upstream):
@@ -402,58 +396,44 @@ def next_release_version(upstream):
         if f"v{base}" in occupied or counter
         else base
     )
-    if versions and semver_precedence(selected) <= max(versions.values()):
+    cutover = semver_precedence(LAST_PRE_MUSL_RELEASE.removeprefix("v"))
+    highest = max(cutover, max(versions.values(), default=cutover))
+    if semver_precedence(selected) <= highest:
         raise ValueError(
             f"Proposed version {selected} does not exceed existing fork versions; ask the owner"
         )
-    proof_tags = family | {
-        tag for tag, order in versions.items() if order == max(versions.values())
-    }
-    existing_candidates = set(family)
+    # Historical versions still occupy SemVer space, but only musl releases can resume.
+    musl_tags = {tag for tag, order in versions.items() if order > cutover}
+    proof_tags = {tag for tag in musl_tags if tag in family or versions[tag] == highest}
     # A failed initialization can leave a candidate before its tag or draft exists.
     for reference, sha in candidates.items():
-        matching = {tag for tag in versions if tags.get(tag) == sha}
-        if not matching:
+        if not any(tags.get(tag) == sha for tag in versions):
             raise ValueError(
                 f"Unfinished candidate {reference}; resume its original run"
             )
-        existing_candidates.update(matching)
     completed = set()
     resume_runs = None
-    for tag in (existing_candidates | proof_tags) - superseded:
+    for tag in sorted(musl_tags - superseded, key=versions.__getitem__):
         release = releases.get(tag)
-        if (
-            not tags.get(tag)
-            or not release
-            or not any(
-                published_assets_complete(release, target)
-                for target in (LINUX_GNU, LINUX_MUSL)
-            )
-        ):
+        if not tags.get(tag) or not release or not published_assets_complete(release):
             raise ValueError(f"Incomplete release {tag}; resume its original run")
-        # Superseded complete releases need not depend on retained Actions logs forever.
+        # Older complete releases need not depend on retained Actions logs forever.
         if tag not in proof_tags:
             continue
         references = [
             reference for reference, sha in candidates.items() if sha == tags[tag]
         ]
         if not references:
-            raise ValueError(
-                f"Cannot prove completed candidate for {tag}; ask the owner"
-            )
+            verify_completed_tag_release(tag, tags[tag])
+            continue
         for reference in references:
             git("fetch", "--no-tags", "origin", reference)
             if git("rev-parse", "FETCH_HEAD^{commit}") != tags[tag]:
                 raise ValueError(f"Candidate {reference} changed during lookup")
-            installer = git_file(tags[tag], "scripts/install/install.sh")
-            linux_target = installer_linux_target(installer)
-            if not published_assets_complete(release, linux_target):
-                raise ValueError(
-                    f"Release assets for {tag} do not match its pinned Linux target"
-                )
+            require_musl_source(tags[tag])
             run_id = reference.rsplit("-", 1)[1]
             run = api(f"repos/{REPOSITORY}/actions/runs/{run_id}")
-            if completed_publication(run, tags[tag], tag, reference, linux_target):
+            if completed_publication(run, tags[tag], tag, reference):
                 completed.add(tag)
                 break
             if resume_runs is None:
@@ -468,7 +448,7 @@ def next_release_version(upstream):
                         break
                     page += 1
             if any(
-                completed_publication(resume, tags[tag], tag, reference, linux_target)
+                completed_publication(resume, tags[tag], tag, reference)
                 for resume in resume_runs
             ):
                 completed.add(tag)
@@ -477,13 +457,29 @@ def next_release_version(upstream):
             raise ValueError(
                 f"Release verification or main sync unfinished for {tag}; resume its original run"
             )
-    if any(
-        release["draft"]
-        for tag, release in releases.items()
-        if tag in versions and tag not in superseded
-    ):
-        raise ValueError("Unfinished draft release exists; resume its original run")
     return selected
+
+
+def verify_completed_tag_release(tag, revision):
+    git("fetch", "--no-tags", "origin", f"refs/tags/{tag}")
+    if git("rev-parse", "FETCH_HEAD^{commit}") != revision:
+        raise ValueError(f"Tag {tag} changed during lookup")
+    require_musl_source(revision)
+    if git("show", "-s", "--format=%s", revision) == CANDIDATE_SUBJECT.format(
+        version=tag.removeprefix("v")
+    ):
+        raise ValueError(f"{tag} requires its completed candidate run with main sync")
+    page = 1
+    while True:
+        runs = api(
+            f"repos/{REPOSITORY}/actions/workflows/fork-rust-release.yml/runs"
+            f"?head_sha={revision}&status=success&per_page=100&page={page}"
+        )["workflow_runs"]
+        if any(completed_publication(run, revision, tag, "") for run in runs):
+            return
+        if len(runs) < 100:
+            raise ValueError(f"Cannot prove completed tag release {tag}; ask the owner")
+        page += 1
 
 
 def validated_superseded_releases(candidates, tags, releases):
@@ -534,10 +530,7 @@ def validated_superseded_releases(candidates, tags, releases):
             if job["conclusion"] == expected_conclusion
             and not (expected_conclusion == "cancelled" and not job.get("steps"))
         }
-        if stopped_builds != {
-            "Build x86_64-unknown-linux-gnu (jobs 0)",
-            "Build aarch64-apple-darwin (jobs 0)",
-        } or any(
+        if stopped_builds != set(record["stopped_build_jobs"]) or any(
             job["conclusion"] != "skipped"
             and not (
                 expected_conclusion == "cancelled"
@@ -566,11 +559,6 @@ def output(revision, tag="", candidate_ref="", complete=False, publish=False):
     print(
         f"Release source: {revision}; tag: {tag or '(build only)'}; candidate: {candidate_ref or '(none)'}"
     )
-    installer = git_file(revision, "scripts/install/install.sh")
-    staged = publish and (
-        "SHA256SUMS-$vendor_target" in installer
-        or "SHA256SUMS-$asset_target" in installer
-    )
     with open(os.environ["GITHUB_OUTPUT"], "a") as stream:
         for key, value in {
             "sha": revision,
@@ -578,8 +566,6 @@ def output(revision, tag="", candidate_ref="", complete=False, publish=False):
             "candidate_ref": candidate_ref,
             "complete": str(complete).lower(),
             "publish": str(publish).lower(),
-            "staged": str(staged).lower(),
-            "linux_target": installer_linux_target(installer),
         }.items():
             print(f"{key}={value}", file=stream)
 
@@ -595,6 +581,7 @@ def pin():
     base = git("rev-parse", "HEAD")
     if base != remote_ref("refs/heads/main") or git("status", "--porcelain"):
         raise ValueError("Pin from a clean checkout of current origin/main")
+    require_musl_source(base)
     new_version = select_release_version()
     git("checkout", "--detach", base)
     for path, contents in rewritten_files(base, new_version).items():
@@ -618,7 +605,9 @@ def prepare():
         or resume_run_id
         or not re.fullmatch(r"[0-9a-f]{40}", pinned_sha)
     ):
-        raise ValueError("A pinned candidate SHA requires publication on main, without resume")
+        raise ValueError(
+            "A pinned candidate SHA requires publication on main, without resume"
+        )
     if publish not in {"true", "false"}:
         raise ValueError("PUBLISH_RELEASE must be true or false")
     if publish == "false":
@@ -631,6 +620,12 @@ def prepare():
         revision = git("rev-parse", f"{revision}^{{commit}}")
         if tag != f"v{version(revision)}":
             raise ValueError("Tag does not agree with Cargo version")
+        require_musl_source(revision)
+        order = semver_precedence(tag.removeprefix("v"))
+        if order is None or order <= semver_precedence(
+            LAST_PRE_MUSL_RELEASE.removeprefix("v")
+        ):
+            raise ValueError("Tag version must follow the musl cutover")
         output(revision, tag, complete=complete_candidate(tag, revision), publish=True)
         return
     if reference != "refs/heads/main":
@@ -644,8 +639,11 @@ def prepare():
         git("fetch", "--no-tags", "origin", candidate_ref)
         revision = git("rev-parse", "FETCH_HEAD^{commit}")
         if revision != candidate_sha or (pinned_sha and revision != pinned_sha):
-            raise ValueError("Candidate changed during lookup or does not match the pin")
+            raise ValueError(
+                "Candidate changed during lookup or does not match the pin"
+            )
         base = validate_candidate(revision)
+        require_musl_source(revision)
         if not resume_run_id and base != os.environ["GITHUB_SHA"]:
             raise ValueError("Candidate belongs to a different source commit")
     else:
@@ -653,12 +651,20 @@ def prepare():
             raise ValueError("Requested candidate run does not exist")
         if not pinned_sha:
             raise ValueError("Pin the release candidate before dispatch")
-        git("fetch", "--no-tags", "origin", f"refs/heads/agent/pin-release-{pinned_sha}")
+        git(
+            "fetch", "--no-tags", "origin", f"refs/heads/agent/pin-release-{pinned_sha}"
+        )
         revision = git("rev-parse", "FETCH_HEAD^{commit}")
-        if revision != pinned_sha or validate_candidate(revision) != os.environ["GITHUB_SHA"]:
+        if (
+            revision != pinned_sha
+            or validate_candidate(revision) != os.environ["GITHUB_SHA"]
+        ):
             raise ValueError("Pinned candidate does not match this source commit")
+        require_musl_source(revision)
         if version(revision) != select_release_version():
-            raise ValueError("Pinned version no longer matches the next available release")
+            raise ValueError(
+                "Pinned version no longer matches the next available release"
+            )
         git("push", "--no-follow-tags", "origin", f"{revision}:{candidate_ref}")
     tag = f"v{version(revision)}"
     output(
@@ -671,13 +677,14 @@ def sync_main():
     tag = os.environ["RELEASE_TAG"]
     candidate_ref = os.environ["CANDIDATE_REF"]
     if not candidate_ref:
-        return  # Legacy tag publications do not own a version update to main.
+        return  # Tag publications do not own a version update to main.
     if not re.fullmatch(r"refs/heads/agent/release-[1-9][0-9]*", candidate_ref):
         raise ValueError("Invalid candidate branch")
     git("fetch", "--no-tags", "origin", candidate_ref)
     if git("rev-parse", "FETCH_HEAD^{commit}") != revision:
         raise ValueError("Candidate branch no longer matches published commit")
     base = validate_candidate(revision)
+    require_musl_source(revision)
     if tag != f"v{version(revision)}" or not complete_candidate(tag, revision):
         raise ValueError("Candidate release is not complete")
     for _ in range(3):

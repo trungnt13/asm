@@ -4,6 +4,10 @@
     "source": "08492e08402bc49b6164a82bf0d6be9157233c97",
     "tag": "v0.166.1-alpha.6",
     "release_id": 427492578,
+    "stopped_build_jobs": [
+      "Build x86_64-unknown-linux-gnu (jobs 0)",
+      "Build aarch64-apple-darwin (jobs 0)"
+    ],
     "installer": {
       "id": 687449697,
       "name": "install.sh",
@@ -17,6 +21,10 @@
     "tag": "v0.169.1-alpha.3.1",
     "release_id": 438138836,
     "conclusion": "cancelled",
+    "stopped_build_jobs": [
+      "Build x86_64-unknown-linux-gnu (jobs 0)",
+      "Build aarch64-apple-darwin (jobs 0)"
+    ],
     "installer": {
       "id": 723450842,
       "name": "install.sh",
