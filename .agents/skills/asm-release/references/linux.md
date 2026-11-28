@@ -134,9 +134,6 @@ model, fixture results, and streaming. Merge only that run's
 `profiles/*.profraw` with matching `llvm-profdata`. Publish the indexed result
 and update both hashes and provenance. Keep failed runs separate.
 
-The selected run peaked at eight simultaneous children. It does not cover all
-production paths. The local Fat LTO build reached about 30 GiB of proportional
-resident memory. The CI trial timed out at 330 minutes with about 22 GiB swap
-in use. Keep runner
-disk and swap checks. Require a successful full build before claiming runner
-feasibility.
+Use the profile manifest for measured concurrency and provenance. Training does not
+cover every production path. Keep runner disk and swap checks, and require a
+successful full build before claiming runner feasibility.
