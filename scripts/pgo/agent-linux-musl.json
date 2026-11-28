@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "id": "agent-parallel-20261116",
-  "target": "x86_64-unknown-linux-gnu",
-  "url": "https://github.com/trungnt13/asm/releases/download/pgo-agent-20261116-47932490/agent-linux.profdata.gz",
-  "archive_sha256": "f7b000646fd793db5c6ecaa5812e4f99f704b416fab7bcee95dbb13e6d6a8853",
-  "profile_sha256": "479324908915006b79ff07d5dd284ae331b1543943d49976024d967ecba38a35",
-  "profile_bytes": 176831360,
+  "id": "agent-parallel-musl-20261128",
+  "target": "x86_64-unknown-linux-musl",
+  "url": "https://github.com/trungnt13/asm/releases/download/pgo-agent-musl-20261128-250bcf97/agent-linux-musl.profdata.gz",
+  "archive_sha256": "1a1b6ff5e5f12abd7d586638441caa74d5bc5c95eddc1b0b53b7f4e3d4e311a7",
+  "profile_sha256": "250bcf97d184d96fec756d1aafa3705dbbcf4b8cf15c6c5b8444f0e751b81c53",
+  "profile_bytes": 320210384,
   "training": {
-    "commit": "c237f1e9e5c4a551b3025e3a59d44356745584d8",
+    "commit": "403bee1316d93e6c8e6f882dc961d88494033de9",
     "rust": "1.99.1",
     "llvm": "23.1.1",
     "lto": "fat",
@@ -24,7 +24,7 @@
       2
     ],
     "parallel_batches_per_session": 3,
-    "global_parallel_child_peak": 8,
+    "global_parallel_child_peak": 9,
     "model": "gpt-6-luna",
     "system1": false
   },

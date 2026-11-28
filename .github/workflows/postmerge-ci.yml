@@ -33,7 +33,7 @@ jobs:
           - runner: ubuntu-22.04
             build_timeout: 330
             job_timeout: 345
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -46,10 +46,22 @@ jobs:
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: '3.11'
-      - if: ${{ contains(matrix.target, 'linux-gnu') }}
-        name: Install GNU build tools
-        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-gnu-build-tools.sh"
-      - if: ${{ contains(matrix.target, 'linux-gnu') }}
+      - if: ${{ contains(matrix.target, 'linux-musl') }}
+        name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.0
+          use-cache: false
+      - if: ${{ contains(matrix.target, 'linux-musl') }}
+        name: Install musl build tools
+        env:
+          TARGET: ${{ matrix.target }}
+          CODEX_MUSL_RELEASE_LINK_FLAGS: '1'
+          # musl-gcc otherwise adds a dynamic interpreter to the static PIE.
+          RUSTFLAGS: -Clink-arg=-Wl,--no-dynamic-linker
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-musl-build-tools.sh"
+
+      - if: ${{ contains(matrix.target, 'linux-musl') }}
         name: Disable aws-lc jitter entropy
         shell: bash
         run: |
@@ -64,10 +76,10 @@ jobs:
           target: ${{ matrix.target }}
           repository: trungnt13/asm
       - name: Prepare standard Linux runner for PGO
-        if: ${{ contains(matrix.target, 'linux-gnu') }}
+        if: ${{ contains(matrix.target, 'linux-musl') }}
         run: bash "${GITHUB_WORKSPACE}/.github/scripts/prepare-linux-release-runner.sh"
       - name: Fetch and validate release PGO profile
-        if: ${{ contains(matrix.target, 'linux-gnu') }}
+        if: ${{ contains(matrix.target, 'linux-musl') }}
         run: python3 "${GITHUB_WORKSPACE}/scripts/pgo/setup.py" --target "${{ matrix.target }}" --output "${GITHUB_WORKSPACE}/diagnostics/pgo" --env-file "$GITHUB_ENV"
 
       - name: Build ASM with resource sampling
@@ -94,10 +106,11 @@ jobs:
           done) > "${GITHUB_WORKSPACE}/diagnostics/resources-${TARGET}.log" 2>&1 &
           sampler_pid=$!
           trap 'kill "$sampler_pid" 2>/dev/null || true' EXIT
-          if [[ "$TARGET" == *-linux-gnu ]]; then
-            env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 cargo build --locked --release --target "$TARGET" --bin bwrap
+          if [[ "$TARGET" == *-linux-musl ]]; then
+            env -u CARGO_ENCODED_RUSTFLAGS CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 cargo build --locked --release --target "$TARGET" --bin bwrap
             CODEX_BWRAP_SHA256="$(shasum -a 256 "target/${TARGET}/release/bwrap" | awk '{print $1}')"
-            export CODEX_BWRAP_SHA256
+            export CODEX_BWRAP_SHA256 STABLE_GIT_COMMIT
+            STABLE_GIT_COMMIT="$(git rev-parse HEAD)"
           fi
           cargo build --locked --release --target "$TARGET" --bin codex --bin codex-code-mode-host --bin codex-exec-server --timings 2>&1 | tee "${GITHUB_WORKSPACE}/diagnostics/build-${TARGET}.log"
 
@@ -110,8 +123,10 @@ jobs:
           archive="${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz"
           # macOS Bash 3.2 treats empty arrays as unset under nounset.
           resource_args=(--force)
-          if [[ "$TARGET" == *-linux-gnu ]]; then
+          if [[ "$TARGET" == *-linux-musl ]]; then
             resource_args+=(--bwrap-bin "${release_dir}/bwrap")
+          else
+            resource_args+=(--archive-output "$archive")
           fi
           CODEX_REPO_ROOT="$GITHUB_WORKSPACE" python3 "${GITHUB_WORKSPACE}/scripts/build_codex_package.py" \
             --target "$TARGET" --cargo-profile release \
@@ -119,7 +134,23 @@ jobs:
             --code-mode-host-bin "${release_dir}/codex-code-mode-host" \
             --exec-server-bin "${release_dir}/codex-exec-server" \
             --package-dir "${RUNNER_TEMP}/asm-package-${TARGET}" \
-            --archive-output "$archive" "${resource_args[@]}"
+            "${resource_args[@]}"
+
+      - name: Prepare Bazel for Linux voice
+        if: ${{ contains(matrix.target, 'linux-musl') }}
+        uses: ./.github/actions/prepare-bazel-ci
+        with:
+          target: x86_64-unknown-linux-gnu
+          cache-scope: fork-release-voice
+      - name: Bundle the same-commit Linux voice helper and runtime
+        if: ${{ contains(matrix.target, 'linux-musl') }}
+        working-directory: .
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("codex-rs/Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          bash .github/scripts/package-asm-linux-voice.sh "${RUNNER_TEMP}/asm-package-${TARGET}" "$version" "dist/codex-${TARGET}.tar.gz"
 
       - name: Smoke packaged ASM
         env:
@@ -128,8 +159,8 @@ jobs:
           set -euo pipefail
           python3 "${GITHUB_WORKSPACE}/.github/scripts/smoke-codex-archive.py" "${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz" | tee "${GITHUB_WORKSPACE}/diagnostics/smoke-${TARGET}.log"
 
-      - name: Smoke packaged ASM on clean Ubuntu 22.04
-        if: ${{ contains(matrix.target, 'linux-gnu') }}
+      - name: Smoke packaged ASM on clean Linux
+        if: ${{ contains(matrix.target, 'linux-musl') }}
         env:
           TARGET: ${{ matrix.target }}
         run: |

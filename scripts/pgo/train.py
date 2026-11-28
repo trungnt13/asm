@@ -48,6 +48,10 @@ async def session(index, turns, children, sandbox, raw):
         "service_tier": "default",
         "model_catalog_json": str(R / "cheap-model-catalog.json"),
         "subagent_model_list": ["gpt-6-luna"],
+        "subagent_tools.collaboration": False,
+        "features.multi_agent_v2.max_concurrent_threads_per_session": children + 1,
+        "features.multi_agent_v2.default_wait_timeout_ms": 30000,
+        "features.multi_agent_v2.max_wait_timeout_ms": 30000,
         "notify": [],
         "diagnostic_log_capture": True,
         "sqlite_home": str(h / "sqlite"),
@@ -144,6 +148,15 @@ async def session(index, turns, children, sandbox, raw):
                 raise RuntimeError(
                     f"Training requires the session-local {key}; check managed settings"
                 )
+        active_limit = (
+            effective.get("features", {})
+            .get("multi_agent_v2", {})
+            .get("max_concurrent_threads_per_session")
+        )
+        if active_limit != children + 1:
+            raise RuntimeError(
+                "Training needs one active thread for the root and each child"
+            )
         thread = (
             await rpc(
                 "thread/start",
@@ -160,7 +173,21 @@ async def session(index, turns, children, sandbox, raw):
         for turn in range(1, turns + 1):
             prompt = f"Isolated coding exercise, session {index}, user turn {turn}/{turns}. Work only in {w}. Preserve sorted JSON output. "
             if turn in [1, (turns + 1) // 2, turns]:
-                prompt += f"Spawn exactly {children} new default-role subagents in PARALLEL, model gpt-6-luna, reasoning_effort low, fork_turns none, distinct task_names prefixed wave{turn}_. Launch every child before waiting. Give them different bounded read-only audits or real shell checks of this fixture and accumulated scenario files; no recursive spawning or edits. Do not attempt direct messaging, followup_task, or direct app-server input: those are disabled. Collect all results via list_agents/wait_agent. "
+                prompt += (
+                    f"Start this wave before doing your own work. Spawn exactly {children} "
+                    "new default-role subagents, using gpt-6-luna, low effort and fork_turns none. "
+                    f"Allocate each one slot 1 to {children}, with distinct task_names "
+                    f"wave{turn}_1 through wave{turn}_{children}. In every child prompt include: "
+                    f"'Your first action is to run python3 pgo_wave.py {turn} SLOT {children}, "
+                    "replacing SLOT with your assigned integer. Wait for its exit if the shell "
+                    "returns a running session. After it succeeds, perform "
+                    "your assigned read-only audit and report the result.' Give each slot a "
+                    "different bounded, useful audit of this fixture or prior scenarios. "
+                    "Spawn all slots before waiting. Collect a completed result from every "
+                    "child via list_agents/wait_agent (up to 30000 ms per wait) before proceeding, even if a wait "
+                    "returns only some results. Do not interrupt children, use direct messaging, "
+                    "send followups, or ask children to spawn agents or edit the fixture. "
+                )
             else:
                 prompt += "Do not spawn agents this turn; the next parallel audit batch is scheduled later in this session. "
             if turn == 1:
@@ -250,7 +277,7 @@ async def monitor():
         )
         if (
             count >= 890
-            or inputs >= 19_900_000
+            or inputs >= 100_000_000
             or outputs >= 245_000
             or inputs * 0.1 / 1e6 + outputs * 0.5 / 1e6 >= 4.9
             or time.monotonic() - started >= 3600

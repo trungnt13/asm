@@ -4,9 +4,19 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish the V8 dependency after both builds and smoke tests pass
+        description: Publish the selected V8 dependency after verifying its build and smoke tests
         type: boolean
         default: false
+      recover_run_id:
+        description: Publish the verified artifact from this completed V8 run without rebuilding (requires publish)
+        type: string
+      target:
+        description: Build only the required V8 dependency
+        type: choice
+        options:
+          - x86_64-unknown-linux-musl
+          - aarch64-apple-darwin
+        default: x86_64-unknown-linux-musl
   push:
     tags:
       - 'asm-v8-v*'
@@ -22,30 +32,51 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      actions: read
     outputs:
-      version: ${{ steps.version.outputs.version }}
+      target: ${{ steps.version.outputs.target }}
+      runner: ${{ steps.version.outputs.runner }}
+      platform: ${{ steps.version.outputs.platform }}
+      tag: ${{ steps.version.outputs.tag }}
+      source_sha: ${{ steps.recovery.outputs.source_sha || github.sha }}
+      run_id: ${{ steps.recovery.outputs.run_id }}
+      artifact_id: ${{ steps.recovery.outputs.artifact_id }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          fetch-depth: ${{ inputs.recover_run_id && 2 || 1 }}
       - id: version
         env:
           REF: ${{ github.ref }}
           REF_NAME: ${{ github.ref_name }}
           PUBLISH: ${{ inputs.publish || false }}
+          TARGET: ${{ inputs.target || 'x86_64-unknown-linux-musl' }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           version="$(python3 .github/scripts/rusty_v8_bazel.py resolved-v8-crate-version)"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
           if [[ "$REF" == refs/tags/* ]]; then
-            [[ "$REF_NAME" == "asm-v8-v${version}-glibc2.35.2" ]] || { echo 'V8 tag and resolved crate version differ' >&2; exit 1; }
+            case "$REF_NAME" in
+              *-musl.1) TARGET=x86_64-unknown-linux-musl ;;
+              *-glibc2.35.2) TARGET=aarch64-apple-darwin ;;
+              *) echo 'Unsupported V8 dependency tag' >&2; exit 1 ;;
+            esac
+          fi
+          case "$TARGET" in
+            x86_64-unknown-linux-musl) runner=ubuntu-24.04; platform=linux_amd64_musl ;;
+            aarch64-apple-darwin) runner=macos-15; platform=macos_arm64 ;;
+            *) echo "Unsupported V8 target: $TARGET" >&2; exit 1 ;;
+          esac
+          tag="$(python3 .github/scripts/verify-fork-v8.py --tag "$TARGET" "$version")"
+          printf 'target=%s\nrunner=%s\nplatform=%s\ntag=%s\n' "$TARGET" "$runner" "$platform" "$tag" >> "$GITHUB_OUTPUT"
+          if [[ "$REF" == refs/tags/* ]]; then
+            [[ "$REF_NAME" == "$tag" ]] || { echo 'V8 tag and resolved crate version differ' >&2; exit 1; }
             [[ "$(git rev-parse "${REF_NAME}^{commit}")" == "$(git rev-parse "${GITHUB_SHA}^{commit}")" ]] || {
               echo 'V8 tag does not point to this workflow commit' >&2; exit 1;
             }
           fi
           if [[ "$REF" == refs/tags/* || "$PUBLISH" == true ]]; then
-            tag="asm-v8-v${version}-glibc2.35.2"
             status="$(curl -sS -o /dev/null -w '%{http_code}' \
               -H "Authorization: Bearer $GH_TOKEN" \
               -H 'Accept: application/vnd.github+json' \
@@ -68,51 +99,116 @@ jobs:
             fi
           fi
 
+      - name: Verify the completed V8 build and artifact for recovery
+        id: recovery
+        if: inputs.recover_run_id
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH: ${{ inputs.publish }}
+          REF: ${{ github.ref }}
+          RECOVER_RUN_ID: ${{ inputs.recover_run_id }}
+          TARGET: ${{ steps.version.outputs.target }}
+        run: |
+          set -euo pipefail
+          [[ "$PUBLISH" == true && "$RECOVER_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_REPOSITORY" == trungnt13/asm ]] || {
+            echo 'V8 recovery requires publish=true and a numeric run ID in trungnt13/asm' >&2; exit 1;
+          }
+          workflow=.github/workflows/fork-v8-release.yml
+          api="repos/trungnt13/asm/actions/runs/$RECOVER_RUN_ID"
+          run="$(gh api "$api" | jq -ce --arg workflow "$workflow" --arg run_id "$RECOVER_RUN_ID" '
+            select((.id | tostring) == $run_id and .path == $workflow and .status == "completed"
+              and .event == "workflow_dispatch" and (.conclusion == "success" or .conclusion == "failure")
+              and .repository.full_name == "trungnt13/asm" and .head_repository.full_name == "trungnt13/asm"
+              and (.head_sha | test("^[0-9a-f]{40}$")) and (.run_attempt | type == "number" and . > 0))
+          ')" || { echo 'Recovery run is not a completed dispatch of this V8 workflow' >&2; exit 1; }
+          source_sha="$(jq -r '.head_sha' <<< "$run")"
+          attempt="$(jq -r '.run_attempt' <<< "$run")"
+          if [[ "$source_sha" != "$GITHUB_SHA" ]]; then
+            # A publication-only fix may recover its parent's artifact, but not different build inputs.
+            [[ "$REF" == refs/heads/* && "$source_sha" == "$(git rev-parse "${GITHUB_SHA}^")" &&
+              "$(git diff --name-only --no-renames "$source_sha" "$GITHUB_SHA")" == "$workflow" ]] || {
+              echo 'Recovery source must match this commit; only branches may recover from a workflow-only parent' >&2; exit 1;
+            }
+            # A workflow-only diff can still change the V8 build or native smoke recipe.
+            source_workflow="$(git show "$source_sha:$workflow")"
+            ruby -ryaml - "$workflow" "$source_workflow" <<'RUBY'
+          workflow, source = ARGV
+          original = YAML.safe_load(source)
+          current = YAML.safe_load_file(workflow)
+
+          def build_inputs(workflow)
+            jobs = workflow.fetch('jobs')
+            metadata = jobs.fetch('metadata')
+            build = jobs.fetch('build')
+            build.delete('if') if build['if'] == "needs.metadata.outputs.artifact_id == ''"
+            steps = metadata.fetch('steps').reject { |step| step['id'] == 'recovery' }
+            checkout = steps.first.fetch('with')
+            depth = '$' + '{{ inputs.recover_run_id && 2 || 1 }}'
+            checkout.delete('fetch-depth') if checkout['fetch-depth'] == depth
+            [workflow.values_at('env', 'defaults'), build,
+             metadata.values_at('env', 'defaults', 'runs-on'),
+             metadata.fetch('outputs').values_at('target', 'runner', 'platform'), steps]
+          end
+
+          abort 'Recovery cannot change the V8 build or smoke recipe' unless build_inputs(original) == build_inputs(current)
+          RUBY
+          fi
+          gh api --paginate "$api/attempts/$attempt/jobs?per_page=100" | jq -se --arg target "$TARGET" '
+            [.[].jobs[] | select(.name == ("Build V8 " + $target))] |
+            length == 1 and (.[0] as $job | $job.status == "completed" and $job.conclusion == "success"
+              and (["Build and stage V8 archive and Rust binding", "Smoke test V8 sandbox and JavaScript execution",
+                "Run actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f"]
+                + (if $target == "x86_64-unknown-linux-musl" then ["Install native musl smoke tools"] else [] end)) as $steps
+              | all($steps[]; . as $name | any($job.steps[];
+                .name == $name and .status == "completed" and .conclusion == "success")))
+          ' >/dev/null || { echo 'The selected V8 build, native smoke, or artifact upload did not succeed' >&2; exit 1; }
+          artifact_id="$(gh api --paginate "$api/artifacts?name=fork-v8-$TARGET&per_page=100" | jq -ser \
+            --arg name "fork-v8-$TARGET" --arg run_id "$RECOVER_RUN_ID" --arg sha "$source_sha" \
+            --arg repository_id "$GITHUB_REPOSITORY_ID" '
+              [.[].artifacts[] | select(.name == $name)] | select(length == 1) | .[0] |
+              select(.expired == false and (.expires_at | fromdateiso8601 > now)
+                and (.digest | test("^sha256:[0-9a-f]{64}$"))
+                and (.workflow_run.id | tostring) == $run_id and .workflow_run.head_sha == $sha
+                and (.workflow_run.repository_id | tostring) == $repository_id
+                and (.workflow_run.head_repository_id | tostring) == $repository_id) |
+              .id | select(type == "number" and . > 0)
+            ')" || { echo 'Expected one unexpired V8 artifact with a SHA-256 digest from the verified run' >&2; exit 1; }
+          printf 'source_sha=%s\nrun_id=%s\nartifact_id=%s\n' "$source_sha" "$RECOVER_RUN_ID" "$artifact_id" >> "$GITHUB_OUTPUT"
+
   build:
     needs: metadata
-    name: Build V8 ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
+    if: needs.metadata.outputs.artifact_id == ''
+    name: Build V8 ${{ needs.metadata.outputs.target }}
+    runs-on: ${{ needs.metadata.outputs.runner }}
     timeout-minutes: 240
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            target: aarch64-apple-darwin
-            platform: macos_arm64
-            cpu: arm64
-          - runner: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            platform: linux_amd64
-            cpu: x64
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
       - uses: ./.github/actions/prepare-bazel-ci
         with:
-          target: ${{ matrix.target }}
+          target: ${{ needs.metadata.outputs.target }}
           cache-scope: fork-v8
       - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ needs.metadata.outputs.target }}
       - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
         with:
           tool: nextest
-      - if: ${{ contains(matrix.target, 'linux-gnu') }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: '3.11'
-      - if: ${{ contains(matrix.target, 'linux-gnu') }}
-        name: Install GNU build tools
-        run: bash .github/scripts/install-gnu-build-tools.sh
+      - if: ${{ runner.os == 'Linux' }}
+        name: Install native musl smoke tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends build-essential musl-tools
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=$(command -v musl-gcc)" >> "$GITHUB_ENV"
+          echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS=-Clink-arg=-Wl,--no-dynamic-linker' >> "$GITHUB_ENV"
       - name: Build and stage V8 archive and Rust binding
         env:
-          TARGET: ${{ matrix.target }}
-          PLATFORM: ${{ matrix.platform }}
-          CPU: ${{ matrix.cpu }}
+          TARGET: ${{ needs.metadata.outputs.target }}
+          PLATFORM: ${{ needs.metadata.outputs.platform }}
         run: |
           set -euo pipefail
           python3 .github/scripts/rusty_v8_bazel.py stage-release-pair \
@@ -120,7 +216,7 @@ jobs:
             --output-dir "dist/$TARGET" --bazel-config fork-v8-local
       - name: Smoke test V8 sandbox and JavaScript execution
         env:
-          TARGET: ${{ matrix.target }}
+          TARGET: ${{ needs.metadata.outputs.target }}
         run: |
           set -euo pipefail
           archive="${GITHUB_WORKSPACE}/dist/${TARGET}/librusty_v8_ptrcomp_sandbox_release_${TARGET}.a.gz"
@@ -132,44 +228,65 @@ jobs:
               --run-ignored all --locked
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: fork-v8-${{ matrix.target }}
-          path: dist/${{ matrix.target }}/*
+          name: fork-v8-${{ needs.metadata.outputs.target }}
+          path: dist/${{ needs.metadata.outputs.target }}/*
           if-no-files-found: error
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/asm-v8-v') || inputs.publish == true
+    if: >-
+      ${{ always() && !cancelled() && needs.metadata.result == 'success' &&
+          (startsWith(github.ref, 'refs/tags/asm-v8-v') || inputs.publish == true) &&
+          (needs.build.result == 'success' || (needs.build.result == 'skipped' && needs.metadata.outputs.artifact_id != '')) }}
     needs: [metadata, build]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
       actions: read
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Download the selected V8 build artifact
+        if: needs.metadata.outputs.artifact_id == ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          name: fork-v8-${{ needs.metadata.outputs.target }}
           path: dist
-      - name: Publish only the six expected files
+          digest-mismatch: error
+      - name: Download the verified V8 recovery artifact
+        if: needs.metadata.outputs.artifact_id != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.metadata.outputs.artifact_id }}
+          path: dist
+          digest-mismatch: error
+          repository: trungnt13/asm
+          run-id: ${{ needs.metadata.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Publish only the selected target pair and manifest
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: asm-v8-v${{ needs.metadata.outputs.version }}-glibc2.35.2
+          TAG: ${{ needs.metadata.outputs.tag }}
+          TARGET: ${{ needs.metadata.outputs.target }}
           REF: ${{ github.ref }}
+          SOURCE_SHA: ${{ needs.metadata.outputs.source_sha }}
         run: |
           set -euo pipefail
-          assets=()
-          for target in aarch64-apple-darwin x86_64-unknown-linux-gnu; do
-            dir="dist/fork-v8-${target}"
-            for name in "librusty_v8_ptrcomp_sandbox_release_${target}.a.gz" \
-              "src_binding_ptrcomp_sandbox_release_${target}.rs" \
-              "rusty_v8_ptrcomp_sandbox_release_${target}.sha256"; do
-              test -s "$dir/$name" || { echo "Missing $name" >&2; exit 1; }
-              assets+=("$dir/$name")
-            done
-            (cd "$dir" && sha256sum --check "rusty_v8_ptrcomp_sandbox_release_${target}.sha256")
+          archive="librusty_v8_ptrcomp_sandbox_release_${TARGET}.a.gz"
+          binding="src_binding_ptrcomp_sandbox_release_${TARGET}.rs"
+          manifest="rusty_v8_ptrcomp_sandbox_release_${TARGET}.sha256"
+          [[ ! -L dist && "$(find dist -mindepth 1 -printf . | wc -c)" -eq 3 ]] || {
+            echo 'Expected exactly three flat V8 assets' >&2; exit 1;
+          }
+          for name in "$archive" "$binding" "$manifest"; do
+            [[ -f "dist/$name" && ! -L "dist/$name" && -s "dist/$name" ]] || {
+              echo "Expected nonempty regular V8 asset: $name" >&2; exit 1;
+            }
           done
-          [[ "$(find dist -type f | wc -l)" -eq 6 ]] || { echo 'Unexpected V8 assets' >&2; exit 1; }
+          (cd dist && sha256sum -- "$archive" "$binding" | cmp -s - "$manifest") || {
+            echo 'V8 manifest does not match the archive and binding' >&2; exit 1;
+          }
           if [[ "$REF" != refs/tags/* ]]; then
             gh api --method POST repos/trungnt13/asm/git/refs \
-              -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" >/dev/null
+              -f ref="refs/tags/$TAG" -f sha="$SOURCE_SHA" >/dev/null
           fi
-          gh release create "$TAG" "${assets[@]}" -R trungnt13/asm \
+          gh release create "$TAG" "dist/$archive" "dist/$binding" "dist/$manifest" -R trungnt13/asm \
             --verify-tag --title "$TAG" --notes 'Fork-built V8 dependencies for ASM.' \
             --latest=false

@@ -7,8 +7,18 @@ import sys
 from pathlib import Path
 
 
+def release_tag(target: str, version: str) -> str:
+    if target == "x86_64-unknown-linux-musl":
+        generation = "musl.1"
+    elif target == "aarch64-apple-darwin":
+        generation = "glibc2.35.2"
+    else:
+        raise ValueError(f"unsupported fork V8 target {target}")
+    return f"asm-v8-v{version}-{generation}"
+
+
 def verify(metadata: dict, directory: Path, target: str, version: str) -> None:
-    tag = f"asm-v8-v{version}-glibc2.35.2"
+    tag = release_tag(target, version)
     if (
         metadata.get("tag_name") != tag
         or metadata.get("draft") is not False
@@ -53,11 +63,14 @@ def verify(metadata: dict, directory: Path, target: str, version: str) -> None:
 
 if __name__ == "__main__":
     try:
-        verify(
-            json.loads(Path(sys.argv[1]).read_text()),
-            Path(sys.argv[2]),
-            sys.argv[3],
-            sys.argv[4],
-        )
+        if sys.argv[1] == "--tag":
+            print(release_tag(sys.argv[2], sys.argv[3]))
+        else:
+            verify(
+                json.loads(Path(sys.argv[1]).read_text()),
+                Path(sys.argv[2]),
+                sys.argv[3],
+                sys.argv[4],
+            )
     except (OSError, ValueError, KeyError, IndexError) as error:
         raise SystemExit(f"Fork V8 verification failed: {error}") from error
