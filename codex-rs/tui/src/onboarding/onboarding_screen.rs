@@ -1,7 +1,7 @@
 //! Onboarding screen orchestration and top-level keyboard routing.
 //!
 //! The onboarding flow is a small state machine over visible steps
-//! (welcome/auth/trust/GovCloud). This module decides which step receives key/paste
+//! (welcome/auth/trust). This module decides which step receives key/paste
 //! events and enforces flow-level safety rules that cut across individual step
 //! widgets. Folder-entry consent reuses this same event loop for startup and in-app navigation.
 //!
@@ -46,7 +46,6 @@ use crate::legacy_core::config::Config;
 use crate::onboarding::auth::AuthModeWidget;
 use crate::onboarding::auth::SignInOption;
 use crate::onboarding::auth::SignInState;
-use crate::onboarding::bedrock::BedrockState;
 use crate::onboarding::keys;
 use crate::onboarding::trust_directory::TrustDirectorySelection;
 use crate::onboarding::trust_directory::TrustDirectoryWidget;
@@ -75,10 +74,6 @@ enum Step {
     Auth(AuthModeWidget),
     GatewayDevice(GatewayOAuthPrompt),
     TrustDirectory(TrustDirectoryWidget),
-    GovCloudGuidance {
-        state: BedrockState,
-        acknowledged: bool,
-    },
 }
 
 pub(crate) trait KeyboardHandler {
@@ -109,8 +104,6 @@ pub(crate) struct OnboardingScreenArgs {
     pub show_trust_screen: bool,
     pub remote_project_trust: Option<RemoteProjectTrust>,
     pub show_login_screen: bool,
-    pub bedrock_setup_enabled: bool,
-    pub gcp_setup_enabled: bool,
     pub gateway_setup_enabled: bool,
     pub login_status: LoginStatus,
     pub app_server_target: crate::AppServerTarget,
@@ -139,8 +132,6 @@ impl OnboardingScreen {
             show_trust_screen,
             remote_project_trust,
             show_login_screen,
-            bedrock_setup_enabled,
-            gcp_setup_enabled,
             gateway_setup_enabled,
             login_status,
             app_server_target,
@@ -193,8 +184,6 @@ impl OnboardingScreen {
                     app_server_target,
                     app_server_request_handle,
                     auth_config,
-                    bedrock_setup_enabled,
-                    gcp_setup_enabled,
                     gateway_setup_enabled,
                     gateway: None,
                     animations_enabled: local_settings.tui.animations
@@ -278,7 +267,7 @@ impl OnboardingScreen {
         self.current_steps().into_iter().any(|step| match step {
             Step::Auth(widget) => widget.should_suppress_animations(),
             Step::GatewayDevice(_) => true,
-            Step::Welcome(_) | Step::TrustDirectory(_) | Step::GovCloudGuidance { .. } => false,
+            Step::Welcome(_) | Step::TrustDirectory(_) => false,
         })
     }
 
@@ -320,10 +309,7 @@ impl OnboardingScreen {
     pub(super) fn auth_widget_mut(&mut self) -> Option<&mut AuthModeWidget> {
         self.steps.iter_mut().find_map(|step| match step {
             Step::Auth(widget) => Some(widget),
-            Step::Welcome(_)
-            | Step::TrustDirectory(_)
-            | Step::GovCloudGuidance { .. }
-            | Step::GatewayDevice(_) => None,
+            Step::Welcome(_) | Step::TrustDirectory(_) | Step::GatewayDevice(_) => None,
         })
     }
 
@@ -369,7 +355,7 @@ impl KeyboardHandler for OnboardingScreen {
     /// Route key events to onboarding steps while preserving text-entry safety.
     ///
     /// OpenAI API-key entry suppresses printable quit bindings after typing
-    /// starts, while cloud provider fields suppress them from the first character.
+    /// starts, while gateway fields suppress them from the first character.
     /// Control/alt quit chords still work as emergency exits.
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         if key_event.kind == KeyEventKind::Release {
@@ -390,12 +376,7 @@ impl KeyboardHandler for OnboardingScreen {
                 // If the user cancels the auth menu, exit the app rather than
                 // leave the user at a prompt in an unauthed state.
                 self.should_exit = true;
-            } else if self.is_trust_step_active()
-                || self
-                    .steps
-                    .iter()
-                    .any(|step| matches!(step, Step::GovCloudGuidance { .. }))
-            {
+            } else if self.is_trust_step_active() {
                 self.should_exit = true;
             }
             self.is_done = true;
@@ -463,9 +444,7 @@ impl WidgetRef for &OnboardingScreen {
             match step {
                 Step::Welcome(widget) => widget.set_presentation(logo_presentation),
                 Step::Auth(widget) => widget.set_animations_suppressed(suppress_animations),
-                Step::TrustDirectory(_)
-                | Step::GovCloudGuidance { .. }
-                | Step::GatewayDevice(_) => {}
+                Step::TrustDirectory(_) | Step::GatewayDevice(_) => {}
             }
         }
 
@@ -540,18 +519,12 @@ impl KeyboardHandler for Step {
             Step::Welcome(widget) => widget.handle_key_event(key_event),
             Step::Auth(widget) => widget.handle_key_event(key_event),
             Step::TrustDirectory(widget) => widget.handle_key_event(key_event),
-            Step::GovCloudGuidance {
-                state,
-                acknowledged,
-            } => {
-                *acknowledged = state.handle_guidance_key_event(&key_event);
-            }
         }
     }
 
     fn handle_paste(&mut self, pasted: String) {
         match self {
-            Step::Welcome(_) | Step::GovCloudGuidance { .. } | Step::GatewayDevice(_) => {}
+            Step::Welcome(_) | Step::GatewayDevice(_) => {}
             Step::Auth(widget) => widget.handle_paste(pasted),
             Step::TrustDirectory(widget) => widget.handle_paste(pasted),
         }
@@ -565,13 +538,6 @@ impl StepStateProvider for Step {
             Step::Welcome(w) => w.get_step_state(),
             Step::Auth(w) => w.get_step_state(),
             Step::TrustDirectory(w) => w.get_step_state(),
-            Step::GovCloudGuidance { acknowledged, .. } => {
-                if *acknowledged {
-                    StepState::Complete
-                } else {
-                    StepState::InProgress
-                }
-            }
         }
     }
 }
@@ -589,7 +555,6 @@ impl WidgetRef for Step {
                 widget.render_ref(area, buf);
             }
             Step::GatewayDevice(prompt) => render_gateway_device_prompt(prompt, area, buf),
-            Step::GovCloudGuidance { state, .. } => state.render(area, buf, /*error*/ None),
         }
     }
 }
@@ -642,27 +607,6 @@ pub(crate) async fn run_gateway_device_login(
         crate::device_login::cancel(server).await;
     }
     result
-}
-
-pub(crate) async fn run_gov_cloud_guidance(tui: &mut Tui) -> Result<()> {
-    let screen = OnboardingScreen {
-        request_frame: tui.frame_requester(),
-        steps: vec![Step::GovCloudGuidance {
-            state: BedrockState::guidance(),
-            acknowledged: false,
-        }],
-        remote_trust_key: None,
-        is_done: false,
-        should_exit: false,
-    };
-    let result = run_onboarding_screen(
-        screen, /*app_server_request_handle*/ None, /*app_server*/ None, tui,
-    )
-    .await?;
-    if result.should_exit {
-        return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, StartupCancelled).into());
-    }
-    Ok(())
 }
 
 pub(crate) async fn run_onboarding_app(

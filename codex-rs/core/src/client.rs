@@ -139,7 +139,6 @@ use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::client_common::ResponseStream;
 use crate::client_common::SamplingStream;
-use crate::client_common::provider_allows_service_tier;
 use crate::context::BaseInstructionsFragment;
 use crate::context::ContextualUserFragment;
 use crate::cyber_access_program;
@@ -1547,11 +1546,7 @@ impl ModelClient {
             &prompt.output_schema,
             prompt.output_schema_strict,
         );
-        let service_tier = model_info
-            .service_tier_for_request(service_tier)
-            .filter(|tier| {
-                provider_allows_service_tier(self.state.provider.info(), model_info, tier)
-            });
+        let service_tier = model_info.service_tier_for_request(service_tier);
         let (model, service_tier) = fireworks::route(&model_info.slug, service_tier);
         // Project only the request copy. Reviewer history keeps native IDs for deduplication.
         if self.quotes_guardian_replies() {
@@ -3446,7 +3441,6 @@ where
             };
             let event = match event {
                 Ok(ResponseEvent::OutputItemDone(mut item)) => {
-                    provider.normalize_completed_output_item(&mut item);
                     // Assign IDs after interceptors, which may replace provider items.
                     // Reuse the added event's ID so tracing and the harness agree.
                     if item.id().is_none_or(|id| id.is_empty()) {

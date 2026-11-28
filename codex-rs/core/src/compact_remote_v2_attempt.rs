@@ -98,8 +98,8 @@ pub(super) async fn run_remote_compact_v2_attempt(
             let model_info = turn_context.model_info();
             let mut history = sess.clone_history().await;
             let input_goal_ids = UserGoalUpdate::message_ids(history.raw_items());
-            let tools_in_history = step_context.incremental_tools_feature().is_some()
-                && history.has_tool_declarations();
+            let tools_in_history =
+                step_context.supports_incremental_tools() && history.has_tool_declarations();
             let base_instructions = if tools_in_history {
                 BaseInstructions {
                     text: String::new(),
@@ -174,12 +174,11 @@ pub(super) async fn run_remote_compact_v2_attempt(
     let mut unavailable =
         rejected_audio::unavailable_file_audio(&input, sess.services.image_store.as_ref()).await;
     rejected_audio::project_compaction_audio(&mut input, &mut prompt_input_metadata, &unavailable);
-    let tools_in_history = step_context.incremental_tools_feature().is_some()
+    let tools_in_history = step_context.supports_incremental_tools()
         && input
             .iter()
             .any(|item| matches!(item.as_ref(), ResponseItem::AdditionalTools { .. }));
     let tool_router = &step_context.tool_router;
-    // Bedrock uses the same model names with an `openai.` prefix.
     let compaction_model = model_info
         .slug
         .strip_prefix("openai.")
@@ -321,7 +320,7 @@ pub(crate) async fn capture_background_input(
     window: (String, u64, codex_protocol::ContextWindowId),
 ) -> BackgroundCompactionInput {
     let base_instructions =
-        if step_context.incremental_tools_feature().is_some() && snapshot.has_tool_declarations() {
+        if step_context.supports_incremental_tools() && snapshot.has_tool_declarations() {
             BaseInstructions {
                 text: String::new(),
                 provenance: None,

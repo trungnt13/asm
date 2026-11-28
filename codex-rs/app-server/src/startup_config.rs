@@ -5,7 +5,6 @@ mod oauth;
 mod oauth_tests;
 
 use crate::config_manager::ConfigManager;
-use crate::request_processors::account_processor::clear_account_configuration;
 use crate::request_processors::account_processor::logout_configured_account;
 use crate::request_processors::config_errors::cloud_config_bundle_load_error;
 use crate::request_processors::config_errors::config_load_error;
@@ -145,7 +144,7 @@ async fn read_startup_config(
         .map_err(|error| startup_error(io::Error::other(error)))?;
         set_default_client_residency_requirement(config.enforce_residency.value());
         let config = logout_configured_account(manager, &auth, &config).await?;
-        clear_account_configuration(manager, &config).await?;
+        manager.clear_chatgpt_config_loader();
         manager
             .update_managed_config_loader(Arc::clone(&auth), &config)
             .await;

@@ -729,7 +729,15 @@ impl Features {
     }
 
     pub fn enable(&mut self, f: Feature) -> &mut Self {
-        self.enabled.insert(f);
+        if !matches!(
+            f,
+            Feature::BedrockSetupWizard
+                | Feature::GcpSetupWizard
+                | Feature::IncrementalToolsLegacy
+                | Feature::IncrementalToolsLegacyGcp
+        ) {
+            self.enabled.insert(f);
+        }
         self
     }
 
@@ -1966,14 +1974,14 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::IncrementalToolsLegacy,
         key: "incremental_tools_legacy",
-        stage: Stage::Stable,
-        default_enabled: true,
+        stage: Stage::Removed,
+        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::IncrementalToolsLegacyGcp,
         key: "incremental_tools_legacy_gcp",
-        stage: Stage::Stable,
-        default_enabled: true,
+        stage: Stage::Removed,
+        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::SuppressModelChangeAnnouncements,
@@ -2464,13 +2472,13 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::BedrockSetupWizard,
         key: "bedrock_setup_wizard",
-        stage: Stage::Stable,
-        default_enabled: true,
+        stage: Stage::Removed,
+        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::GcpSetupWizard,
         key: "gcp_setup_wizard",
-        stage: Stage::Stable,
+        stage: Stage::Removed,
         default_enabled: false,
     },
     FeatureSpec {

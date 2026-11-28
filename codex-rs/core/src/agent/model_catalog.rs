@@ -126,10 +126,8 @@ fn resolved_context_window_label(
                     .model_providers
                     .get(provider_id)
                     .and_then(|provider| {
-                        let unsupported = provider.is_amazon_bedrock()
-                            || provider.is_gcp()
-                            || (provider_id == GEMINI_PROVIDER_ID
-                                && provider.wire_api != WireApi::GeminiInteractions)
+                        let unsupported = (provider_id == GEMINI_PROVIDER_ID
+                            && provider.wire_api != WireApi::GeminiInteractions)
                             || config
                                 .config_layer_stack
                                 .required_model_provider()

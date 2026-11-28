@@ -10,8 +10,6 @@
 use codex_cloud_config::ConfigServerLoginMethod;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_core::config::Config;
-use codex_core::config::edit::ConfigEdit;
-use codex_core::config::edit::ConfigEditsBuilder;
 use codex_login::AuthKeyringBackendKind;
 use codex_login::AuthManager;
 use codex_login::AuthRouteConfig;
@@ -222,6 +220,7 @@ where
     F: std::future::Future<Output = std::io::Result<()>>,
 {
     let mut config = load_config_or_exit(cli_config_overrides.clone()).await;
+    require_supported_login_provider(&config);
     if !config
         .config_layer_stack
         .requirements_toml()
@@ -237,6 +236,7 @@ where
         config_server_login_method,
     )
     .await;
+    require_supported_login_provider(&config);
     let _login_log_guard = init_login_file_logging(&config);
     finish_login(result)
 }
@@ -450,6 +450,7 @@ pub async fn run_login_with_device_code_fallback_to_browser(
     client_id: Option<String>,
 ) -> ! {
     let config = load_config_or_exit(cli_config_overrides).await;
+    require_supported_login_provider(&config);
     let _login_log_guard = init_login_file_logging(&config);
     tracing::info!("starting login flow with device code fallback");
     if !config
@@ -519,6 +520,7 @@ pub async fn run_login_with_device_code_fallback_to_browser(
 
 pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
     let config = load_config_or_exit(cli_config_overrides).await;
+    require_supported_login_provider(&config);
 
     if is_workload_identity_selected() {
         match AuthManager::shared_from_config(&config, /*enable_codex_api_key_env*/ false).await {
@@ -565,13 +567,9 @@ pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
                 eprintln!("Logged in using personal access token");
                 std::process::exit(0);
             }
-            AuthMode::BedrockApiKey => {
-                eprintln!("Logged in using Amazon Bedrock API key");
-                std::process::exit(0);
-            }
-            AuthMode::BedrockAccessKeys => {
-                eprintln!("Logged in using Amazon Bedrock AWS access keys");
-                std::process::exit(0);
+            AuthMode::BedrockApiKey | AuthMode::BedrockAccessKeys => {
+                eprintln!("Stored Amazon Bedrock credentials are no longer supported.");
+                std::process::exit(1);
             }
         },
         Ok(None) => {
@@ -661,24 +659,6 @@ pub async fn run_logout(cli_config_overrides: CliConfigOverrides) -> ! {
     };
     drop(enterprise_guard);
 
-    let cleared_bedrock_config =
-        if let Some(paths) = ConfigEditsBuilder::bedrock_provider_config_paths_to_clear(&config) {
-            let edits = paths
-                .into_iter()
-                .map(|segments| ConfigEdit::ClearPath { segments });
-            if let Err(err) = ConfigEditsBuilder::for_config(&config)
-                .with_edits(edits)
-                .apply()
-                .await
-            {
-                eprintln!("Error clearing Amazon Bedrock configuration after logout: {err}");
-                std::process::exit(1);
-            }
-            true
-        } else {
-            false
-        };
-
     let config_server_logged_out = match config_server_logout {
         Ok(removed) => removed,
         Err(error) => {
@@ -686,7 +666,7 @@ pub async fn run_logout(cli_config_overrides: CliConfigOverrides) -> ! {
             std::process::exit(1);
         }
     };
-    if logged_out || config_server_logged_out || cleared_bedrock_config {
+    if logged_out || config_server_logged_out {
         eprintln!("Successfully logged out");
     } else {
         eprintln!("Not logged in");
@@ -696,6 +676,7 @@ pub async fn run_logout(cli_config_overrides: CliConfigOverrides) -> ! {
 
 async fn load_managed_login_config_or_exit(cli_config_overrides: CliConfigOverrides) -> Config {
     let mut config = load_config_or_exit(cli_config_overrides.clone()).await;
+    require_supported_login_provider(&config);
     if config
         .config_layer_stack
         .requirements_toml()
@@ -709,6 +690,7 @@ async fn load_managed_login_config_or_exit(cli_config_overrides: CliConfigOverri
     {
         finish_login(Err(error));
     }
+    require_supported_login_provider(&config);
     config
 }
 
@@ -733,6 +715,16 @@ async fn load_config_or_exit(cli_config_overrides: CliConfigOverrides) -> Config
             eprintln!("Error loading configuration: {e}");
             std::process::exit(1);
         }
+    }
+}
+
+fn require_supported_login_provider(config: &Config) {
+    if config.model_provider.is_removed_cloud_provider() {
+        eprintln!(
+            "ASM no longer supports the built-in `{}` provider. Select a supported model provider before signing in.",
+            config.model_provider_id
+        );
+        std::process::exit(1);
     }
 }
 

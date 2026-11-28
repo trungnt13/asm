@@ -386,12 +386,7 @@ pub(crate) fn validate_requested_service_tier(
     if service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
         || (!crate::external_runtime::is_native_model(&model.slug)
             && config.features.service_tier_enabled(service_tier)
-            && model.supports_service_tier(service_tier)
-            && crate::client_common::provider_allows_service_tier(
-                &config.model_provider,
-                model,
-                service_tier,
-            ))
+            && model.supports_service_tier(service_tier))
     {
         return Ok(());
     }

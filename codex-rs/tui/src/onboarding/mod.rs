@@ -1,10 +1,7 @@
 mod auth;
-mod bedrock;
 mod gateway;
 mod gateway_login;
 pub(crate) use gateway_login::authenticate_gateway;
-mod gcp;
-pub(crate) use bedrock::check_gov_cloud;
 mod keys;
 pub(crate) mod onboarding_screen;
 mod provider_setup;

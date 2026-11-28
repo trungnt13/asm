@@ -31,9 +31,6 @@ use codex_guardian_reviewer::guardian_output_contract_prompt;
 use codex_history::RolloutItem;
 use codex_model_provider::ProviderAuthContext;
 use codex_model_provider::create_model_provider;
-use codex_model_provider_info::AMAZON_BEDROCK_GPT_5_5_MODEL_ID;
-use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
-use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_models_manager::manager::StaticModelsManager;
 use codex_network_proxy::NetworkProxyConfig;
@@ -3813,43 +3810,6 @@ async fn guardian_review_session_config_isolates_parent_customizations() {
             )
             .render()
             .expect_text()
-        )
-    );
-}
-
-#[tokio::test]
-async fn guardian_review_session_config_keeps_bedrock_provider_for_bedrock_gpt_5_5() {
-    let mut parent_config = test_config().await;
-    parent_config.model_provider_id = AMAZON_BEDROCK_PROVIDER_ID.to_string();
-    parent_config.model_provider =
-        ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None);
-
-    let guardian_config = build_guardian_review_session_config_for_test(
-        crate::guardian::test_host::build_reviewer_config(&parent_config).expect("reviewer config"),
-        /*live_network_config*/ None,
-        AMAZON_BEDROCK_GPT_5_5_MODEL_ID,
-        Some(ReasoningEffort::Low),
-        ReasoningSummary::default(),
-        /*personality*/ None,
-        ResolvedModelMessages::bundled(),
-        ReviewRetrieval::ConversationHistory,
-    )
-    .expect("guardian config");
-
-    let mut expected_model_provider =
-        ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None);
-    expected_model_provider.request_max_retries = Some(1);
-    expected_model_provider.stream_max_retries = Some(1);
-    assert_eq!(
-        (
-            guardian_config.model,
-            guardian_config.model_provider_id,
-            guardian_config.model_provider,
-        ),
-        (
-            Some(AMAZON_BEDROCK_GPT_5_5_MODEL_ID.to_string()),
-            AMAZON_BEDROCK_PROVIDER_ID.to_string(),
-            expected_model_provider,
         )
     );
 }

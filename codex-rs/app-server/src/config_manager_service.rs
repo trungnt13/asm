@@ -4,7 +4,6 @@ use crate::config_manager::ConfigManager;
 use crate::otel_config::redact_otel_exporter_headers;
 use codex_app_server_protocol::Config as ApiConfig;
 use codex_app_server_protocol::ConfigBatchWriteParams;
-use codex_app_server_protocol::ConfigEdit as ApiConfigEdit;
 use codex_app_server_protocol::ConfigReadParams;
 use codex_app_server_protocol::ConfigReadResponse;
 use codex_app_server_protocol::ConfigValueWriteParams;
@@ -37,7 +36,6 @@ use codex_core::path_utils;
 use codex_core::path_utils::SymlinkWritePaths;
 use codex_core::path_utils::resolve_symlink_write_paths;
 use codex_core::path_utils::write_atomically;
-use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::protocol::AskForApproval;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use serde_json::Value as JsonValue;
@@ -53,8 +51,6 @@ use toml_edit::Item as TomlItem;
 mod credential_edits;
 #[path = "config_manager_service_model_providers.rs"]
 mod model_providers;
-#[path = "config_manager_service_provider_setup.rs"]
-mod provider_setup;
 #[path = "config_manager_service_provider_write.rs"]
 mod provider_write;
 
@@ -127,11 +123,6 @@ impl ConfigManagerError {
             _ => None,
         }
     }
-}
-
-pub(crate) struct PreparedProviderWrite {
-    edits: Vec<ApiConfigEdit>,
-    expected_version: String,
 }
 
 impl ConfigManager {
@@ -237,63 +228,6 @@ impl ConfigManager {
         let edits = vec![(params.key_path, params.value, params.merge_strategy)];
         self.apply_edits(params.file_path, params.expected_version, edits)
             .await
-    }
-
-    pub(crate) fn prepare_provider_config<'a>(
-        &self,
-        layers: &ConfigLayerStack,
-        provider_id: &'a str,
-        settings: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
-    ) -> Result<(PreparedProviderWrite, ModelProviderInfo), ConfigManagerError> {
-        let selection = match layers.required_model_provider() {
-            Some(required) if required == provider_id => None,
-            Some(required) => {
-                return Err(ConfigManagerError::write(
-                    ConfigWriteErrorCode::ConfigRequirementReadonly,
-                    format!(
-                        "Cannot select `{provider_id}` because requirements set `model_provider` to `{required}`."
-                    ),
-                ));
-            }
-            None => Some(("model_provider".to_owned(), Some(provider_id))),
-        };
-        let settings = settings
-            .into_iter()
-            .map(|(key, value)| (format!("model_providers.{provider_id}.{key}"), value));
-        let edits = selection
-            .into_iter()
-            .chain(settings)
-            .map(|(key_path, value)| ApiConfigEdit {
-                key_path,
-                value: value.into(),
-                merge_strategy: MergeStrategy::Replace,
-            })
-            .collect();
-        let user_path = self
-            .user_config_path()
-            .map_err(|err| ConfigManagerError::io("failed to resolve user config path", err))?;
-        provider_setup::preview(layers, &user_path, provider_id, edits)
-    }
-
-    pub(crate) async fn commit_provider_config(
-        &self,
-        write: PreparedProviderWrite,
-    ) -> Result<(), ConfigManagerError> {
-        let response = self
-            .batch_write(ConfigBatchWriteParams {
-                edits: write.edits,
-                file_path: None,
-                expected_version: Some(write.expected_version),
-                reload_user_config: false,
-            })
-            .await?;
-        if let Some(overridden) = response.overridden_metadata {
-            return Err(ConfigManagerError::write(
-                ConfigWriteErrorCode::ConfigLayerReadonly,
-                overridden.message,
-            ));
-        }
-        Ok(())
     }
 
     pub(crate) async fn batch_write(

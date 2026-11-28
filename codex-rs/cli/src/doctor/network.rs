@@ -49,11 +49,10 @@ pub(super) async fn checks(
     ));
     config_check.duration_ms = config_duration.as_millis().try_into().unwrap_or(u64::MAX);
     progress.finish("config", config_check.status);
-    let auth_manager = codex_login::AuthManager::shared_from_config(
-        &config, /*enable_codex_api_key_env*/ true,
-    )
-    .await
-    .ok();
+    let auth_manager = super::diagnostics_auth_manager(&config)
+        .await
+        .ok()
+        .flatten();
     let plan = super::provider_reachability_plan(&config);
     #[cfg(target_os = "macos")]
     let url = plan.endpoints.first().map(|endpoint| endpoint.url.clone());

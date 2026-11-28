@@ -27,7 +27,15 @@ pub(crate) fn config_load_error(err: &std::io::Error) -> JSONRPCErrorError {
         .map(|error| error as &(dyn std::error::Error + 'static));
     while let Some(source) = current {
         if let Some(provider_error) = source.downcast_ref::<ModelProviderError>() {
-            return model_provider_error(provider_error);
+            let mut rpc_error = model_provider_error(provider_error);
+            if err.kind() == std::io::ErrorKind::Unsupported
+                && let ModelProviderError::ModelProviderNotConfigured { model_provider } =
+                    provider_error
+            {
+                rpc_error.message =
+                    format!("Model provider `{model_provider}` is no longer supported in ASM.");
+            }
+            return rpc_error;
         }
         current = source.source();
     }

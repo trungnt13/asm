@@ -18,10 +18,7 @@ use codex_login::AuthKeyringBackendKind;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::auth::AgentIdentityAuthPolicy;
-use codex_login::auth::BedrockApiKeyAuth;
 use codex_login::default_client::originator;
-use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
-use codex_model_provider_info::AMAZON_BEDROCK_RUNTIME_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_model_provider_info::built_in_model_providers;
@@ -75,7 +72,6 @@ use core_test_support::responses::ev_completed_with_tokens;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_message_item_added;
 use core_test_support::responses::ev_output_text_delta;
-use core_test_support::responses::ev_reasoning_item;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_once_match;
@@ -217,138 +213,6 @@ async fn responses_request_preserves_flex_without_catalog_support_or_fast_mode()
             "configure_at_start={configure_at_start}",
         );
     }
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn responses_request_uses_implicit_default_tier_for_bedrock() -> anyhow::Result<()> {
-    skip_if_no_network!(Ok(()));
-    for provider_id in [
-        AMAZON_BEDROCK_PROVIDER_ID,
-        AMAZON_BEDROCK_RUNTIME_PROVIDER_ID,
-    ] {
-        let server = start_mock_server().await;
-        let response_mock = mount_sse_once(&server, sse(vec![ev_completed("done")])).await;
-        let test = test_codex()
-            .with_auth(CodexAuth::BedrockApiKey(BedrockApiKeyAuth {
-                api_key: "dummy".to_string(),
-                region: "us-east-1".to_string(),
-            }))
-            .with_model("gpt-5.4")
-            .with_model_info_override("gpt-5.4", |model| model.service_tiers.clear())
-            .with_config(move |config| {
-                let base_url = config.model_provider.base_url.clone();
-                config.model_provider_id = provider_id.to_string();
-                config.model_provider = built_in_model_providers(/*openai_base_url*/ None)
-                    .remove(provider_id)
-                    .expect("built-in Bedrock provider");
-                config.model_provider.base_url = base_url;
-                config.service_tier = Some("flex".to_string());
-            })
-            .build_with_auto_env(&server)
-            .await?;
-        test.submit_turn("hello").await?;
-
-        assert_eq!(
-            response_mock
-                .single_request()
-                .body_json()
-                .get("service_tier"),
-            None,
-            "provider={provider_id}",
-        );
-    }
-    Ok(())
-}
-
-#[test_case::test_case(AMAZON_BEDROCK_PROVIDER_ID; "mantle")]
-#[test_case::test_case(AMAZON_BEDROCK_RUNTIME_PROVIDER_ID; "runtime")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn bedrock_function_continuation_replays_assistant_commentary(
-    provider_id: &'static str,
-) -> anyhow::Result<()> {
-    skip_if_no_network!(Ok(()));
-    let server = start_mock_server().await;
-    let mut commentary = ev_assistant_message("msg_progress", "Checking.");
-    commentary["item"]["phase"] = json!("commentary");
-    commentary["item"]["content"] = json!([
-        {"type": "output_text", "text": "Checking.", "annotations": [], "logprobs": []},
-        {"type": "output_text", "text": "Source", "annotations": [{
-            "type": "url_citation", "url": "https://example.org", "title": "Source",
-            "start_index": 0, "end_index": 6
-        }]}
-    ]);
-    let mut expected_content = commentary["item"]["content"].clone();
-    if provider_id == AMAZON_BEDROCK_PROVIDER_ID {
-        expected_content[0]
-            .as_object_mut()
-            .expect("output text part")
-            .remove("annotations");
-    }
-    let reasoning = ev_reasoning_item("rs_plan", &[], &[]);
-    let mut answer = ev_assistant_message("msg_answer", "Checked.");
-    answer["item"]["phase"] = json!("final_answer");
-    answer["item"]["content"][0]["annotations"] = json!([]);
-    let mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                commentary,
-                reasoning.clone(),
-                ev_function_call(
-                    "plan",
-                    "update_plan",
-                    r#"{"plan":[{"step":"Check","status":"completed"}]}"#,
-                ),
-                ev_completed("tool"),
-            ]),
-            sse(vec![answer.clone(), ev_completed("answer")]),
-            sse(vec![ev_completed("next")]),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_auth(CodexAuth::BedrockApiKey(BedrockApiKeyAuth {
-            api_key: "dummy".to_string(),
-            region: "us-east-1".to_string(),
-        }))
-        .with_config(move |config| {
-            let base_url = config.model_provider.base_url.clone();
-            config.model_provider_id = provider_id.to_string();
-            config.model_provider = built_in_model_providers(/*openai_base_url*/ None)
-                .remove(provider_id)
-                .expect("built-in Bedrock provider");
-            config.model_provider.base_url = base_url;
-            config.model_provider.supports_websockets = false;
-            config.update_plan_enabled = true;
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    test.submit_text_turn("Check the plan.").await?;
-    test.submit_text_turn("Continue.").await?;
-
-    let requests = mock.requests();
-    assert_eq!(requests.len(), 3);
-    for request in &requests[1..] {
-        let input = request.input();
-        let progress = input
-            .iter()
-            .position(|item| item["id"] == "msg_progress")
-            .expect("replayed commentary");
-        assert_eq!(input[progress]["content"], expected_content);
-        assert_eq!(
-            input[progress + 1]["encrypted_content"],
-            reasoning["item"]["encrypted_content"]
-        );
-        assert_eq!(input[progress + 2]["type"], "function_call");
-        assert_eq!(input[progress + 3]["type"], "function_call_output");
-    }
-    let input = requests[2].input();
-    let replayed_answer = input
-        .iter()
-        .find(|item| item["id"] == "msg_answer")
-        .expect("replayed final answer");
-    assert_eq!(replayed_answer["content"], answer["item"]["content"]);
     Ok(())
 }
 
@@ -1020,30 +884,14 @@ fn write_auth_json(
     fake_jwt
 }
 
-pub(super) struct ProviderAuthCommandFixture {
+struct ProviderAuthCommandFixture {
     tempdir: TempDir,
     command: String,
     args: Vec<String>,
 }
 
 impl ProviderAuthCommandFixture {
-    /// Each thread can resolve credentials independently, including at the same time.
-    pub(super) fn fixed_token(token: &str) -> std::io::Result<Self> {
-        let tempdir = tempfile::tempdir()?;
-        std::fs::write(tempdir.path().join("token.txt"), token)?;
-        let (command, args): (&str, &[&str]) = if cfg!(windows) {
-            ("cmd.exe", &["/D", "/C", "type", "token.txt"])
-        } else {
-            ("cat", &["token.txt"])
-        };
-        Ok(Self {
-            tempdir,
-            command: command.to_owned(),
-            args: args.iter().copied().map(str::to_owned).collect(),
-        })
-    }
-
-    pub(super) fn new(tokens: &[&str]) -> std::io::Result<Self> {
+    fn new(tokens: &[&str]) -> std::io::Result<Self> {
         let tempdir = tempfile::tempdir()?;
         let tokens_file = tempdir.path().join("tokens.txt");
         let mut token_file_contents = String::new();
@@ -1059,7 +907,6 @@ impl ProviderAuthCommandFixture {
             codex_utils_cargo_bin::write_executable(
                 &script_path,
                 r#"#!/bin/sh
-printf '%s\n' "$GOOGLE_APPLICATION_CREDENTIALS" >> credential-env.txt
 if [ -f fail-until-401 ]; then
     exit 1
 fi
@@ -1079,9 +926,6 @@ mv tokens.next tokens.txt
                 &script_path,
                 r#"@echo off
 setlocal EnableExtensions DisableDelayedExpansion
-setlocal EnableDelayedExpansion
-echo(!GOOGLE_APPLICATION_CREDENTIALS!>> credential-env.txt
-endlocal
 if exist fail-until-401 exit /b 1
 
 set "first_line="
@@ -1111,7 +955,7 @@ move /y tokens.next tokens.txt >nul
         })
     }
 
-    pub(super) fn auth(&self) -> ModelProviderAuthInfo {
+    fn auth(&self) -> ModelProviderAuthInfo {
         ModelProviderAuthInfo {
             command: self.command.clone(),
             args: self.args.iter().cloned().map(Into::into).collect(),
@@ -1122,41 +966,6 @@ move /y tokens.next tokens.txt >nul
                 .expect("tempdir should be absolute"),
         }
     }
-}
-
-#[cfg(windows)]
-#[test]
-fn provider_auth_command_logs_credential_paths_with_cmd_metacharacters() -> anyhow::Result<()> {
-    let auth_fixture = ProviderAuthCommandFixture::new(&["first-token", "second-token"])?;
-    let credential_file = auth_fixture
-        .tempdir
-        .path()
-        .join("ADC (team)&^!credentials!%PATH%.json");
-
-    for (credential_path, token) in [
-        (Some(credential_file.as_os_str()), "first-token"),
-        (None, "second-token"),
-    ] {
-        let mut command = codex_utils_process::background_command(&auth_fixture.command);
-        command
-            .args(&auth_fixture.args)
-            .current_dir(auth_fixture.tempdir.path());
-        if let Some(credential_path) = credential_path {
-            command.env("GOOGLE_APPLICATION_CREDENTIALS", credential_path);
-        } else {
-            command.env_remove("GOOGLE_APPLICATION_CREDENTIALS");
-        }
-        let output = command.output()?;
-        assert!(output.status.success(), "{output:?}");
-        assert_eq!(String::from_utf8(output.stdout)?, format!("{token}\r\n"));
-        assert_eq!(output.stderr, Vec::<u8>::new());
-    }
-
-    assert_eq!(
-        std::fs::read_to_string(auth_fixture.tempdir.path().join("credential-env.txt"))?,
-        format!("{}\r\n\r\n", credential_file.display()),
-    );
-    Ok(())
 }
 
 fn non_zero_u64(value: u64) -> NonZeroU64 {
@@ -1868,45 +1677,6 @@ async fn provider_auth_command_recovers_after_initial_resolution_failure() {
         .await;
 
     send_provider_auth_request(&server, auth_fixture.auth()).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn amazon_bedrock_proxy_uses_command_auth_and_custom_headers() {
-    skip_if_no_network!();
-
-    let server = MockServer::start().await;
-    let response = mount_sse_once(
-        &server,
-        sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
-    )
-    .await;
-    let auth_fixture = ProviderAuthCommandFixture::new(&["command-token"]).unwrap();
-    let mut provider = built_in_model_providers(/*openai_base_url*/ None)
-        .remove(AMAZON_BEDROCK_PROVIDER_ID)
-        .expect("Amazon Bedrock provider should be built in");
-    provider.base_url = Some(format!("{}/v1", server.uri()));
-    provider.auth = Some(auth_fixture.auth());
-    provider.aws = None;
-    provider
-        .http_headers
-        .get_or_insert_default()
-        .insert("x-some-header".to_string(), "foo".into());
-
-    send_request_with_provider(provider).await;
-
-    let request = response.single_request();
-    assert_eq!(request.path(), "/v1/responses");
-    assert_eq!(
-        request.header("authorization"),
-        Some("Bearer command-token".to_string())
-    );
-    assert_eq!(request.header("x-amz-date"), None);
-    assert_eq!(request.header("x-some-header"), Some("foo".to_string()));
-    assert_eq!(
-        request.header("x-amzn-mantle-client-agent"),
-        Some("codex".to_string())
-    );
-    assert_eq!(request.body_json()["store"], false);
 }
 
 /// Issues one streamed Responses request through a provider configured with command-backed auth.

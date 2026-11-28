@@ -15,14 +15,13 @@ use codex_app_server_protocol::ProviderSettings;
 use codex_config::ConfigLayerEntry;
 use codex_config::ConfigLayerStack;
 use codex_config::LoaderOverrides;
-use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
-use codex_model_provider_info::AMAZON_BEDROCK_RUNTIME_PROVIDER_ID;
-use codex_model_provider_info::GCP_PROVIDER_ID;
 use codex_model_provider_info::LMSTUDIO_OSS_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OLLAMA_OSS_PROVIDER_ID;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_model_provider_info::built_in_model_providers;
+use codex_model_provider_info::is_removed_cloud_provider_id;
+use codex_model_provider_info::is_removed_cloud_provider_name;
 use codex_model_provider_info::uses_builtin_auth;
 use std::collections::BTreeSet;
 
@@ -67,6 +66,13 @@ impl ConfigManager {
         &self,
         params: ModelProviderDefaultSetParams,
     ) -> Result<ConfigWriteResponse, ConfigManagerError> {
+        let provider_id = params.provider_id;
+        if is_removed_cloud_provider_id(&provider_id) {
+            return Err(ConfigManagerError::write(
+                ConfigWriteErrorCode::ConfigValidationError,
+                format!("Model provider `{provider_id}` is not supported in ASM."),
+            ));
+        }
         let layers = self
             .load_thread_agnostic_config()
             .await
@@ -78,13 +84,21 @@ impl ConfigManager {
                     "The user configuration is not writable.",
                 )
             })?;
-        let provider_id = params.provider_id;
+        let effective = layers.effective_config();
+        let configured = effective
+            .get("model_providers")
+            .and_then(|providers| providers.get(&provider_id));
+        if string_field(configured, "name")
+            .as_deref()
+            .is_some_and(is_removed_cloud_provider_name)
+        {
+            return Err(ConfigManagerError::write(
+                ConfigWriteErrorCode::ConfigValidationError,
+                format!("Model provider `{provider_id}` is not supported in ASM."),
+            ));
+        }
         if !built_in_model_providers(/*openai_base_url*/ None).contains_key(&provider_id)
-            && layers
-                .effective_config()
-                .get("model_providers")
-                .and_then(|providers| providers.get(&provider_id))
-                .is_none()
+            && configured.is_none()
         {
             return Err(ConfigManagerError::write(
                 ConfigWriteErrorCode::ConfigValidationError,
@@ -135,9 +149,19 @@ impl ConfigManager {
             });
         let ids: BTreeSet<_> = configured
             .into_iter()
-            .flat_map(|table| table.keys().map(String::as_str))
+            .flat_map(|table| table.iter())
+            .filter(|(_, value)| {
+                !value
+                    .get("name")
+                    .and_then(TomlValue::as_str)
+                    .is_some_and(is_removed_cloud_provider_name)
+            })
+            .map(|(id, _)| id.as_str())
             // Local OSS built-ins cannot have configured provider tables.
-            .filter(|id| !matches!(*id, OLLAMA_OSS_PROVIDER_ID | LMSTUDIO_OSS_PROVIDER_ID))
+            .filter(|id| {
+                !matches!(*id, OLLAMA_OSS_PROVIDER_ID | LMSTUDIO_OSS_PROVIDER_ID)
+                    && !is_removed_cloud_provider_id(id)
+            })
             .chain([OPENAI_PROVIDER_ID])
             .collect();
         let data = ids
@@ -170,7 +194,6 @@ pub(super) fn summarize_provider(
     writable_user_layer: Option<&ConfigLayerEntry>,
 ) -> ModelProviderSummary {
     let display_name = match builtin {
-        Some(_) if id == AMAZON_BEDROCK_PROVIDER_ID => "Amazon Bedrock Mantle",
         Some(provider) => &provider.name,
         None => config.and_then(|c| c.get("name")?.as_str()).unwrap_or(id),
     };
@@ -187,18 +210,6 @@ pub(super) fn summarize_provider(
     .map(str::to_owned);
     let settings = match id {
         OPENAI_PROVIDER_ID => ProviderSettings::OpenAi,
-        AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID => {
-            let aws = config.and_then(|provider| provider.get("aws"));
-            ProviderSettings::Bedrock {
-                profile: string_field(aws, "profile"),
-                region: string_field(aws, "region"),
-            }
-        }
-        GCP_PROVIDER_ID => ProviderSettings::Gcp {
-            project_id: string_field(config, "project_id"),
-            location: string_field(config, "location"),
-            credential_file: string_field(config, "credential_file"),
-        },
         _ => {
             let env_key = string_field(config, "env_key");
             let auth = if external_auth {
@@ -211,11 +222,12 @@ pub(super) fn summarize_provider(
             ProviderSettings::CustomGateway { auth }
         }
     };
-    let can_edit = supported_fields(id, config, builtin).iter().any(|&field| {
-        (field == "name" || !requires_rename)
-            && (field != "env_key" || !external_auth)
-            && field_is_writable(layers, writable_user_layer, id, field)
-    });
+    let can_edit = builtin.is_none()
+        && ["name", "base_url", "env_key"].into_iter().any(|field| {
+            (field == "name" || !requires_rename)
+                && (field != "env_key" || !external_auth)
+                && field_is_writable(layers, writable_user_layer, id, field)
+        });
     ModelProviderSummary {
         id: id.to_owned(),
         name: display_name.to_owned(),
@@ -232,28 +244,6 @@ pub(super) fn writable_user_layer<'a>(
     layers
         .get_active_user_layer()
         .filter(|user| !user.is_disabled() && !overrides.ignore_user_config)
-}
-
-pub(super) fn supported_fields(
-    id: &str,
-    config: Option<&TomlValue>,
-    builtin: Option<&ModelProviderInfo>,
-) -> &'static [&'static str] {
-    let aws_config = config.and_then(|config| config.get("aws"));
-    match (builtin, id) {
-        (Some(_), AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID) => {
-            if config.is_some_and(|config| config.get("auth").is_some()) {
-                &[]
-            } else if aws_config.is_some_and(|aws| aws.get("credential_export").is_some()) {
-                &["aws.region"]
-            } else {
-                &["aws.profile", "aws.region"]
-            }
-        }
-        (Some(_), GCP_PROVIDER_ID) => &["project_id", "location", "credential_file"],
-        (Some(_), _) => &[],
-        (None, _) => &["name", "base_url", "env_key"],
-    }
 }
 
 pub(super) fn field_is_writable(
@@ -281,11 +271,7 @@ pub(super) fn field_is_writable(
                 .config
                 .get("model_providers")
                 .and_then(|providers| providers.get(id))
-                .and_then(|provider| {
-                    field
-                        .split('.')
-                        .try_fold(provider, |value, key| value.get(key))
-                })
+                .and_then(|provider| provider.get(field))
                 .is_some()
     })
 }

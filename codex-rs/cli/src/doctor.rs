@@ -52,6 +52,7 @@ use codex_install_context::InstallMethod;
 use codex_install_context::StandalonePlatform;
 use codex_login::AuthDotJson;
 use codex_login::AuthManager;
+use codex_login::AuthManagerInitializationError;
 use codex_login::CODEX_ACCESS_TOKEN_ENV_VAR;
 use codex_login::CODEX_API_KEY_ENV_VAR;
 use codex_login::CodexAuth;
@@ -410,9 +411,8 @@ async fn build_report(
                 filesystem_paths::check(config),
             )
             .await;
-            let auth_manager_result =
-                AuthManager::shared_from_config(config, /*enable_codex_api_key_env*/ true).await;
-            let auth_manager = auth_manager_result.as_ref().ok().cloned();
+            let auth_manager_result = diagnostics_auth_manager(config).await;
+            let auth_manager = auth_manager_result.as_ref().ok().cloned().flatten();
             let reachability_plan = provider_reachability_plan(config);
             #[cfg(target_os = "macos")]
             let reachability_url = reachability_plan
@@ -1227,7 +1227,29 @@ fn config_toml_details(config: &Config, details: &mut Vec<String>) {
     }
 }
 
+async fn diagnostics_auth_manager(
+    config: &Config,
+) -> Result<Option<Arc<AuthManager>>, AuthManagerInitializationError> {
+    if config.model_provider.is_removed_cloud_provider() {
+        return Ok(None);
+    }
+    AuthManager::shared_from_config(config, /*enable_codex_api_key_env*/ true)
+        .await
+        .map(Some)
+}
+
 fn auth_check(config: &Config) -> DoctorCheck {
+    if config.model_provider.is_removed_cloud_provider() {
+        return DoctorCheck::new(
+            "auth.credentials",
+            "auth",
+            CheckStatus::Fail,
+            "the active built-in provider is no longer supported by ASM",
+        )
+        .detail(format!("model provider: {}", config.model_provider_id))
+        .remediation("Select a supported model provider.");
+    }
+
     let mut details = Vec::new();
     let auth_path = config.codex_home.join("auth.json");
     details.push(format!(
@@ -1485,22 +1507,9 @@ fn stored_auth_issues(
                 issues.push("personal access token auth is missing a personal access token");
             }
         }
-        AuthMode::BedrockApiKey => {
-            if auth.bedrock_api_key.is_none() {
-                issues.push("Bedrock API key auth is missing a Bedrock API key");
-            }
+        AuthMode::BedrockApiKey | AuthMode::BedrockAccessKeys => {
+            issues.push("stored Amazon Bedrock credentials are no longer supported");
         }
-        AuthMode::BedrockAccessKeys => match auth.bedrock_access_keys.as_ref() {
-            Some(access_keys) => {
-                if access_keys.access_key_id.trim().is_empty() {
-                    issues.push("Bedrock access key auth is missing an access key ID");
-                }
-                if access_keys.secret_access_key.trim().is_empty() {
-                    issues.push("Bedrock access key auth is missing a secret access key");
-                }
-            }
-            None => issues.push("Bedrock access key auth is missing AWS access keys"),
-        },
     }
     issues
 }
@@ -2656,6 +2665,14 @@ impl ProviderAuthReachabilityMode {
 }
 
 fn provider_reachability_plan(config: &Config) -> ReachabilityPlan {
+    if config.model_provider.is_removed_cloud_provider() {
+        return ReachabilityPlan {
+            description: "retired built-in provider".to_string(),
+            endpoints: Vec::new(),
+            http_client_factory: config.http_client_factory(),
+        };
+    }
+
     let query_params = config.model_provider.query_params.as_ref().map(|params| {
         params
             .iter()
@@ -2682,7 +2699,6 @@ fn provider_reachability_plan(config: &Config) -> ReachabilityPlan {
         &config.model_provider.name,
         config.model_provider.base_url.as_deref(),
         query_params.as_ref(),
-        config.model_provider.is_amazon_bedrock(),
         &config.chatgpt_base_url,
     );
     plan.http_client_factory = config.http_client_factory();
@@ -2696,7 +2712,6 @@ fn default_reachability_plan() -> ReachabilityPlan {
         "OpenAI",
         /*provider_base_url*/ None,
         /*provider_query_params*/ None,
-        /*is_amazon_bedrock*/ false,
         "https://chatgpt.com/backend-api/",
     )
 }
@@ -2722,15 +2737,15 @@ fn provider_auth_reachability_mode_from_auth(
         return ProviderAuthReachabilityMode::Chatgpt;
     }
     match stored_auth.map(stored_auth_mode_value) {
-        Some(AuthMode::ApiKey | AuthMode::BedrockApiKey | AuthMode::BedrockAccessKeys) => {
-            ProviderAuthReachabilityMode::ApiKey
-        }
+        Some(AuthMode::ApiKey) => ProviderAuthReachabilityMode::ApiKey,
         Some(
             AuthMode::Chatgpt
             | AuthMode::ChatgptAuthTokens
             | AuthMode::Headers
             | AuthMode::AgentIdentity
-            | AuthMode::PersonalAccessToken,
+            | AuthMode::PersonalAccessToken
+            | AuthMode::BedrockApiKey
+            | AuthMode::BedrockAccessKeys,
         )
         | None => ProviderAuthReachabilityMode::Chatgpt,
     }
@@ -2742,7 +2757,6 @@ fn provider_reachability_plan_from_parts(
     provider_name: &str,
     provider_base_url: Option<&str>,
     provider_query_params: Option<&HashMap<String, String>>,
-    is_amazon_bedrock: bool,
     chatgpt_base_url: &str,
 ) -> ReachabilityPlan {
     let provider_route_probe_url = provider_base_url
@@ -2750,7 +2764,7 @@ fn provider_reachability_plan_from_parts(
             (mode == ProviderAuthReachabilityMode::ApiKey).then_some("https://api.openai.com/v1")
         })
         .and_then(|url| {
-            should_probe_models_route(provider_name, url, is_amazon_bedrock)
+            (!is_azure_responses_provider(provider_name, Some(url)))
                 .then(|| provider_url_for_path(url, "models", provider_query_params))
         });
     let endpoints = match (mode, provider_base_url) {
@@ -2777,10 +2791,6 @@ fn provider_reachability_plan_from_parts(
         endpoints,
         http_client_factory: HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
     }
-}
-
-fn should_probe_models_route(provider_name: &str, base_url: &str, is_amazon_bedrock: bool) -> bool {
-    !is_amazon_bedrock && !is_azure_responses_provider(provider_name, Some(base_url))
 }
 
 fn provider_url_for_path(
@@ -3941,7 +3951,6 @@ mod tests {
                 "azure",
                 Some("https://example.openai.azure.com/openai/v1"),
                 /*provider_query_params*/ None,
-                /*is_amazon_bedrock*/ false,
                 "https://chatgpt.com/backend-api/",
             ),
             ReachabilityPlan {
@@ -3972,7 +3981,6 @@ mod tests {
                     "Custom",
                     Some("https://example.com/openai/v1/"),
                     Some(&query_params),
-                    /*is_amazon_bedrock*/ false,
                     "https://chatgpt.com/backend-api/",
                 ),
                 ReachabilityPlan {
@@ -3996,21 +4004,6 @@ mod tests {
     }
 
     #[test]
-    fn provider_reachability_skips_route_probe_for_bedrock() {
-        let plan = provider_reachability_plan_from_parts(
-            ProviderAuthReachabilityMode::NotRequired,
-            "amazon-bedrock",
-            "Amazon Bedrock",
-            Some("https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1"),
-            /*provider_query_params*/ None,
-            /*is_amazon_bedrock*/ true,
-            "https://chatgpt.com/backend-api/",
-        );
-
-        assert_eq!(plan.endpoints[0].route_probe_url, None);
-    }
-
-    #[test]
     fn provider_reachability_api_key_does_not_require_chatgpt() {
         let plan = provider_reachability_plan_from_parts(
             ProviderAuthReachabilityMode::ApiKey,
@@ -4018,7 +4011,6 @@ mod tests {
             "OpenAI",
             /*provider_base_url*/ None,
             /*provider_query_params*/ None,
-            /*is_amazon_bedrock*/ false,
             "https://chatgpt.com/backend-api/",
         );
 
@@ -4084,7 +4076,6 @@ mod tests {
             "OpenAI",
             Some(&format!("http://{addr}/xxxx")),
             /*provider_query_params*/ None,
-            /*is_amazon_bedrock*/ false,
             "https://chatgpt.com/backend-api/",
         );
 
@@ -4125,7 +4116,6 @@ mod tests {
             "OpenAI",
             Some(&format!("http://{addr}/v1")),
             /*provider_query_params*/ None,
-            /*is_amazon_bedrock*/ false,
             "https://chatgpt.com/backend-api/",
         );
 

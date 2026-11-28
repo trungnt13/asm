@@ -108,10 +108,6 @@ pub const AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID: &str = "openai.gpt-5.6-luna";
 pub const AMAZON_BEDROCK_RUNTIME_GLOBAL_GPT_5_6_TERRA_MODEL_ID: &str =
     "global.openai.gpt-5.6-terra";
 pub const AMAZON_BEDROCK_RUNTIME_GLOBAL_GPT_5_6_LUNA_MODEL_ID: &str = "global.openai.gpt-5.6-luna";
-pub const AMAZON_BEDROCK_DEFAULT_BASE_URL: &str =
-    "https://bedrock-mantle.us-east-1.api.aws/openai/v1";
-const AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_HEADER: &str = "x-amzn-mantle-client-agent";
-const AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_VALUE: &str = "codex";
 const CHAT_WIRE_API_REMOVED_ERROR: &str = "`wire_api = \"chat\"` is no longer supported.\nHow to fix: set `wire_api = \"responses\"` in your provider config.\nMore info: https://github.com/openai/codex/discussions/7782";
 pub const LEGACY_OLLAMA_CHAT_PROVIDER_ID: &str = "ollama-chat";
 pub const OLLAMA_CHAT_PROVIDER_REMOVED_ERROR: &str = "`ollama-chat` is no longer supported.\nHow to fix: replace `ollama-chat` with `ollama` in `model_provider`, `oss_provider`, or `--local-provider`.\nMore info: https://github.com/openai/codex/discussions/7782";
@@ -731,90 +727,6 @@ other non-default provider fields are not supported"
         }
     }
 
-    pub fn create_amazon_bedrock_provider(
-        aws: Option<ModelProviderAwsAuthInfo>,
-    ) -> ModelProviderInfo {
-        ModelProviderInfo {
-            name: AMAZON_BEDROCK_PROVIDER_NAME.into(),
-            // The runtime provider derives the regional Mantle endpoint when
-            // this is unset. A configured value is therefore unambiguously an
-            // endpoint override.
-            base_url: None,
-            model_catalog_url: None,
-            env_key: None,
-            env_key_instructions: None,
-            experimental_bearer_token: None,
-            auth: None,
-            gateway_oauth: None,
-            aws: Some(aws.unwrap_or(ModelProviderAwsAuthInfo {
-                profile: None,
-                region: None,
-                credential_export: None,
-                auth_refresh: None,
-            })),
-            wire_api: WireApi::Responses,
-            query_params: None,
-            http_headers: Some(HashMap::from([(
-                AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_HEADER.to_string(),
-                AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_VALUE.into(),
-            )])),
-            env_http_headers: None,
-            request_max_retries: None,
-            stream_max_retries: None,
-            stream_idle_timeout_ms: None,
-            websocket_connect_timeout_ms: None,
-            requires_openai_auth: false,
-            supports_websockets: false,
-            supports_standalone_web_search: false,
-            standalone_web_search_provider: None,
-            capabilities: None,
-            project_id: None,
-            location: None,
-            credential_file: None,
-            include_internal_metadata: false,
-        }
-    }
-
-    pub fn create_amazon_bedrock_runtime_provider(
-        aws: Option<ModelProviderAwsAuthInfo>,
-    ) -> ModelProviderInfo {
-        let mut provider = Self::create_amazon_bedrock_provider(aws);
-        provider.name = AMAZON_BEDROCK_RUNTIME_PROVIDER_NAME.into();
-        provider
-    }
-
-    pub fn create_gcp_provider() -> ModelProviderInfo {
-        ModelProviderInfo {
-            name: GCP_PROVIDER_NAME.into(),
-            base_url: None,
-            model_catalog_url: None,
-            env_key: None,
-            env_key_instructions: None,
-            experimental_bearer_token: None,
-            // Config loading supplies default command auth after resolving its working directory.
-            auth: None,
-            gateway_oauth: None,
-            aws: None,
-            capabilities: None,
-            wire_api: WireApi::Responses,
-            query_params: None,
-            http_headers: None,
-            env_http_headers: None,
-            request_max_retries: None,
-            stream_max_retries: None,
-            stream_idle_timeout_ms: None,
-            websocket_connect_timeout_ms: None,
-            requires_openai_auth: false,
-            supports_websockets: false,
-            supports_standalone_web_search: false,
-            standalone_web_search_provider: None,
-            project_id: None,
-            location: None,
-            credential_file: None,
-            include_internal_metadata: false,
-        }
-    }
-
     /// Whether explicit Cyber programs may be selected and forwarded to this provider.
     /// Use the configured provider ID, never its user-controlled display name, for defaults.
     pub fn supports_cyber_access_programs(&self, provider_id: &str) -> bool {
@@ -844,6 +756,10 @@ other non-default provider fields are not supported"
                         && !value.trim().is_empty()
                 })
             })
+    }
+
+    pub fn is_removed_cloud_provider(&self) -> bool {
+        is_removed_cloud_provider_name(&self.name)
     }
 
     pub fn is_amazon_bedrock(&self) -> bool {
@@ -881,27 +797,30 @@ pub fn uses_builtin_auth(name: &str) -> bool {
     )
 }
 
+/// Identifies retired built-in provider IDs that must not become custom routes.
+pub fn is_removed_cloud_provider_id(id: &str) -> bool {
+    matches!(
+        id,
+        AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID | GCP_PROVIDER_ID
+    )
+}
+
+/// Identifies old display names that previously selected a native cloud route.
+pub fn is_removed_cloud_provider_name(name: &str) -> bool {
+    matches!(
+        name,
+        AMAZON_BEDROCK_PROVIDER_NAME | AMAZON_BEDROCK_RUNTIME_PROVIDER_NAME | GCP_PROVIDER_NAME
+    )
+}
+
 /// Built-in default provider list.
 pub fn built_in_model_providers(
     openai_base_url: Option<String>,
 ) -> HashMap<String, ModelProviderInfo> {
     use ModelProviderInfo as P;
     let openai_provider = P::create_openai_provider(openai_base_url);
-    let amazon_bedrock_provider = P::create_amazon_bedrock_provider(/*aws*/ None);
-    let amazon_bedrock_runtime_provider =
-        P::create_amazon_bedrock_runtime_provider(/*aws*/ None);
-    let gcp_provider = P::create_gcp_provider();
-
-    // Bundle OpenAI, supported cloud-hosted OpenAI backends, and local OSS providers.
-    // Other compatible providers can be added through `model_providers` in config.toml.
     [
         (OPENAI_PROVIDER_ID, openai_provider),
-        (AMAZON_BEDROCK_PROVIDER_ID, amazon_bedrock_provider),
-        (GCP_PROVIDER_ID, gcp_provider),
-        (
-            AMAZON_BEDROCK_RUNTIME_PROVIDER_ID,
-            amazon_bedrock_runtime_provider,
-        ),
         (
             OLLAMA_OSS_PROVIDER_ID,
             create_oss_provider(DEFAULT_OLLAMA_PORT, WireApi::Responses),
@@ -919,14 +838,23 @@ pub fn built_in_model_providers(
 /// Merge configured providers into the built-in provider catalog.
 ///
 /// Configured providers extend the built-in set. Built-in providers are not
-/// generally overridable. OpenAI allows a catalog URL override, while the
-/// cloud-hosted OpenAI providers allow a limited
-/// set of endpoint, authentication, header, and cloud-specific overrides.
+/// generally overridable. OpenAI allows a catalog URL override. Legacy cloud
+/// provider tables remain readable but do not register runnable providers.
 pub fn merge_configured_model_providers(
     mut model_providers: HashMap<String, ModelProviderInfo>,
     configured_model_providers: HashMap<String, ModelProviderInfo>,
 ) -> Result<HashMap<String, ModelProviderInfo>, String> {
     for (key, mut provider) in configured_model_providers {
+        if is_removed_cloud_provider_id(&key) {
+            continue;
+        }
+        if provider.is_removed_cloud_provider() {
+            model_providers.entry(key).or_insert(ModelProviderInfo {
+                name: provider.name,
+                ..Default::default()
+            });
+            continue;
+        }
         if provider.wire_api == WireApi::GeminiInteractions {
             // Managed provider definitions enter after ordinary TOML validation.
             if model_providers.contains_key(&key) {
@@ -959,32 +887,6 @@ pub fn merge_configured_model_providers(
                 }
                 built_in_provider.model_catalog_url = Some(catalog_url);
             }
-        } else if matches!(
-            key.as_str(),
-            AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID
-        ) {
-            provider
-                .validate_bedrock_override()
-                .map_err(|message| format!("model_providers.{key} {message}"))?;
-            let base_url_override = provider.base_url.take();
-            let auth_override = provider.auth.take();
-            let aws_override = provider.aws.take();
-            let http_headers_override = provider.http_headers.take();
-            if let Some(built_in_provider) = model_providers.get_mut(&key) {
-                built_in_provider.base_url = base_url_override;
-                built_in_provider.auth = auth_override;
-                if let Some(aws_override) = aws_override {
-                    built_in_provider.aws = Some(aws_override);
-                }
-                if let Some(http_headers_override) = http_headers_override {
-                    built_in_provider
-                        .http_headers
-                        .get_or_insert_default()
-                        .extend(http_headers_override);
-                }
-            }
-        } else if key == GCP_PROVIDER_ID {
-            merge_gcp_provider_overrides(model_providers.get_mut(&key), provider)?;
         } else {
             model_providers.entry(key.clone()).or_insert(provider);
         }
@@ -996,48 +898,6 @@ pub fn merge_configured_model_providers(
     }
 
     Ok(model_providers)
-}
-
-/// Validates GCP overrides and applies them when the built-in provider is present.
-pub fn merge_gcp_provider_overrides(
-    built_in: Option<&mut ModelProviderInfo>,
-    mut overrides: ModelProviderInfo,
-) -> Result<(), String> {
-    overrides
-        .validate_gcp_credential_file()
-        .and_then(|()| overrides.validate())
-        .map_err(|message| format!("model_providers.{GCP_PROVIDER_ID} {message}"))?;
-    let base_url = overrides.base_url.take();
-    let auth = overrides.auth.take();
-    let credential_file = overrides.credential_file.take();
-    let http_headers = overrides.http_headers.take();
-    let project_id = overrides.project_id.take();
-    let location = overrides.location.take();
-    if overrides != ModelProviderInfo::default() {
-        return Err(format!(
-            "model_providers.{GCP_PROVIDER_ID} only supports changing \
-`base_url`, `auth`, `http_headers`, `project_id`, `location`, and `credential_file`; other non-default provider fields are not supported"
-        ));
-    }
-
-    if let Some(provider) = built_in {
-        provider.project_id = project_id;
-        provider.location = location;
-        provider.credential_file = credential_file;
-        if let Some(base_url) = base_url {
-            provider.base_url = Some(base_url);
-        }
-        if let Some(auth) = auth {
-            provider.auth = Some(auth);
-        }
-        if let Some(http_headers) = http_headers {
-            provider
-                .http_headers
-                .get_or_insert_default()
-                .extend(http_headers);
-        }
-    }
-    Ok(())
 }
 
 pub fn create_oss_provider(default_provider_port: u16, wire_api: WireApi) -> ModelProviderInfo {

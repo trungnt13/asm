@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -32,8 +31,7 @@ use http::HeaderValue;
 
 use crate::bearer_auth_provider::BearerAuthProvider;
 
-const BEDROCK_API_KEY_UNSUPPORTED_MESSAGE: &str =
-    "Bedrock API key auth is only supported by the Amazon Bedrock model provider";
+pub(crate) const BEDROCK_AUTH_UNSUPPORTED_MESSAGE: &str = "Saved Amazon Bedrock credentials are no longer supported. Log out and sign in with a supported method.";
 
 /// Credential ownership and optional OpenAI runtime auth for one harness/thread context.
 /// Publish these together so auxiliary clients cannot select another thread's credentials.
@@ -305,6 +303,16 @@ impl AuthProvider for AuthManagerAuthProvider {
     }
 }
 
+struct UnsupportedBedrockAuthProvider;
+
+impl AuthProvider for UnsupportedBedrockAuthProvider {
+    fn add_auth_headers(&self, _headers: &mut HeaderMap) -> Result<(), AuthError> {
+        Err(AuthError::Build(
+            BEDROCK_AUTH_UNSUPPORTED_MESSAGE.to_string(),
+        ))
+    }
+}
+
 // Some providers are meant to send no auth headers. Examples include local OSS
 // providers and custom test providers with `requires_openai_auth = false`.
 #[derive(Clone, Debug)]
@@ -328,24 +336,11 @@ pub(crate) fn auth_manager_for_provider(
     provider: &ModelProviderInfo,
 ) -> Option<Arc<AuthManager>> {
     match provider.auth.clone() {
-        Some(config) => {
-            if provider.is_gcp() {
-                let mut env = HashMap::new();
-                if let Some(credential_file) = &provider.credential_file {
-                    env.insert(
-                        "GOOGLE_APPLICATION_CREDENTIALS".to_string(),
-                        credential_file.as_os_str().to_os_string(),
-                    );
-                }
-                Some(AuthManager::external_bearer_only_with_env(config, env))
-            } else {
-                Some(match auth_manager {
-                    Some(manager) => crate::shared_state::process_shared_state()
-                        .command_credentials(&config, &manager.runtime_config()),
-                    None => AuthManager::external_bearer_only(config),
-                })
-            }
-        }
+        Some(config) => Some(match auth_manager {
+            Some(manager) => crate::shared_state::process_shared_state()
+                .command_credentials(&config, &manager.runtime_config()),
+            None => AuthManager::external_bearer_only(config),
+        }),
         None if provider.wire_api != codex_model_provider_info::WireApi::Responses => None,
         None => auth_manager,
     }
@@ -368,7 +363,7 @@ pub(crate) fn resolve_provider_auth(
         Some(CodexAuth::BedrockApiKey(_) | CodexAuth::BedrockAccessKeys(_))
     ) {
         return Err(CodexErr::UnsupportedOperation(
-            BEDROCK_API_KEY_UNSUPPORTED_MESSAGE.to_string(),
+            BEDROCK_AUTH_UNSUPPORTED_MESSAGE.to_string(),
         ));
     }
 
@@ -484,6 +479,12 @@ pub async fn auth_provider_for_request(
     headers: &HeaderMap,
 ) -> Result<ResolvedProviderAuth, RuntimeAuthError> {
     observe_auth_selection(runtime.map(|(_, mode)| *mode), "request", async {
+        if matches!(
+            auth,
+            CodexAuth::BedrockApiKey(_) | CodexAuth::BedrockAccessKeys(_)
+        ) {
+            return Err(RuntimeAuthError::Unsupported);
+        }
         match runtime {
             Some((manager, mode)) => {
                 let manager = Arc::clone(manager);
@@ -539,7 +540,7 @@ pub fn auth_provider_from_auth(auth: &CodexAuth) -> SharedAuthProvider {
         }
         CodexAuth::Headers(auth) => Arc::new(HeaderAuthProvider { auth: auth.clone() }),
         CodexAuth::BedrockApiKey(_) | CodexAuth::BedrockAccessKeys(_) => {
-            unreachable!("{BEDROCK_API_KEY_UNSUPPORTED_MESSAGE}")
+            Arc::new(UnsupportedBedrockAuthProvider)
         }
         CodexAuth::ApiKey(_)
         | CodexAuth::Chatgpt(_)

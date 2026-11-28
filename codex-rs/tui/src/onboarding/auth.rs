@@ -52,10 +52,8 @@ use crate::key_hint::KeyBinding;
 use crate::key_hint::KeyBindingListExt;
 use crate::motion::MotionMode;
 use crate::motion::shimmer_text;
-use crate::onboarding::bedrock::BedrockState;
 use crate::onboarding::gateway::GatewayStep;
 use crate::onboarding::gateway::USE_CUSTOM_PROVIDER;
-use crate::onboarding::gcp::GcpState;
 use crate::onboarding::keys;
 use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::StepStateProvider;
@@ -90,10 +88,6 @@ pub(crate) enum SignInState {
     ChatGptSuccess,
     ApiKeyEntry(ApiKeyInputState),
     ApiKeyConfigured,
-    Bedrock(BedrockState),
-    BedrockConfigured,
-    Gcp(GcpState),
-    GcpConfigured,
     GatewaySelected(String),
     GatewayOAuth {
         provider_id: String,
@@ -112,8 +106,6 @@ pub(crate) enum SignInOption {
     DeviceCode,
     OtherMethods,
     ApiKey,
-    Bedrock,
-    Gcp,
     Gateway,
 }
 
@@ -212,10 +204,7 @@ impl KeyboardHandler for AuthModeWidget {
         {
             return;
         }
-        if self.handle_gcp_key_event(&key_event)
-            || self.handle_bedrock_key_event(&key_event)
-            || self.handle_gateway_key_event(key_event)
-        {
+        if self.handle_gateway_key_event(key_event) {
             return;
         }
         if self.handle_api_key_entry_key_event(&key_event) {
@@ -285,23 +274,26 @@ impl KeyboardHandler for AuthModeWidget {
             }
             return;
         }
-        let mut state = self.sign_in_state.write().unwrap();
-        let input = match &mut *state {
-            SignInState::Bedrock(state) => state.active_input_mut(),
-            SignInState::Gcp(state) => state.active_input_mut(),
-            SignInState::ApiKeyEntry(_) => {
-                drop(state);
-                let _ = self.handle_api_key_entry_paste(pasted);
-                return;
-            }
-            _ => None,
-        };
-        if let Some(input) = input {
-            input.paste(&pasted);
-            self.set_error(/*message*/ None);
-            drop(state);
-            self.request_frame.schedule_frame();
+        let trimmed = pasted.trim();
+        if trimmed.is_empty() {
+            return;
         }
+
+        let mut guard = self.sign_in_state.write().unwrap();
+        if let SignInState::ApiKeyEntry(state) = &mut *guard {
+            if state.prepopulated_from_env {
+                state.value = trimmed.to_string();
+                state.prepopulated_from_env = false;
+            } else {
+                state.value.push_str(trimmed);
+            }
+            self.set_error(/*message*/ None);
+        } else {
+            return;
+        }
+
+        drop(guard);
+        self.request_frame.schedule_frame();
     }
 }
 
@@ -316,8 +308,6 @@ pub(crate) struct AuthModeWidget {
     pub app_server_target: crate::AppServerTarget,
     pub app_server_request_handle: AppServerRequestHandle,
     pub auth_config: AuthConfig,
-    pub bedrock_setup_enabled: bool,
-    pub gcp_setup_enabled: bool,
     pub gateway_setup_enabled: bool,
     pub(super) gateway: Option<GatewayStep>,
     pub animations_enabled: bool,
@@ -377,8 +367,6 @@ impl AuthModeWidget {
         }
         self.sign_in_state.read().is_ok_and(|guard| match &*guard {
             SignInState::ApiKeyEntry(_) => true,
-            SignInState::Bedrock(state) => state.is_text_entry_active(),
-            SignInState::Gcp(state) => state.is_text_entry_active(),
             _ => false,
         })
     }
@@ -393,8 +381,6 @@ impl AuthModeWidget {
         }
         self.sign_in_state.read().is_ok_and(|guard| match &*guard {
             SignInState::ApiKeyEntry(state) => !state.value.is_empty(),
-            SignInState::Bedrock(state) => state.is_text_entry_active(),
-            SignInState::Gcp(state) => state.is_text_entry_active(),
             _ => false,
         })
     }
@@ -420,12 +406,6 @@ impl AuthModeWidget {
     fn displayed_sign_in_options(&self) -> Vec<SignInOption> {
         if self.highlighted_mode.is_alternative() {
             let mut options = vec![SignInOption::ApiKey];
-            if self.bedrock_setup_enabled {
-                options.push(SignInOption::Bedrock);
-            }
-            if self.gcp_setup_enabled {
-                options.push(SignInOption::Gcp);
-            }
             if self.gateway_setup_enabled {
                 options.push(SignInOption::Gateway);
             }
@@ -515,22 +495,6 @@ impl AuthModeWidget {
                     self.disallow_api_login();
                 }
             }
-            SignInOption::Bedrock => {
-                if self.bedrock_setup_enabled && self.is_api_login_allowed() {
-                    self.start_bedrock_discovery();
-                } else if !self.is_api_login_allowed() {
-                    self.disallow_api_login();
-                }
-            }
-            SignInOption::Gcp => {
-                if self.gcp_setup_enabled && self.is_api_login_allowed() {
-                    *self.sign_in_state.write().unwrap() = SignInState::Gcp(GcpState::default());
-                    self.set_error(/*message*/ None);
-                    self.request_frame.schedule_frame();
-                } else if !self.is_api_login_allowed() {
-                    self.disallow_api_login();
-                }
-            }
             SignInOption::Gateway => {
                 if self.gateway_setup_enabled && self.is_api_login_allowed() {
                     self.start_gateway_picker();
@@ -551,8 +515,7 @@ impl AuthModeWidget {
     fn render_pick_mode(&self, area: Rect, buf: &mut Buffer) {
         let mut lines: Vec<Line> = if self.highlighted_mode.is_alternative() {
             vec!["  Sign in another way".into(), "".into()]
-        } else if self.bedrock_setup_enabled || self.gcp_setup_enabled || self.gateway_setup_enabled
-        {
+        } else if self.gateway_setup_enabled {
             vec!["  Choose how you want to use ASM.".into(), "".into()]
         } else {
             vec![
@@ -614,10 +577,7 @@ impl AuthModeWidget {
                         idx,
                         option,
                         "Sign in another way",
-                        if self.bedrock_setup_enabled
-                            || self.gcp_setup_enabled
-                            || self.gateway_setup_enabled
-                        {
+                        if self.gateway_setup_enabled {
                             "Use an API key or another provider"
                         } else {
                             "Use an OpenAI API key"
@@ -646,22 +606,6 @@ impl AuthModeWidget {
                         option,
                         "Use an OpenAI API key",
                         "Pay for what you use",
-                    ));
-                }
-                SignInOption::Bedrock => {
-                    lines.extend(create_mode_item(
-                        idx,
-                        option,
-                        "Use Amazon Bedrock",
-                        "Connect using your AWS credentials",
-                    ));
-                }
-                SignInOption::Gcp => {
-                    lines.extend(create_mode_item(
-                        idx,
-                        option,
-                        "Use Google Cloud Vertex AI",
-                        "Connect using your Google Cloud credentials",
                     ));
                 }
                 SignInOption::Gateway => {
@@ -982,30 +926,6 @@ impl AuthModeWidget {
         true
     }
 
-    fn handle_api_key_entry_paste(&mut self, pasted: String) -> bool {
-        let trimmed = pasted.trim();
-        if trimmed.is_empty() {
-            return false;
-        }
-
-        let mut guard = self.sign_in_state.write().unwrap();
-        if let SignInState::ApiKeyEntry(state) = &mut *guard {
-            if state.prepopulated_from_env {
-                state.value = trimmed.to_string();
-                state.prepopulated_from_env = false;
-            } else {
-                state.value.push_str(trimmed);
-            }
-            self.set_error(/*message*/ None);
-        } else {
-            return false;
-        }
-
-        drop(guard);
-        self.request_frame.schedule_frame();
-        true
-    }
-
     pub(super) fn start_api_key_entry(&mut self) {
         if !self.is_api_login_allowed() {
             self.disallow_api_login();
@@ -1213,14 +1133,10 @@ impl StepStateProvider for AuthModeWidget {
             | SignInState::ChatGptContinueInBrowser(_)
             | SignInState::ChatGptDeviceCode(_)
             | SignInState::ChatGptSuccessMessage
-            | SignInState::Bedrock(_)
-            | SignInState::Gcp(_)
             | SignInState::GatewayOAuth { .. }
             | SignInState::GatewayOAuthFailed { .. } => StepState::InProgress,
             SignInState::ChatGptSuccess
             | SignInState::ApiKeyConfigured
-            | SignInState::BedrockConfigured
-            | SignInState::GcpConfigured
             | SignInState::GatewaySelected(_)
             | SignInState::GatewayConfigured => StepState::Complete,
         }
@@ -1256,12 +1172,6 @@ impl WidgetRef for AuthModeWidget {
             SignInState::ApiKeyConfigured => {
                 self.render_api_key_configured(area, buf);
             }
-            SignInState::Bedrock(state) => {
-                state.render(area, buf, self.error_message());
-            }
-            SignInState::Gcp(state) => {
-                state.render(area, buf, self.error_message());
-            }
             SignInState::GatewayOAuth { url, .. } => {
                 let title = if url.is_some() {
                     "Finish signing in to your gateway in the browser."
@@ -1290,16 +1200,6 @@ impl WidgetRef for AuthModeWidget {
             }
             SignInState::GatewaySelected(_) | SignInState::GatewayConfigured => {
                 Paragraph::new("✓ Custom provider configured".green())
-                    .wrap(Wrap { trim: false })
-                    .render(area, buf);
-            }
-            SignInState::GcpConfigured => {
-                Paragraph::new("✓ Google Cloud Vertex AI configured".green())
-                    .wrap(Wrap { trim: false })
-                    .render(area, buf);
-            }
-            SignInState::BedrockConfigured => {
-                Paragraph::new("✓ Amazon Bedrock configured".green())
                     .wrap(Wrap { trim: false })
                     .render(area, buf);
             }
@@ -1340,7 +1240,6 @@ mod tests {
     use codex_arg0::Arg0DispatchPaths;
     use codex_config::CloudConfigBundleLoader;
     use codex_config::LoaderOverrides;
-    use codex_features::Feature;
     use codex_utils_absolute_path::AbsolutePathBuf;
     use pretty_assertions::assert_eq;
     use std::sync::Arc;
@@ -1488,8 +1387,6 @@ mod tests {
             app_server_target: crate::AppServerTarget::Embedded,
             app_server_request_handle: AppServerRequestHandle::InProcess(client.request_handle()),
             auth_config,
-            bedrock_setup_enabled: false,
-            gcp_setup_enabled: false,
             gateway_setup_enabled: false,
             gateway: None,
             animations_enabled: true,
@@ -1538,7 +1435,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bedrock_option_requires_feature_and_api_login_permission() {
+    async fn gateway_option_requires_feature_and_api_login_permission() {
         let (mut widget, codex_home) = widget_forced_chatgpt().await;
         widget.auth_config.forced_login_method = None;
         assert_eq!(
@@ -1550,9 +1447,23 @@ mod tests {
             ]
         );
 
+        let area = Rect::new(0, 0, 76, 8);
+        let mut terminal = crate::custom_terminal::Terminal::with_options(
+            crate::test_backend::VT100Backend::new(area.width, area.height),
+        )
+        .unwrap();
+        terminal.set_viewport_area(area);
+        terminal
+            .draw(|frame| widget.render_ref(area, frame.buffer_mut()))
+            .unwrap();
+        insta::assert_snapshot!(
+            "sign_in_menu_short_without_gateway",
+            terminal.backend().to_string()
+        );
+
         std::fs::write(
             codex_home.path().join("config.toml"),
-            "model_provider = \"openai\"\n[features]\nbedrock_setup_wizard = true\n",
+            "model_provider = \"openai\"\n[features]\ngateway_setup_wizard = true\n",
         )
         .unwrap();
         let config = ConfigBuilder::default()
@@ -1560,17 +1471,16 @@ mod tests {
             .build()
             .await
             .unwrap();
-        widget.bedrock_setup_enabled = crate::should_show_provider_setup_wizard(
+        widget.gateway_setup_enabled = crate::should_show_gateway_setup_wizard(
             widget.login_status,
             /*requires_openai_auth*/ true,
             &config,
             &widget.app_server_target,
-            Feature::BedrockSetupWizard,
         );
         widget.handle_key_event(KeyCode::Char('3').into());
         assert_eq!(
             widget.displayed_sign_in_options(),
-            vec![SignInOption::ApiKey, SignInOption::Bedrock]
+            vec![SignInOption::ApiKey, SignInOption::Gateway]
         );
         widget.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         widget.move_highlight(/*delta*/ 1);
@@ -1924,10 +1834,6 @@ mod tests {
 
 #[cfg(test)]
 mod activation_key_tests;
-
-#[cfg(test)]
-#[path = "gcp_tests.rs"]
-mod gcp_tests;
 
 #[cfg(test)]
 #[path = "gateway_tests.rs"]

@@ -36,6 +36,7 @@ pub(crate) async fn resolve_request_auth(
     scope: Option<ProviderAuthScope>,
     destination: Option<String>,
 ) -> codex_protocol::error::Result<ResolvedProviderAuth> {
+    crate::provider::ensure_supported_provider(&info)?;
     tokio::spawn(async move {
         crate::auth::observe_auth_selection(
             runtime.as_ref().map(|(_, mode)| *mode),

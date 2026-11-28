@@ -9,14 +9,11 @@ use crate::legacy_core::config::ConfigBuilder;
 use crate::legacy_core::config::ConfigOverrides;
 use crate::legacy_core::config::ConfigTomlLoadResult;
 use crate::legacy_core::config::bootstrap_auth_config;
-use crate::legacy_core::config::edit::ConfigEdit;
-use crate::legacy_core::config::edit::ConfigEditsBuilder;
 use crate::legacy_core::config::load_config_toml_with_layer_stack;
 #[cfg(test)]
 use crate::legacy_core::config::resolve_bootstrap_http_client_factory;
 use crate::legacy_core::config::resolve_oss_provider;
 use crate::legacy_core::config::resolve_profile_v2_config_path;
-use crate::onboarding::check_gov_cloud;
 use crate::session_resume::ResolveCwdOutcome;
 use crate::session_resume::ResumeCwdContext;
 use crate::session_resume::effective_resume_cwd_mode;
@@ -294,7 +291,6 @@ mod wrapping;
 mod table_detect;
 
 use crate::onboarding::onboarding_screen::OnboardingScreenArgs;
-use crate::onboarding::onboarding_screen::run_gov_cloud_guidance;
 use crate::onboarding::onboarding_screen::run_onboarding_app;
 use crate::startup_hooks_review::StartupHooksReviewOutcome;
 use crate::startup_hooks_review::load_startup_hooks_review_entry;
@@ -1399,26 +1395,19 @@ async fn run_ratatui_app(
         // Authentication can change while any interactive onboarding screen is open.
         startup_account = None;
         let show_login_screen = should_show_login_screen(login_status, requires_openai_auth);
-        let show_wizard = |feature| {
-            should_show_provider_setup_wizard(
-                login_status,
-                requires_openai_auth,
-                &initial_config,
-                &app_server_target,
-                feature,
-            )
-        };
         let onboarding_result = run_onboarding_app(
             OnboardingScreenArgs {
                 show_login_screen,
-                bedrock_setup_enabled: show_wizard(Feature::BedrockSetupWizard),
-                gcp_setup_enabled: show_wizard(Feature::GcpSetupWizard),
-                gateway_setup_enabled: show_wizard(Feature::GatewaySetupWizard)
-                    && app_server.as_ref().is_some_and(|server| {
-                        server
-                            .client_provider_override_for_new_chats(&initial_config)
-                            .is_none()
-                    }),
+                gateway_setup_enabled: should_show_gateway_setup_wizard(
+                    login_status,
+                    requires_openai_auth,
+                    &initial_config,
+                    &app_server_target,
+                ) && app_server.as_ref().is_some_and(|server| {
+                    server
+                        .client_provider_override_for_new_chats(&initial_config)
+                        .is_none()
+                }),
                 show_trust_screen: should_show_trust_screen_flag,
                 remote_project_trust: None,
                 login_status,
@@ -2332,11 +2321,6 @@ async fn run_ratatui_app(
         &session_selection,
         &loader_overrides,
     );
-    // Connected servers resolve their own provider; the local config may differ.
-    let check_gov_cloud_guidance = config.notices.hide_gov_cloud_guidance != Some(true)
-        && (config.model_provider.is_amazon_bedrock()
-            || !matches!(app_server_target, AppServerTarget::Embedded));
-    let guidance_request_handle = app_server.request_handle();
     let gateway_sign_in = async {
         if !uses_remote_workspace
             && let Some(prompt) = startup_draft
@@ -2383,13 +2367,10 @@ async fn run_ratatui_app(
                     Ok(Some(bootstrap))
                 },
                 load_startup_hooks_review_entry(hooks_request_handle, hooks_cwd),
-                async {
-                    check_gov_cloud_guidance && check_gov_cloud(guidance_request_handle).await
-                },
             )
         })
         .await;
-    let (startup_bootstrap, startup_hooks_entry, show_gov_cloud_guidance) = match startup_prefetch {
+    let (startup_bootstrap, startup_hooks_entry) = match startup_prefetch {
         Ok(startup_prefetch) => startup_prefetch,
         Err(err) => {
             shutdown_startup_session(Some(app_server), &mut terminal_restore_guard).await;
@@ -2408,22 +2389,6 @@ async fn run_ratatui_app(
         }
     };
     let startup_elapsed_before_app = startup_prefetch_started_at.elapsed();
-    if show_gov_cloud_guidance {
-        if let Err(err) = run_gov_cloud_guidance(&mut tui).await {
-            shutdown_startup_session(Some(app_server), &mut terminal_restore_guard).await;
-            return Err(err);
-        }
-        if let Err(err) = ConfigEditsBuilder::for_config(&config)
-            .with_edits([ConfigEdit::SetPath {
-                segments: vec!["notice".into(), "hide_gov_cloud_guidance".into()],
-                value: toml_edit::value(true),
-            }])
-            .apply()
-            .await
-        {
-            tracing::warn!(%err, "Failed to save GovCloud guidance acknowledgment");
-        }
-    }
     let startup_hooks_review = maybe_run_startup_hooks_review(
         &mut app_server,
         &mut tui,
@@ -2750,26 +2715,19 @@ fn should_show_login_screen(login_status: LoginStatus, requires_openai_auth: boo
     login_status == LoginStatus::NotAuthenticated
 }
 
-fn should_show_provider_setup_wizard(
+fn should_show_gateway_setup_wizard(
     login_status: LoginStatus,
     requires_openai_auth: bool,
     config: &Config,
     app_server_target: &AppServerTarget,
-    feature: Feature,
 ) -> bool {
-    let supported_target = match app_server_target {
-        AppServerTarget::Embedded => true,
-        AppServerTarget::LocalDaemon { .. } => feature == Feature::BedrockSetupWizard,
-        AppServerTarget::Remote { .. } | AppServerTarget::Cloud => false,
-    };
-    supported_target
+    matches!(app_server_target, AppServerTarget::Embedded)
         && should_show_login_screen(login_status, requires_openai_auth)
-        && config.features.enabled(feature)
-        && (feature != Feature::GatewaySetupWizard
-            || config
-                .config_layer_stack
-                .required_model_provider()
-                .is_none())
+        && config.features.enabled(Feature::GatewaySetupWizard)
+        && config
+            .config_layer_stack
+            .required_model_provider()
+            .is_none()
         && config.model_provider_id == "openai"
         && config
             .auth_config()

@@ -125,7 +125,7 @@ async fn new_and_resumed_sessions_use_quota_for_the_active_provider() -> Result<
     std::fs::write(
         home.path().join("config.toml"),
         format!(
-            "model_provider = 'amazon-bedrock'\nmodel = 'gpt-5.5'\ncli_auth_credentials_store = 'file'\nchatgpt_base_url = {:?}\nmodel_catalog_json = {catalog_path:?}\nfeatures.apps = true\n\n[model_providers.alt]\nname = 'Alt'\nwire_api = 'responses'\nrequires_openai_auth = true\n\n[model_providers.custom]\nname = 'Custom'\nrequires_openai_auth = false\n",
+            "model_provider = 'team'\nmodel = 'gpt-5.5'\ncli_auth_credentials_store = 'file'\nchatgpt_base_url = {:?}\nmodel_catalog_json = {catalog_path:?}\nfeatures.apps = true\n\n[model_providers.alt]\nname = 'Alt'\nwire_api = 'responses'\nrequires_openai_auth = true\n\n[model_providers.team]\nname = 'Team'\nrequires_openai_auth = false\n\n[model_providers.custom]\nname = 'Custom'\nrequires_openai_auth = false\n",
             backend.uri(),
         ),
     )?;
@@ -141,7 +141,7 @@ async fn new_and_resumed_sessions_use_quota_for_the_active_provider() -> Result<
         .mount(&backend)
         .await;
     for (provider, saved_providers) in [
-        ("amazon-bedrock", &[][..]),
+        ("team", &[][..]),
         ("openai", &[]),
         ("alt", &[]),
         (
@@ -153,7 +153,7 @@ async fn new_and_resumed_sessions_use_quota_for_the_active_provider() -> Result<
                 ("openai", true),
             ],
         ),
-        ("amazon-bedrock", &[]),
+        ("team", &[]),
         ("custom", &[("openai", true)]),
     ] {
         if app.chat_widget.config_ref().model_provider_id == "alt" {

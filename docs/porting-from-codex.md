@@ -263,6 +263,10 @@ Separate ASM inference/tools from external CLI execution. Use `core/src/external
 
 Delete all thread-private runtime files (linkage, Cursor configuration, diagnostics, login markers) only with exclusive runtime ownership. Keep native conversation history. In opt-in failure diagnostics, record bounded CLI versions from protocol initialization. Do not launch extra CLIs or gate admission on versions.
 
+### Retired cloud providers
+
+ASM does not run the native Amazon Bedrock (Mantle or Runtime) or Google Cloud Vertex AI providers. Keep legacy provider config and saved history readable, keep credential redaction and logout, and preserve the non-Bedrock GovCloud probe reply. Do not silently replace a retired provider with another route. Custom Responses endpoints can still use environment-key or command-backed bearer auth. Gemini Interactions and AWS auth for the exec server are separate and remain supported.
+
 ### Catalog-bound model providers
 
 - With `load_external_models_json = true`, merge bundled entries into custom `model_catalog_json` in memory. Keep all metadata overrides for exact custom IDs. With `false`, keep only the custom catalog. Routing remains bundled and exact-match-only.

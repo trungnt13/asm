@@ -3059,16 +3059,16 @@ async fn plugin_list_includes_api_curated_marketplace_for_api_auth_when_remote_p
 }
 
 #[tokio::test]
-async fn plugin_list_includes_api_curated_marketplace_for_bedrock_without_codex_auth() -> Result<()>
+async fn plugin_list_includes_api_curated_marketplace_for_gateway_without_codex_auth() -> Result<()>
 {
     let codex_home = TempDir::new()?;
     std::fs::write(
         codex_home.path().join("config.toml"),
-        r#"model_provider = "amazon-bedrock"
+        r#"model_provider = "gateway"
 
-[model_providers.amazon-bedrock.aws]
-region = "us-east-2"
-profile = "default"
+[model_providers.gateway]
+name = "Gateway"
+base_url = "https://gateway.example.test/v1"
 
 [features]
 plugins = true
@@ -3114,16 +3114,16 @@ plugins = true
 }
 
 #[tokio::test]
-async fn plugin_list_includes_chatgpt_curated_marketplace_for_bedrock_with_chatgpt_auth()
+async fn plugin_list_includes_chatgpt_curated_marketplace_for_gateway_with_chatgpt_auth()
 -> Result<()> {
     let codex_home = TempDir::new()?;
     std::fs::write(
         codex_home.path().join("config.toml"),
-        r#"model_provider = "amazon-bedrock"
+        r#"model_provider = "gateway"
 
-[model_providers.amazon-bedrock.aws]
-region = "us-east-2"
-profile = "default"
+[model_providers.gateway]
+name = "Gateway"
+base_url = "https://gateway.example.test/v1"
 
 [features]
 plugins = true

@@ -1,5 +1,4 @@
 pub use codex_api::ResponseEvent;
-use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
 use codex_protocol::models::BaseInstructions;
@@ -77,19 +76,6 @@ impl Prompt {
         }
         input
     }
-}
-
-pub(crate) fn provider_allows_service_tier(
-    provider: &ModelProviderInfo,
-    model: &ModelInfo,
-    service_tier: &str,
-) -> bool {
-    // Bedrock requires an advertised tier, even for Flex.
-    !provider.is_amazon_bedrock()
-        || model
-            .service_tiers
-            .iter()
-            .any(|tier| tier.id == service_tier)
 }
 
 /// Lists image details in the same items and order that `normalize_image_details` edits.

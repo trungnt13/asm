@@ -111,7 +111,7 @@ impl Session {
         &self,
         step_context: &StepContext,
     ) -> bool {
-        if step_context.incremental_tools_feature().is_none() {
+        if !step_context.supports_incremental_tools() {
             return false;
         }
         let state = self.state.lock().await;

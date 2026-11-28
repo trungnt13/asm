@@ -61,10 +61,6 @@ mod audio_truncation;
 mod auth_recovery_policy;
 mod auto_review;
 mod base_instructions;
-#[path = "bedrock_multi_agent_tests.rs"]
-mod bedrock_multi_agent;
-#[path = "bedrock_service_tier_tests.rs"]
-mod bedrock_service_tier;
 mod catalog_permission_messages;
 mod cli_stream;
 mod client;
@@ -93,7 +89,6 @@ mod exec_policy;
 mod extension_sandbox;
 mod external_auth;
 mod fork_thread;
-mod gcp;
 mod git_enrichment;
 mod guardian_authorization;
 mod guardian_authorization_refresh;

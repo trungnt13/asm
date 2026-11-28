@@ -631,7 +631,12 @@ async fn startup_config_sign_out_reloads_policy_without_starting_runtime() -> Re
         let user_config: toml::Value = toml::from_str(&std::fs::read_to_string(
             fixture.codex_home.path().join("config.toml"),
         )?)?;
-        assert!(user_config.get("model_provider").is_none());
+        assert_eq!(
+            user_config
+                .get("model_provider")
+                .and_then(toml::Value::as_str),
+            provider
+        );
         let status = fixture.command(&["login", "status"])?.output().await?;
         assert!(!status.status.success());
         fixture.server.verify().await;

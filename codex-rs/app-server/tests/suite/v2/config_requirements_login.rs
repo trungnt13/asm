@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 use app_test_support::TestAppServer;
-use codex_app_server_protocol::Account;
 use codex_app_server_protocol::GetAccountParams;
 use codex_app_server_protocol::GetAccountResponse;
 use codex_app_server_protocol::RequestId;
@@ -134,7 +133,7 @@ async fn config_requirements_read_rejects_invalid_login_method() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn config_requirements_read_preserves_api_only_bedrock_without_chatgpt_requests() -> Result<()>
+async fn config_requirements_read_preserves_api_only_gateway_without_chatgpt_requests() -> Result<()>
 {
     let backend = MockServer::start().await;
     let (_home, mut server) = start_server(
@@ -142,10 +141,11 @@ async fn config_requirements_read_preserves_api_only_bedrock_without_chatgpt_req
             r#"
 forced_login_method = "api"
 chatgpt_base_url = "{}/backend-api"
-model_provider = "amazon-bedrock"
-[model_providers.amazon-bedrock]
-base_url = "https://bedrock.example.com/v1"
-[model_providers.amazon-bedrock.auth]
+model_provider = "gateway"
+[model_providers.gateway]
+name = "Gateway"
+base_url = "https://gateway.example.test/v1"
+[model_providers.gateway.auth]
 command = "print-token"
 "#,
             backend.uri()
@@ -167,9 +167,7 @@ command = "print-token"
         account,
         GetAccountResponse {
             user_id: None,
-            account: Some(Account::AmazonBedrock {
-                uses_codex_managed_credentials: false
-            }),
+            account: None,
             requires_openai_auth: false,
             workspace_routing: None,
         }

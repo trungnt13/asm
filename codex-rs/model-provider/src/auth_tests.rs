@@ -303,7 +303,7 @@ fn openai_provider_rejects_bedrock_api_key_auth() {
     match resolve_provider_auth(Some(&auth), &provider) {
         Err(err) => match err.details() {
             CodexErrorDetails::UnsupportedOperation(message) => {
-                assert_eq!(message, BEDROCK_API_KEY_UNSUPPORTED_MESSAGE);
+                assert_eq!(message, BEDROCK_AUTH_UNSUPPORTED_MESSAGE);
             }
             details => panic!("unexpected auth error: {details:?}"),
         },

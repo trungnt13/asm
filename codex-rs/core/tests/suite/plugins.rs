@@ -20,7 +20,6 @@ use codex_extension_api::ExtensionRegistryBuilder;
 use codex_features::Feature;
 use codex_login::CodexAuth;
 use codex_mcp::CODEX_APPS_MCP_SERVER_NAME;
-use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_plugin::PluginId;
 use codex_protocol::auth::AuthMode;
@@ -1708,7 +1707,6 @@ async fn curated_plugin_skills_follow_auth_switch() -> Result<()> {
     enum TargetAuth {
         Chatgpt,
         ApiKey,
-        BedrockApiKey,
         NoCodexAuth,
     }
 
@@ -1740,20 +1738,6 @@ async fn curated_plugin_skills_follow_auth_switch() -> Result<()> {
             name: "API key",
             target_auth: TargetAuth::ApiKey,
             target_model_provider_id: OPENAI_PROVIDER_ID,
-            expected_target_loaded_plugin_skills: &[API_CURATED_PLUGIN_SKILL],
-            expected_target_skill_description: "api description before",
-        },
-        Fixture {
-            name: "Bedrock API key",
-            target_auth: TargetAuth::BedrockApiKey,
-            target_model_provider_id: AMAZON_BEDROCK_PROVIDER_ID,
-            expected_target_loaded_plugin_skills: &[API_CURATED_PLUGIN_SKILL],
-            expected_target_skill_description: "api description before",
-        },
-        Fixture {
-            name: "ambient Bedrock",
-            target_auth: TargetAuth::NoCodexAuth,
-            target_model_provider_id: AMAZON_BEDROCK_PROVIDER_ID,
             expected_target_loaded_plugin_skills: &[API_CURATED_PLUGIN_SKILL],
             expected_target_skill_description: "api description before",
         },
@@ -1905,17 +1889,6 @@ enabled = true
                 )?;
                 test_codex.thread_manager.auth_manager().reload().await;
                 Some(AuthMode::ApiKey)
-            }
-            TargetAuth::BedrockApiKey => {
-                codex_login::login_with_bedrock_api_key(
-                    codex_home.path(),
-                    "test-bedrock-api-key",
-                    "us-east-1",
-                    codex_login::AuthCredentialsStoreMode::File,
-                    codex_login::AuthKeyringBackendKind::default(),
-                )?;
-                test_codex.thread_manager.auth_manager().reload().await;
-                Some(AuthMode::BedrockApiKey)
             }
             TargetAuth::NoCodexAuth => {
                 test_codex.thread_manager.auth_manager().logout().await?;

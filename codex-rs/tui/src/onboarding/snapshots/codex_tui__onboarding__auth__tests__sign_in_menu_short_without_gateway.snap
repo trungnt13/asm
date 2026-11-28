@@ -1,5 +1,5 @@
 ---
-source: tui/src/onboarding/gcp_tests.rs
+source: tui/src/onboarding/auth.rs
 expression: terminal.backend().to_string()
 ---
   Sign in with ChatGPT to use Codex as part of your paid plan
