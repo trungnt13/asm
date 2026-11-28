@@ -125,7 +125,7 @@ The harness copies feature settings and disables System1. Bubblewrap makes
 host files read-only and permits writes to private session and profile paths.
 It does not restrict host reads or network access. The harness checks the
 effective SQLite and log paths before starting a turn. If managed settings
-change either path, stop. The monitor checks these limits: 890 completions, 19.9M input
+change either path, stop. The monitor checks these limits: 890 completions, 100M input
 tokens, 245K output tokens, 60 minutes, or $4.90 API-equivalent. Actual charges
 are unknown. Never publish training homes, histories, or credentials.
 

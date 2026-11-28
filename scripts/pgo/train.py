@@ -267,7 +267,7 @@ async def monitor():
         )
         if (
             count >= 890
-            or inputs >= 19_900_000
+            or inputs >= 100_000_000
             or outputs >= 245_000
             or inputs * 0.1 / 1e6 + outputs * 0.5 / 1e6 >= 4.9
             or time.monotonic() - started >= 3600
