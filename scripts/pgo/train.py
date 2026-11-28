@@ -48,6 +48,9 @@ async def session(index, turns, children, sandbox, raw):
         "service_tier": "default",
         "model_catalog_json": str(R / "cheap-model-catalog.json"),
         "subagent_model_list": ["gpt-6-luna"],
+        "subagent_tools.collaboration": False,
+        "features.multi_agent_v2.default_wait_timeout_ms": 30000,
+        "features.multi_agent_v2.max_wait_timeout_ms": 30000,
         "notify": [],
         "diagnostic_log_capture": True,
         "sqlite_home": str(h / "sqlite"),
@@ -171,7 +174,7 @@ async def session(index, turns, children, sandbox, raw):
                     "your assigned read-only audit and report the result.' Give each slot a "
                     "different bounded, useful audit of this fixture or prior scenarios. "
                     "Spawn all slots before waiting. Collect a completed result from every "
-                    "child via list_agents/wait_agent before proceeding, even if a wait "
+                    "child via list_agents/wait_agent (up to 30000 ms per wait) before proceeding, even if a wait "
                     "returns only some results. Do not interrupt children, use direct messaging, "
                     "send followups, or ask children to spawn agents or edit the fixture. "
                 )
