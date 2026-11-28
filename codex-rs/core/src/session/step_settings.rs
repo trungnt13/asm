@@ -297,6 +297,8 @@ pub(crate) struct StepSettingsUpdate {
 pub(crate) struct StepSettingsConstraints<'a> {
     pub(crate) requirements: &'a ConfigRequirements,
     pub(crate) external_models: &'a ExternalModels,
+    pub(crate) model_provider_id: &'a str,
+    pub(crate) session_source: &'a SessionSource,
     pub(crate) guardian_approval_enabled: bool,
     pub(crate) trusted_guardian_reviewer: bool,
     pub(crate) has_full_disk_write_access: bool,
@@ -380,12 +382,21 @@ impl StepSettings {
                 .can_set(&ApprovalsReviewer::AutoReview)?;
             next.approvals_reviewer = ApprovalsReviewer::AutoReview;
         }
-        if constraints
-            .external_models
-            .provider_for_model(self.collaboration_mode.model())
-            != constraints
+        let current_model = self.collaboration_mode.model();
+        let next_model = next.collaboration_mode.model();
+        let next_binding = constraints.external_models.provider_for_model(next_model);
+        let leaves_bound_child_route = next_binding.is_none()
+            && matches!(
+                constraints.session_source,
+                SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+            )
+            && constraints
                 .external_models
-                .provider_for_model(next.collaboration_mode.model())
+                .provider_for_model(current_model)
+                .is_some();
+        if current_model != next_model
+            && (next_binding.is_some_and(|provider| provider != constraints.model_provider_id)
+                || leaves_bound_child_route)
         {
             return Err(ConstraintError::InvalidValue {
                 field_name: "Model provider (start a fresh thread to change)",

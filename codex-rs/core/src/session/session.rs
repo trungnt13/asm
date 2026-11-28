@@ -428,6 +428,8 @@ impl SessionConfiguration {
                 .config_layer_stack
                 .requirements(),
             external_models: &self.original_config_do_not_use.external_models,
+            model_provider_id: &self.original_config_do_not_use.model_provider_id,
+            session_source: &self.session_source,
             guardian_approval_enabled: self
                 .original_config_do_not_use
                 .features

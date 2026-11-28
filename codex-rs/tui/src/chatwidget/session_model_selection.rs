@@ -64,15 +64,25 @@ impl ChatWidget {
     }
 
     pub(super) fn model_selection_needs_new_session(&self, model: &str) -> bool {
+        let current_model = self.current_model();
+        if current_model == model {
+            return false;
+        }
         let external_models = self.picker_external_models();
-        let provider = self.model_catalog.provider();
-        (external_models
-            .provider_for_model(self.current_model())
-            .or(provider)
-            != external_models.provider_for_model(model).or(provider))
-            || (codex_protocol::openai_models::is_native_runtime_model(self.current_model())
-                || codex_protocol::openai_models::is_native_runtime_model(model))
-                && self.current_model() != model
+        let catalog_provider = self.model_catalog.provider();
+        let thread_provider = self
+            .thread_id()
+            .map(|_| self.config.model_provider_id.as_str());
+        let current_provider = thread_provider
+            .or_else(|| external_models.provider_for_model(current_model))
+            .or(catalog_provider);
+        let target_provider = external_models
+            .provider_for_model(model)
+            .or(catalog_provider)
+            .or(thread_provider);
+        current_provider != target_provider
+            || codex_protocol::openai_models::is_native_runtime_model(current_model)
+            || codex_protocol::openai_models::is_native_runtime_model(model)
     }
 
     pub(crate) fn confirm_model_session(
