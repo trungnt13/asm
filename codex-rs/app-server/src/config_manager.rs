@@ -6,7 +6,6 @@ use codex_config::ConfigLayerStack;
 use codex_config::ConfigServerResolution;
 use codex_config::LoaderOverrides;
 use codex_config::ThreadConfigLoader;
-use codex_config::apply_default_gcp_auth;
 use codex_config::loader::load_config_layers_state;
 use codex_config::loader::load_managed_requirements_state;
 use codex_core::GuardianPolicyLoader;
@@ -18,11 +17,9 @@ use codex_exec_server::LOCAL_FS;
 use codex_features::feature_for_key;
 use codex_login::AuthManager;
 use codex_login::default_client::set_default_client_residency_requirement;
-use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
-use codex_model_provider_info::AMAZON_BEDROCK_RUNTIME_PROVIDER_ID;
-use codex_model_provider_info::GCP_PROVIDER_ID;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_model_provider_info::built_in_model_providers;
+use codex_model_provider_info::is_removed_cloud_provider_id;
 use codex_model_provider_info::merge_configured_model_providers;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_json_to_toml::json_to_toml;
@@ -394,6 +391,14 @@ impl ConfigManager {
         &self,
         current: &Config,
     ) -> std::io::Result<()> {
+        if current.model_provider.is_removed_cloud_provider() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                ModelProviderError::ModelProviderNotConfigured {
+                    model_provider: current.model_provider_id.clone(),
+                },
+            ));
+        }
         let policy_load = self.refresh_application_network_policy().await?;
         // Existing threads retain their session route; only managed
         // requirements can invalidate it.
@@ -418,29 +423,14 @@ impl ConfigManager {
             .and_then(|providers| providers.get(&current.model_provider_id))
             .cloned();
         let required_provider = match required_provider {
-            Some(provider)
-                if matches!(
-                    current.model_provider_id.as_str(),
-                    AMAZON_BEDROCK_PROVIDER_ID
-                        | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID
-                        | GCP_PROVIDER_ID
-                        | OPENAI_PROVIDER_ID
-                ) =>
-            {
-                // Managed overrides must receive the same built-in defaults as startup config.
+            Some(provider) if current.model_provider_id == OPENAI_PROVIDER_ID => {
                 // OpenAI's inference URL belongs to the retained session, not the catalog override.
-                let mut provider = merge_configured_model_providers(
+                merge_configured_model_providers(
                     built_in_model_providers(current.model_provider.base_url.clone()),
                     HashMap::from([(current.model_provider_id.clone(), provider)]),
                 )
                 .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message))?
-                .remove(&current.model_provider_id);
-                if current.model_provider_id == GCP_PROVIDER_ID
-                    && let Some(provider) = provider.as_mut()
-                {
-                    apply_default_gcp_auth(provider, &current.cwd);
-                }
-                provider
+                .remove(&current.model_provider_id)
             }
             Some(provider) => Some(provider),
             None => None,
@@ -632,6 +622,19 @@ impl ConfigManager {
                             ModelProviderError::ModelProviderPolicyConflict {
                                 model_provider: provider.to_owned(),
                                 required_model_provider: required.to_owned(),
+                            },
+                        ));
+                    }
+                    if is_removed_cloud_provider_id(provider)
+                        || config
+                            .model_providers
+                            .get(provider)
+                            .is_some_and(|info| info.is_removed_cloud_provider())
+                    {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::Unsupported,
+                            ModelProviderError::ModelProviderNotConfigured {
+                                model_provider: provider.to_owned(),
                             },
                         ));
                     }

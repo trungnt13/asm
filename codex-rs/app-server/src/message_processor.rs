@@ -50,7 +50,6 @@ use crate::request_processors::ThreadResumeTarget;
 use crate::request_processors::ThreadSearchDelivery;
 use crate::request_processors::TurnRequestProcessor;
 use crate::request_processors::WindowsSandboxRequestProcessor;
-use crate::request_processors::account_processor::handle_gcp_setup;
 use crate::request_processors::read_server_diagnostics;
 use crate::request_processors::thread_list_state::ThreadListState;
 use crate::request_serialization::QueuedInitializedRequest;
@@ -2022,15 +2021,12 @@ impl MessageProcessor {
                     .login_account(request_id.clone(), params)
                     .await
             }
-            ClientRequest::BedrockDiscover { params, .. } => {
-                self.account_processor.bedrock_discover(params).await
+            ClientRequest::BedrockDiscover { .. } | ClientRequest::BedrockSetup { .. } => {
+                Err(invalid_request("Amazon Bedrock is not supported in ASM."))
             }
-            ClientRequest::BedrockSetup { params, .. } => {
-                self.account_processor.bedrock_setup(params).await
-            }
-            ClientRequest::GcpSetup { params, .. } => {
-                handle_gcp_setup(&self.account_processor, params).await
-            }
+            ClientRequest::GcpSetup { .. } => Err(invalid_request(
+                "Google Cloud Vertex AI is not supported in ASM.",
+            )),
             ClientRequest::BedrockCheckGovCloudRequirements { .. } => {
                 self.account_processor
                     .bedrock_check_gov_cloud_requirements()

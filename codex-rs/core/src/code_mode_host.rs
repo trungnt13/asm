@@ -228,9 +228,10 @@ impl HostTransport {
             .filter(|host| host.alive.load(Ordering::Acquire))
         {
             Some(host) => host,
-            None if kind == Some(GrpcCallKind::Admission) => {
-                current.insert(HostChannel::spawn(&self.host_program, self.diagnostic_log_capture)?)
-            }
+            None if kind == Some(GrpcCallKind::Admission) => current.insert(HostChannel::spawn(
+                &self.host_program,
+                self.diagnostic_log_capture,
+            )?),
             None => return Err(Status::unavailable("code-mode host is not running")),
         };
         let activity = match kind {

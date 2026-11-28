@@ -45,8 +45,6 @@ pub(crate) async fn authenticate_gateway(
             OnboardingScreenArgs {
                 show_login_screen: true,
                 gateway_setup_enabled: false,
-                gcp_setup_enabled: false,
-                bedrock_setup_enabled: false,
                 show_trust_screen: false,
                 remote_project_trust: None,
                 login_status,

@@ -8,11 +8,9 @@ use anyhow::Result;
 use app_test_support::ChatGptAuthFixture;
 use app_test_support::write_chatgpt_auth;
 use codex_config::types::AuthCredentialsStoreMode;
-use codex_login::AuthKeyringBackendKind;
 use codex_login::CLIENT_ID;
 use codex_login::CODEX_ACCESS_TOKEN_ENV_VAR;
 use codex_login::REVOKE_TOKEN_URL_OVERRIDE_ENV_VAR;
-use codex_login::login_with_bedrock_access_keys;
 use codex_models_manager::bundled_models_response;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::shell_environment::OPENAI_FEDERATION_RULE_ID_ENV_VAR;
@@ -225,7 +223,7 @@ fn login_status_validates_configured_workload_identity() -> Result<()> {
 }
 
 #[test]
-fn logout_clears_only_the_selected_bedrock_provider() -> Result<()> {
+fn logout_removes_legacy_credentials_without_changing_provider_config() -> Result<()> {
     for (model_provider_id, managed_bedrock_auth, model) in [
         ("amazon-bedrock", true, "openai.gpt-5.6-sol"),
         ("amazon-bedrock-runtime", true, "global.openai.gpt-5.6-sol"),
@@ -258,29 +256,20 @@ fn logout_clears_only_the_selected_bedrock_provider() -> Result<()> {
             ),
         )?;
         if managed_bedrock_auth {
-            login_with_bedrock_access_keys(
-                codex_home.path(),
-                "managed-access-key-id",
-                "managed-secret-access-key",
-                Some("managed-session-token"),
-                AuthCredentialsStoreMode::File,
-                AuthKeyringBackendKind::default(),
+            std::fs::write(
+                codex_home.path().join("auth.json"),
+                serde_json::to_vec(&json!({
+                    "auth_mode": "bedrockAccessKeys",
+                    "bedrock_access_keys": {
+                        "access_key_id": "managed-access-key-id",
+                        "secret_access_key": "managed-secret-access-key",
+                        "session_token": "managed-session-token",
+                    },
+                }))?,
             )?;
         }
-        let mut expected_config: toml::Value =
-            toml::from_str(&std::fs::read_to_string(&config_path)?)?;
-        if model_provider_id != "openai" {
-            let expected_root = expected_config
-                .as_table_mut()
-                .expect("config should be a table");
-            expected_root.remove("model_provider");
-            expected_root.remove("model");
-            expected_root["model_providers"][model_provider_id]
-                .as_table_mut()
-                .expect("selected Bedrock provider should be a table")
-                .remove("aws");
-        }
-        let expected_message = if managed_bedrock_auth || model_provider_id != "openai" {
+        let expected_config = std::fs::read(&config_path)?;
+        let expected_message = if managed_bedrock_auth {
             "Successfully logged out"
         } else {
             "Not logged in"
@@ -296,8 +285,7 @@ fn logout_clears_only_the_selected_bedrock_provider() -> Result<()> {
             .stderr(contains(expected_message));
 
         assert!(!codex_home.path().join("auth.json").exists());
-        let actual_config: toml::Value = toml::from_str(&std::fs::read_to_string(&config_path)?)?;
-        assert_eq!(actual_config, expected_config);
+        assert_eq!(std::fs::read(&config_path)?, expected_config);
     }
 
     Ok(())

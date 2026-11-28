@@ -22,7 +22,6 @@ async fn provider_reachability_rejects_proxy_authentication_challenges() {
         "OpenAI",
         /*provider_base_url*/ None,
         /*provider_query_params*/ None,
-        /*is_amazon_bedrock*/ false,
         &format!("{}/backend-api/", proxy.uri()),
     );
 

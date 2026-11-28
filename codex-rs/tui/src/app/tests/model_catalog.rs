@@ -2,8 +2,6 @@ use super::*;
 use crate::status::StatusAccountDisplay;
 use assert_matches::assert_matches;
 use codex_config::types::ModelAvailabilityNuxConfig;
-use codex_model_provider::create_model_provider;
-use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::openai_models::ModelAvailabilityNux;
 use pretty_assertions::assert_eq;
@@ -13,14 +11,15 @@ fn all_model_presets() -> Vec<ModelPreset> {
     crate::test_support::TEST_MODEL_PRESETS.clone()
 }
 
-fn bedrock_model_presets() -> Vec<ModelPreset> {
-    create_model_provider(
-        ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None),
-        /*auth_manager*/ None,
-    )
-    .models_manager_without_cache(/*config_model_catalog*/ None)
-    .try_list_models()
-    .expect("Bedrock model catalog")
+fn remote_bedrock_model_presets() -> Vec<ModelPreset> {
+    let mut preset = all_model_presets()
+        .into_iter()
+        .find(|preset| preset.model == "gpt-6-sol")
+        .expect("GPT-6 Sol model preset");
+    preset.id = "openai.gpt-6-sol".into();
+    preset.model = preset.id.clone();
+    preset.upgrade = None;
+    vec![preset]
 }
 
 #[tokio::test]
@@ -492,7 +491,7 @@ async fn accepted_model_migration_persists_target_default_reasoning_effort() -> 
             "openai.gpt-5.4",
             "openai.gpt-6-sol",
             "amazon-bedrock",
-            bedrock_model_presets(),
+            remote_bedrock_model_presets(),
         ),
     ] {
         let codex_home = tempdir()?;
@@ -632,7 +631,7 @@ async fn model_migration_prompt_respects_hide_flag_and_self_target() {
             "openai.gpt-5.4",
             "openai.gpt-5.6-terra",
             "openai.gpt-6-sol",
-            bedrock_model_presets(),
+            remote_bedrock_model_presets(),
         ),
     ] {
         let provider_id = if model == "openai.gpt-5.4" {
@@ -675,7 +674,7 @@ async fn model_migration_prompt_skips_when_target_missing_or_hidden() {
         (
             "openai.gpt-5.4",
             "openai.gpt-6-sol",
-            bedrock_model_presets(),
+            remote_bedrock_model_presets(),
         ),
     ] {
         let provider_id = if model == "openai.gpt-5.4" {

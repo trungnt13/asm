@@ -1746,6 +1746,12 @@ async fn prepare_realtime_start(
         .model_client
         .validate_required_cyber_access_program(/*programs*/ None)?;
     let provider = sess.provider().await;
+    if provider.is_removed_cloud_provider() {
+        return Err(CodexErr::UnsupportedOperation(format!(
+            "{} is no longer supported as a built-in model provider.",
+            provider.name
+        )));
+    }
     if provider.wire_api == WireApi::GeminiInteractions {
         return Err(CodexErr::UnsupportedOperation(
             "Gemini Interactions does not support realtime conversations".into(),

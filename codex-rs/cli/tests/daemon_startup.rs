@@ -91,11 +91,6 @@ async fn daemon_exclusion_survives_fork_picker() -> Result<()> {
 }
 
 #[tokio::test]
-async fn daemon_auto_start_preserves_bedrock_onboarding() -> Result<()> {
-    daemon_startup("bedrock").await
-}
-
-#[tokio::test]
 #[cfg(windows)]
 async fn elevated_local_tui_uses_embedded_without_starting_daemon() -> Result<()> {
     if !codex_app_server_daemon::is_elevated()? {
@@ -158,12 +153,6 @@ async fn restrictive_launcher_uses_embedded_if_daemon_cannot_start() -> Result<(
     daemon_startup("restrictive-job").await
 }
 
-#[tokio::test]
-#[cfg(unix)]
-async fn bedrock_onboarding_discovers_credentials_on_the_running_daemon() -> Result<()> {
-    daemon_startup("bedrock-running").await
-}
-
 async fn daemon_startup(command: &str) -> Result<()> {
     #[cfg(windows)]
     let elevated = codex_app_server_daemon::is_elevated()?;
@@ -188,7 +177,6 @@ async fn daemon_startup(command: &str) -> Result<()> {
             .success(),
         "failed to prepare CLI test executable"
     );
-    let bedrock_onboarding = matches!(command, "bedrock" | "bedrock-running");
     let trust_restart = matches!(command, "agents-trust-restart" | "startup-trust-restart");
     if trust_restart {
         fs::create_dir(workspace_path.join(".codex"))?;
@@ -210,8 +198,6 @@ async fn daemon_startup(command: &str) -> Result<()> {
          [projects.{}]\n{}\n",
             if command == "discovered" {
                 "tui.status_line=[\"model\",\"thread-id\",\"thread-name\"]\nfeatures.daemon_auto_start=false"
-            } else if bedrock_onboarding {
-                "features.gcp_setup_wizard=false"
             } else {
                 ""
             },
@@ -229,12 +215,10 @@ async fn daemon_startup(command: &str) -> Result<()> {
     let persisted = command == "mismatch-disable-persisted";
     let disabling = matches!(command, "mismatch-disable" | "mismatch-disable-persisted");
     let restart = command == "mismatch-restart" || disabling;
-    if !bedrock_onboarding {
-        fs::write(
-            home.path().join("auth.json"),
-            r#"{"OPENAI_API_KEY":"daemon-startup-test","tokens":null,"last_refresh":null}"#,
-        )?;
-    }
+    fs::write(
+        home.path().join("auth.json"),
+        r#"{"OPENAI_API_KEY":"daemon-startup-test","tokens":null,"last_refresh":null}"#,
+    )?;
     let mut env = std::env::vars().collect::<std::collections::HashMap<_, _>>();
     for key in [
         "CODEX_EXEC_SERVER_URL",
@@ -263,8 +247,6 @@ async fn daemon_startup(command: &str) -> Result<()> {
             | "agents-no-daemon"
             | "agents-untrusted"
             | "discovered"
-            | "bedrock"
-            | "bedrock-running"
             | "restrictive-job"
     ) || mismatch
         || trust_restart
@@ -296,17 +278,9 @@ async fn daemon_startup(command: &str) -> Result<()> {
     }
     let pid_file = home.path().join("app-server-daemon/daemon.pid");
     let result = async {
-        let mut existing_daemon = if matches!(command, "bedrock-running" | "discovered" | "agents-no-daemon")
+        let mut existing_daemon = if matches!(command, "discovered" | "agents-no-daemon")
             || (mismatch && !disabling)
         {
-            if command == "bedrock-running" {
-                // This Unix-only case uses a daemon-only token and no ambient profiles.
-                env.insert("AWS_CONFIG_FILE".into(), "/dev/null".into());
-                env.insert("AWS_SHARED_CREDENTIALS_FILE".into(), "/dev/null".into());
-                env.remove("AWS_ACCESS_KEY_ID");
-                env.remove("AWS_SECRET_ACCESS_KEY");
-                env.insert("AWS_BEARER_TOKEN_BEDROCK".into(), "daemon-only-test-token".into());
-            }
             let started = Command::new(&codex)
                 .env_clear()
                 .envs(&env)
@@ -392,14 +366,6 @@ async fn daemon_startup(command: &str) -> Result<()> {
                 steps.push_back(("GPT-5.6-Terra", b"/status\r"));
                 if restart { "Server:Localbackgroundserver" } else { "Model:" }
             }
-        } else if command == "bedrock-running" {
-            env.remove("AWS_BEARER_TOKEN_BEDROCK");
-            steps.push_back(("UseanAPIkeyoranotherprovider", b"3"));
-            steps.push_back(("UseAmazonBedrock", b"2"));
-            "Continuewithdetectedcredentials"
-        } else if bedrock_onboarding {
-            // With GCP disabled, only Bedrock makes the sign-in menu advertise another provider.
-            "UseanAPIkeyoranotherprovider"
         } else {
             args.extend([command.into(), "--strict-config".into()]);
             if command == "resume" {
@@ -479,18 +445,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
         // A fresh disable request includes both cold daemon startup and its confirmed restart.
         let timeout = Duration::from_secs(if disabling { 90 } else { 45 });
         let result = tokio::time::timeout(timeout, async {
-            loop {
-                let bytes = tokio::select! {
-                    bytes = stdout.recv() => bytes,
-                    // The first onboarding draw precedes its typeahead drain. Retry the
-                    // main menu shortcut until the submenu appears (it has no option 3).
-                    () = tokio::time::sleep(Duration::from_millis(/*millis*/ 250)),
-                        if steps.front().is_some_and(|(ready, _)| *ready == "UseAmazonBedrock") => {
-                            writer.send(b"3".to_vec()).await?;
-                            continue;
-                        }
-                };
-                let Some(bytes) = bytes else { break };
+            while let Some(bytes) = stdout.recv().await {
                 output.push_str(&String::from_utf8_lossy(&bytes));
                 screen.process(&bytes);
                 for (query, reply) in &mut queries {
@@ -625,8 +580,6 @@ async fn daemon_startup(command: &str) -> Result<()> {
                     } else if elevated_launch {
                         ensure!(!home.path().join("app-server-daemon").exists());
                         ensure!(!home.path().join("packages/app-server-daemon").exists());
-                    } else if bedrock_onboarding {
-                        ensure!(pid_file.exists() != elevated);
                     } else if command == "restrictive-job" {
                         ensure!(!pid_file.exists());
                         if !elevated {
@@ -656,14 +609,6 @@ async fn daemon_startup(command: &str) -> Result<()> {
         ))
     }
     .await;
-    // Elevated fresh Bedrock onboarding already verified that no daemon started.
-    if elevated
-        && command == "bedrock"
-        && let Ok((session, Ok(Ok(())))) = &result
-    {
-        session.terminate();
-        return Ok(());
-    }
     // Stop the detached daemon, including on timeout or failed assertions.
     let stopped = Command::new(&codex)
         .env_clear()

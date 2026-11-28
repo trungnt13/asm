@@ -474,8 +474,6 @@ impl ExecutedToolCalls {
         // The built-in provider declares optional organization/project selectors. The
         // transport checks the resolved headers again and declines either active selector.
         if !info.include_internal_metadata
-            || info.is_amazon_bedrock()
-            || info.is_gcp()
             || !provider_uses_first_party_auth_path(info)
             || info.gateway_oauth.is_some()
             || !turn

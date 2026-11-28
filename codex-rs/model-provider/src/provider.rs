@@ -27,13 +27,12 @@ use codex_models_manager::manager::StaticModelsManager;
 use codex_protocol::account::ProviderAccount;
 use codex_protocol::auth::RefreshTokenFailedError;
 use codex_protocol::error::CodexErr;
-use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_runtime_agent_instance::RuntimeAuthManager;
 
 use crate::ProviderCapabilities;
 use crate::ResolvedResponsesProvider;
-use crate::amazon_bedrock::AmazonBedrockModelProvider;
+use crate::auth::BEDROCK_AUTH_UNSUPPORTED_MESSAGE;
 use crate::auth::ProviderAuthScope;
 use crate::auth::ResolvedProviderAuth;
 use crate::auth::auth_manager_for_provider;
@@ -41,7 +40,6 @@ use crate::auth::resolve_provider_auth;
 use crate::auth::resolve_provider_auth_for_scope;
 use crate::auth::uses_fedramp_api_key;
 use crate::combined_auth::compose_auth;
-use crate::gcp::GcpModelProvider;
 use crate::models_endpoint::OpenAiModelsEndpoint;
 use crate::request_setup::resolve_request_auth;
 use crate::workspace_routing::WorkspaceRoutingContext;
@@ -82,12 +80,7 @@ impl fmt::Display for ProviderAccountError {
             Self::MissingChatgptAccountDetails => {
                 write!(f, "plan type is required for chatgpt authentication")
             }
-            Self::UnsupportedBedrockApiKeyAuth => {
-                write!(
-                    f,
-                    "Bedrock API key auth is only supported by the Amazon Bedrock model provider"
-                )
-            }
+            Self::UnsupportedBedrockApiKeyAuth => f.write_str(BEDROCK_AUTH_UNSUPPORTED_MESSAGE),
         }
     }
 }
@@ -224,9 +217,6 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
         codex_api::map_api_error(error)
     }
 
-    /// Normalizes a completed output item before it enters model history.
-    fn normalize_completed_output_item(&self, _item: &mut ResponseItem) {}
-
     /// Returns provider configuration adapted for the API client.
     fn api_provider(&self) -> ModelProviderFuture<'_, codex_protocol::error::Result<Provider>> {
         Box::pin(async move {
@@ -307,7 +297,10 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
     fn runtime_base_url(
         &self,
     ) -> ModelProviderFuture<'_, codex_protocol::error::Result<Option<String>>> {
-        Box::pin(async { Ok(self.info().base_url.clone()) })
+        Box::pin(async {
+            ensure_supported_provider(self.info())?;
+            Ok(self.info().base_url.clone())
+        })
     }
 
     /// Returns the auth provider used to attach request credentials.
@@ -428,11 +421,24 @@ pub fn resolve_api_provider(
     info: &ModelProviderInfo,
     auth: Option<&CodexAuth>,
 ) -> codex_protocol::error::Result<Provider> {
+    ensure_supported_provider(info)?;
     let mut provider = info.to_api_provider(auth.map(CodexAuth::auth_mode))?;
     if info.base_url.is_none() && uses_fedramp_api_key(auth, info)? {
         provider.base_url = FEDRAMP_API_BASE_URL.to_string();
     }
     Ok(provider)
+}
+
+pub(crate) fn ensure_supported_provider(
+    info: &ModelProviderInfo,
+) -> codex_protocol::error::Result<()> {
+    if info.is_removed_cloud_provider() {
+        return Err(CodexErr::UnsupportedOperation(format!(
+            "{} is no longer supported as a built-in model provider. Configure a different model provider.",
+            info.name,
+        )));
+    }
+    Ok(())
 }
 
 pub fn provider_uses_first_party_auth_path(provider: &ModelProviderInfo) -> bool {
@@ -467,12 +473,6 @@ pub(crate) fn create_model_provider_with_runtime(
     auth_manager: Option<Arc<AuthManager>>,
     runtime_auth: Option<(Arc<RuntimeAuthManager>, RuntimeAuthMode)>,
 ) -> SharedModelProvider {
-    if provider_info.is_amazon_bedrock() {
-        return Arc::new(AmazonBedrockModelProvider::new(provider_info, auth_manager));
-    }
-    if provider_info.is_gcp() {
-        return Arc::new(GcpModelProvider::new(provider_info, auth_manager));
-    }
     Arc::new(ConfiguredModelProvider::new(
         provider_info,
         auth_manager,
@@ -497,6 +497,15 @@ impl ConfiguredModelProvider {
         auth_manager: Option<Arc<AuthManager>>,
         runtime_auth: Option<(Arc<RuntimeAuthManager>, RuntimeAuthMode)>,
     ) -> Self {
+        if ensure_supported_provider(&info).is_err() {
+            return Self {
+                info,
+                auth_manager: None,
+                gateway_auth_manager: None,
+                runtime_auth: None,
+                catalog_runtime_auth: None,
+            };
+        }
         let gateway_auth_manager = info.gateway_oauth.as_ref().map(|config| {
             info.validate()?;
             let manager = auth_manager
@@ -730,6 +739,13 @@ impl ModelProvider for ConfiguredModelProvider {
         config_model_catalog: Option<ModelsResponse>,
         settings: ModelCatalogSettings,
     ) -> SharedModelsManager {
+        if ensure_supported_provider(&self.info).is_err() {
+            return Arc::new(StaticModelsManager::new(
+                /*auth_manager*/ None,
+                ModelsResponse::default(),
+                codex_models_manager::ModelOrigin::Bundled,
+            ));
+        }
         if let Some(model_catalog) = config_model_catalog {
             return Arc::new(
                 StaticModelsManager::new(

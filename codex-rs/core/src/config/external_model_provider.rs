@@ -21,6 +21,9 @@ impl Config {
     }
 
     pub fn apply_external_model_provider(&mut self) -> io::Result<()> {
+        if self.model_provider.is_removed_cloud_provider() {
+            return Ok(());
+        }
         if let Some(model) = self
             .model
             .as_deref()

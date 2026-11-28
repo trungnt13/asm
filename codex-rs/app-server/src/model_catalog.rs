@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use codex_config::ConfigLayerStack;
 use codex_core::ThreadManager;
 use codex_core::config::Config;
 use codex_features::Feature;
@@ -15,7 +14,6 @@ use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelPreset;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use tokio::sync::Mutex;
 
 use crate::config_manager::ConfigManager;
@@ -53,16 +51,6 @@ impl ModelCatalog {
                 models_manager,
             }),
         }
-    }
-
-    /// Loads the same startup context used to reload the catalog after account setup.
-    pub(crate) async fn load_startup_config_layers(&self) -> std::io::Result<ConfigLayerStack> {
-        let cwd = self
-            .startup_cwd
-            .as_deref()
-            .map(AbsolutePathBuf::from_absolute_path)
-            .transpose()?;
-        self.config_manager.load_config_layers(cwd).await
     }
 
     /// Reloads catalog configuration on the next read.

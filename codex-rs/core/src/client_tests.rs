@@ -1942,44 +1942,6 @@ async fn response_stream_records_last_model_feedback_ids() {
     );
 }
 
-#[tokio::test]
-async fn bedrock_unauthorized_error_uses_provider_mapping() {
-    let provider = create_model_provider(
-        ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None),
-        /*auth_manager*/ None,
-    );
-    let mut auth_recovery = None;
-    let mut provider_auth_recovery_attempted = false;
-    let url = "https://bedrock-mantle.us-east-2.api.aws/openai/v1/responses";
-    let error = super::handle_unauthorized(
-        TransportError::Http {
-            retry_after: None,
-            status: http::StatusCode::UNAUTHORIZED,
-            url: Some(url.to_string()),
-            headers: None,
-            body: Some(
-                "Signature expired: 20260609T133205Z is now earlier than 20260614T062525Z"
-                    .to_string(),
-            ),
-        },
-        &mut auth_recovery,
-        &mut provider_auth_recovery_attempted,
-        &test_session_telemetry(),
-        &provider,
-        /*event_sender*/ None,
-        /*turn_id*/ None,
-    )
-    .await
-    .expect_err("expired Bedrock signature should fail");
-
-    assert_eq!(
-        error.to_string(),
-        format!(
-            "Amazon Bedrock rejected the request because its AWS signature has expired. Refresh your AWS credentials and retry. If `AWS_BEARER_TOKEN_BEDROCK` is set, update or unset it, then restart Codex, url: {url}"
-        )
-    );
-}
-
 #[derive(Debug)]
 struct TestRecoveryProvider {
     inner: SharedModelProvider,
@@ -2730,18 +2692,15 @@ async fn realtime_auth_uses_request_scope_on_reconnect(mode: RuntimeAuthMode, ga
 }
 
 #[tokio::test]
-async fn realtime_uses_openai_credentials_with_bedrock_inference() {
+async fn realtime_uses_openai_credentials_with_custom_inference() {
     let (mut model_client, _) =
         model_client_with_counting_attestation(/*include_attestation*/ false);
     let credentials = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("realtime-key"));
-    let info = ModelProviderInfo::create_amazon_bedrock_provider(Some(
-        codex_model_provider_info::ModelProviderAwsAuthInfo {
-            profile: Some("configured-profile".into()),
-            region: Some("us-east-1".into()),
-            credential_export: None,
-            auth_refresh: None,
-        },
-    ));
+    let info = ModelProviderInfo {
+        name: "Custom Responses".into(),
+        base_url: Some("https://custom.example/v1".into()),
+        ..Default::default()
+    };
     Arc::get_mut(&mut model_client.state).unwrap().provider =
         create_model_provider(info, Some(Arc::clone(&credentials)));
     let context = codex_model_provider::ProviderAuthContext {

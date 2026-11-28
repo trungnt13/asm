@@ -696,6 +696,12 @@ impl Session {
         session_source: &SessionSource,
         allow_provider_model_fallback: bool,
     ) -> CodexResult<(String, CatalogModel)> {
+        if config.model_provider.is_removed_cloud_provider() {
+            return Err(CodexErr::UnsupportedOperation(format!(
+                "Model provider `{}` is no longer supported. Configure a different model provider.",
+                config.model_provider_id
+            )));
+        }
         // Child catalogs are initialized by their selector. Reading only memory here
         // preserves the loaded snapshot shared with the parent.
         let uses_native_runtime = config

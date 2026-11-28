@@ -28,7 +28,6 @@ use codex_config::SandboxModeRequirement;
 use codex_config::Sourced;
 use codex_config::System1Config;
 use codex_config::ThreadConfigLoader;
-use codex_config::apply_default_gcp_auth;
 use codex_config::config_toml::CircuitBreakAction;
 use codex_config::config_toml::ConfigToml;
 use codex_config::config_toml::DEFAULT_PROJECT_DOC_MAX_BYTES;
@@ -106,7 +105,12 @@ use codex_mcp::ResolvedMcpCatalog;
 use codex_model_provider::ChatgptBaseUrl;
 use codex_model_provider::DEFAULT_CHATGPT_BASE_URL;
 use codex_model_provider::ProviderCapabilities;
+use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
+use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_NAME;
+use codex_model_provider_info::AMAZON_BEDROCK_RUNTIME_PROVIDER_ID;
+use codex_model_provider_info::AMAZON_BEDROCK_RUNTIME_PROVIDER_NAME;
 use codex_model_provider_info::GCP_PROVIDER_ID;
+use codex_model_provider_info::GCP_PROVIDER_NAME;
 use codex_model_provider_info::GatewayOAuthConfig;
 use codex_model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
@@ -4393,29 +4397,46 @@ impl Config {
             .clone()
             .filter(|value| !value.is_empty());
 
-        let mut model_providers =
+        let model_providers =
             merge_configured_model_providers(built_in_model_providers(openai_base_url), cfg.model_providers)
                 .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message))?;
-
-        if let Some(provider) = model_providers.get_mut(GCP_PROVIDER_ID) {
-            apply_default_gcp_auth(provider, &resolved_cwd);
-        }
 
         let model_provider_id = config_layer_stack.required_model_provider().map(str::to_string)
             .or(model_provider)
             .or(cfg.model_provider)
             .unwrap_or_else(|| "openai".to_string());
-        let model_provider = model_providers
-            .get(&model_provider_id)
-            .ok_or_else(|| {
-                let message = if model_provider_id == LEGACY_OLLAMA_CHAT_PROVIDER_ID {
-                    OLLAMA_CHAT_PROVIDER_REMOVED_ERROR.to_string()
-                } else {
-                    format!("Model provider `{model_provider_id}` not found")
-                };
-                std::io::Error::new(std::io::ErrorKind::NotFound, message)
-            })?
-            .clone();
+        // Preserve retired selections for config reads and resume without registering a runnable
+        // provider or silently selecting OpenAI when loading an old config.
+        let retired_provider_name = match model_provider_id.as_str() {
+            AMAZON_BEDROCK_PROVIDER_ID => Some(AMAZON_BEDROCK_PROVIDER_NAME),
+            AMAZON_BEDROCK_RUNTIME_PROVIDER_ID => Some(AMAZON_BEDROCK_RUNTIME_PROVIDER_NAME),
+            GCP_PROVIDER_ID => Some(GCP_PROVIDER_NAME),
+            _ => None,
+        };
+        let model_provider = if let Some(name) = retired_provider_name {
+            ModelProviderInfo {
+                name: name.to_string(),
+                ..Default::default()
+            }
+        } else {
+            model_providers
+                .get(&model_provider_id)
+                .ok_or_else(|| {
+                    let message = if model_provider_id == LEGACY_OLLAMA_CHAT_PROVIDER_ID {
+                        OLLAMA_CHAT_PROVIDER_REMOVED_ERROR.to_string()
+                    } else {
+                        format!("Model provider `{model_provider_id}` not found")
+                    };
+                    std::io::Error::new(std::io::ErrorKind::NotFound, message)
+                })?
+                .clone()
+        };
+
+        if model_provider.is_removed_cloud_provider() {
+            startup_warnings.push(format!(
+                "Model provider `{model_provider_id}` is no longer supported. Configure a different model provider."
+            ));
+        }
 
         for provider in model_providers.values() {
             if let Some(search_id) = provider.standalone_web_search_provider.as_ref() {

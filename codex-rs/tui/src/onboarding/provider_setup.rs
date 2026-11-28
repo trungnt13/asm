@@ -1,16 +1,12 @@
-//! Single-line fields shared by provider settings and the cloud setup wizards.
+//! Single-line fields shared by provider settings and gateway onboarding.
 
-use super::auth::AuthModeWidget;
-use super::auth::SignInState;
 use crate::bottom_pane::TextArea;
-use codex_app_server_protocol::RequestId;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
-use std::future::Future;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
@@ -25,8 +21,6 @@ pub(crate) struct ProviderInput(Arc<Mutex<TextArea>>);
 pub(crate) enum FieldDisplay {
     Focused,
     Unfocused,
-    FocusedSecret,
-    UnfocusedSecret,
 }
 
 impl Default for ProviderInput {
@@ -76,7 +70,7 @@ impl ProviderInput {
             line.push_span(placeholder.to_owned().dim());
             return line;
         }
-        let focused = matches!(display, FieldDisplay::Focused | FieldDisplay::FocusedSecret);
+        let focused = matches!(display, FieldDisplay::Focused);
         let field_width = usize::from(width).saturating_sub(line.width());
         // When the label occupies a whole row, wrapping moves the value to the next row.
         let mut remaining = if field_width == 0 {
@@ -89,14 +83,8 @@ impl ProviderInput {
         } else {
             0
         };
-        let mut content = editor.text()[start..].grapheme_indices(true).peekable();
-        while let Some((offset, grapheme)) = content.next() {
-            let cell = match display {
-                FieldDisplay::Focused | FieldDisplay::Unfocused => grapheme,
-                FieldDisplay::FocusedSecret if content.peek().is_none() => grapheme,
-                FieldDisplay::FocusedSecret | FieldDisplay::UnfocusedSecret => "•",
-            };
-            let span = Span::raw(cell.to_owned());
+        for (offset, grapheme) in editor.text()[start..].grapheme_indices(true) {
+            let span = Span::raw(grapheme.to_owned());
             let span = if focused { span.cyan() } else { span };
             let Some(rest) = remaining.checked_sub(span.width()) else {
                 break;
@@ -124,40 +112,4 @@ pub(crate) fn move_provider_field(key: KeyEvent, selected: &mut usize, count: us
         _ => return false,
     };
     true
-}
-
-impl AuthModeWidget {
-    pub(super) fn spawn_provider_setup(
-        &self,
-        request_id: RequestId,
-        retry: SignInState,
-        request: impl Future<Output = Result<(), String>> + Send + 'static,
-    ) {
-        let sign_in_state = self.sign_in_state.clone();
-        let error = self.error.clone();
-        let request_frame = self.request_frame.clone();
-        tokio::spawn(async move {
-            let result = request.await;
-            let mut state = sign_in_state
-                .write()
-                .unwrap_or_else(PoisonError::into_inner);
-            let configured = match &*state {
-                SignInState::Bedrock(bedrock) if bedrock.is_configuring(&request_id) => {
-                    SignInState::BedrockConfigured
-                }
-                SignInState::Gcp(gcp) if gcp.is_configuring(&request_id) => {
-                    SignInState::GcpConfigured
-                }
-                _ => return,
-            };
-            let (next, message) = match result {
-                Ok(()) => (configured, None),
-                Err(err) => (retry, Some(err)),
-            };
-            *state = next;
-            *error.write().unwrap_or_else(PoisonError::into_inner) = message;
-            drop(state);
-            request_frame.schedule_frame();
-        });
-    }
 }

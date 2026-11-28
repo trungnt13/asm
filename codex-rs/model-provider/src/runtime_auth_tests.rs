@@ -5,7 +5,6 @@ use codex_features::RuntimeAuthMode;
 use codex_login::AuthCredentialsStoreMode;
 use codex_login::AuthKeyringBackendKind;
 use codex_login::CodexAuth;
-use codex_login::auth::BedrockApiKeyAuth;
 use codex_login::auth::RefreshTokenFailedReason;
 use codex_protocol::config_types::ModelProviderAuthInfo;
 use codex_protocol::error::CodexErrorDetails;
@@ -193,59 +192,6 @@ async fn explicit_provider_key_keeps_the_requested_project_scope() {
             ActorInfo::Platform { project_id: Some(project), .. } if project == "proj-selected"
         ));
     }
-}
-
-#[tokio::test]
-async fn bedrock_auth_stays_independent_when_openai_runtime_auth_is_enabled() {
-    let server = MockServer::start().await;
-    let credentials =
-        AuthManager::from_auth_for_testing(CodexAuth::BedrockApiKey(BedrockApiKeyAuth {
-            api_key: "bedrock-key".into(),
-            region: "us-east-1".into(),
-        }));
-    let context = context(&server, credentials, RuntimeAuthMode::DualHeader).await;
-    let bedrock = context.model_provider(ModelProviderInfo::create_amazon_bedrock_provider(
-        /*aws*/ None,
-    ));
-    let headers = bedrock
-        .api_auth()
-        .await
-        .unwrap()
-        .apply_auth_headers(Default::default())
-        .await
-        .unwrap();
-    assert_eq!(headers["authorization"], "Bearer bedrock-key");
-    assert!(!headers.contains_key("x-openai-agent-assertion"));
-    assert!(server.received_requests().await.unwrap().is_empty());
-
-    let openai = context.model_provider(ModelProviderInfo {
-        experimental_bearer_token: Some("openai-key".into()),
-        ..ModelProviderInfo::create_openai_provider(/*base_url*/ None)
-    });
-    let headers = openai
-        .api_auth()
-        .await
-        .unwrap()
-        .apply_auth_headers(Default::default())
-        .await
-        .unwrap();
-    assert_eq!(headers["authorization"], "Bearer openai-key");
-    assert!(headers.contains_key("x-openai-agent-assertion"));
-    let headers = bedrock
-        .api_auth()
-        .await
-        .unwrap()
-        .apply_auth_headers(Default::default())
-        .await
-        .unwrap();
-    assert_eq!(headers["authorization"], "Bearer bedrock-key");
-    assert!(!headers.contains_key("x-openai-agent-assertion"));
-    let requests = server.received_requests().await.unwrap();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(
-        requests[0].body_json::<serde_json::Value>().unwrap()["actor_auth"]["credential"],
-        "openai-key"
-    );
 }
 
 #[tokio::test]

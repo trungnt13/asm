@@ -136,8 +136,6 @@ cli_auth_credentials_store = "file"
 suppress_unstable_features_warning = true
 [features]
 gateway_setup_wizard = true
-bedrock_setup_wizard = false
-gcp_setup_wizard = false
 api_key_model_discovery = false
 [projects.{trusted}]
 trust_level = "trusted"

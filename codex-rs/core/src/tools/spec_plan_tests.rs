@@ -8,13 +8,6 @@ use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_mcp::ToolInfo;
 use codex_model_provider::create_model_provider;
-use codex_model_provider_info::AMAZON_BEDROCK_GPT_5_5_MODEL_ID;
-use codex_model_provider_info::AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID;
-use codex_model_provider_info::AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID;
-use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
-use codex_model_provider_info::ModelProviderInfo;
-use codex_protocol::AgentPath;
-use codex_protocol::ThreadId;
 use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::error::CodexErrorDetails;
@@ -25,8 +18,6 @@ use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::openai_models::WebSearchToolType;
 use codex_protocol::protocol::MultiAgentVersion;
-use codex_protocol::protocol::SessionSource;
-use codex_protocol::protocol::SubAgentSource;
 use codex_tools::DiscoverablePluginInfo;
 use codex_tools::DiscoverableTool;
 use codex_tools::ResponsesApiNamespaceTool;
@@ -300,15 +291,6 @@ fn use_chatgpt_auth(turn: &mut TurnContext) {
         turn.config.model_provider.clone(),
         turn.auth_manager.clone(),
     );
-}
-
-fn use_bedrock_provider(turn: &mut TurnContext) {
-    let provider_info = ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None);
-    update_config(turn, |config| {
-        config.model_provider_id = AMAZON_BEDROCK_PROVIDER_ID.to_string();
-        config.model_provider = provider_info.clone();
-    });
-    turn.provider = create_model_provider(provider_info, turn.auth_manager.clone());
 }
 
 struct TestNamespaceExtensionTool {
@@ -1342,18 +1324,6 @@ async fn mcp_and_tool_search_follow_direct_and_deferred_tool_exposure() {
         "list_mcp_resource_templates",
         "read_mcp_resource",
     ]);
-
-    let bedrock_namespace_capability = probe_with(
-        |turn| {
-            update_turn_settings_for_test(turn, |settings| {
-                Arc::make_mut(&mut settings.model_info).supports_search_tool = true;
-            });
-            use_bedrock_provider(turn);
-        },
-        searchable_mcp(),
-    )
-    .await;
-    bedrock_namespace_capability.assert_visible_contains(&["tool_search"]);
 
     let enabled = probe_with(
         |turn| {
@@ -3038,79 +3008,6 @@ async fn multi_agent_v2_can_use_configured_tool_namespace() {
 }
 
 #[tokio::test]
-async fn multi_agent_v2_namespace_is_supported_by_bedrock_provider() {
-    let plan = probe(|turn| {
-        set_feature(turn, Feature::MultiAgentV2, /*enabled*/ true);
-        update_config(turn, |config| {
-            config.multi_agent_v2.tool_namespace = Some("agents".to_string());
-        });
-        use_bedrock_provider(turn);
-    })
-    .await;
-
-    plan.assert_visible_contains(&["agents"]);
-    plan.assert_visible_lacks(&["spawn_agent", "send_message", "list_agents"]);
-    assert!(
-        !plan
-            .registered_names
-            .contains(&ToolName::plain("spawn_agent").to_string())
-    );
-    assert!(
-        plan.registered_names
-            .contains(&ToolName::namespaced("agents", "spawn_agent").to_string())
-    );
-}
-
-#[tokio::test]
-async fn multi_agent_v2_bedrock_workers_only_delegate_when_model_supports_v2() {
-    for (model, model_multi_agent_version, supports_delegation) in [
-        (
-            AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID,
-            Some(MultiAgentVersion::V2),
-            true,
-        ),
-        (
-            AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID,
-            Some(MultiAgentVersion::V1),
-            false,
-        ),
-        (AMAZON_BEDROCK_GPT_5_5_MODEL_ID, None, false),
-    ] {
-        let plan = probe(|turn| {
-            set_feature(turn, Feature::MultiAgentV2, /*enabled*/ true);
-            update_config(turn, |config| {
-                config.multi_agent_v2.tool_namespace = Some("agents".to_string());
-            });
-            use_bedrock_provider(turn);
-            update_turn_settings_for_test(turn, |settings| {
-                Arc::make_mut(&mut settings.model_info).slug = model.to_string();
-                Arc::make_mut(&mut settings.model_info).multi_agent_version =
-                    model_multi_agent_version;
-            });
-            turn.session_source = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-                parent_thread_id: ThreadId::new(),
-                depth: 1,
-                agent_path: Some(AgentPath::try_from("/root/worker").expect("valid agent path")),
-                agent_nickname: None,
-                agent_role: None,
-            });
-        })
-        .await;
-
-        let spawn_agent_name = ToolName::namespaced("agents", "spawn_agent").to_string();
-        let followup_task_name = ToolName::namespaced("agents", "followup_task").to_string();
-        assert_eq!(plan.can_manage_children, supports_delegation);
-        if supports_delegation {
-            plan.assert_visible_contains(&["agents"]);
-            plan.assert_registered_contains(&[&spawn_agent_name, &followup_task_name]);
-        } else {
-            plan.assert_visible_lacks(&["agents"]);
-            plan.assert_registered_lacks(&[&spawn_agent_name, &followup_task_name]);
-        }
-    }
-}
-
-#[tokio::test]
 async fn multi_agent_catalog_code_mode_follows_tool_mode_and_preserves_runtime_fallback() {
     for (catalog, non_code_mode_only, follows_tool_mode) in [
         (None, true, false),
@@ -3296,22 +3193,6 @@ async fn hosted_web_search_and_standalone_image_generation_follow_runtime_gates(
     .await;
     text_only_model.assert_visible_lacks(&["image_gen"]);
 
-    let unsupported_provider = probe_with(
-        |turn| {
-            use_bedrock_provider(turn);
-            update_turn_settings_for_test(turn, |settings| {
-                Arc::make_mut(&mut settings.model_info).input_modalities =
-                    vec![InputModality::Image];
-            });
-        },
-        ToolPlanInputs {
-            extension_tool_executors: vec![image_generation_tool],
-            ..Default::default()
-        },
-    )
-    .await;
-    unsupported_provider.assert_visible_lacks(&["image_gen"]);
-
     let live_web_search = probe(|turn| {
         set_web_search_mode(turn, WebSearchMode::Live);
         update_turn_settings_for_test(turn, |settings| {
@@ -3412,38 +3293,6 @@ async fn hosted_web_search_and_standalone_image_generation_follow_runtime_gates(
     )
     .await;
     standalone_web_search.assert_visible_lacks(&["web_search"]);
-
-    let bedrock_cached_web_search = probe(|turn| {
-        set_web_search_mode(turn, WebSearchMode::Cached);
-        use_bedrock_provider(turn);
-        update_turn_settings_for_test(turn, |settings| {
-            Arc::make_mut(&mut settings.model_info).web_search_tool_type = WebSearchToolType::Text;
-        });
-    })
-    .await;
-    assert_eq!(
-        bedrock_cached_web_search.visible_spec("web_search"),
-        &ToolSpec::WebSearch {
-            external_web_access: Some(false),
-            indexed_web_access: None,
-            filters: None,
-            user_location: None,
-            search_context_size: None,
-            search_content_types: None,
-        }
-    );
-
-    let bedrock_with_standalone_web_search = probe(|turn| {
-        set_feature(turn, Feature::StandaloneWebSearch, /*enabled*/ true);
-        set_web_search_mode(turn, WebSearchMode::Cached);
-        use_bedrock_provider(turn);
-        update_turn_settings_for_test(turn, |settings| {
-            Arc::make_mut(&mut settings.model_info).web_search_tool_type = WebSearchToolType::Text;
-        });
-    })
-    .await;
-    bedrock_with_standalone_web_search.assert_visible_contains(&["web_search"]);
-    bedrock_with_standalone_web_search.assert_visible_lacks(&["web"]);
 }
 
 #[path = "spec_plan_strict_third_party_tests.rs"]

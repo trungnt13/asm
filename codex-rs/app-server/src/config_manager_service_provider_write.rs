@@ -1,7 +1,6 @@
 //! Applies provider field patches without selecting a provider or changing hidden credentials.
 //! RPC writes share the config queue and apply field patches with last-write-wins semantics.
 
-use super::ApiConfigEdit;
 use super::ConfigManager;
 use super::ConfigManagerError;
 use super::MergeStrategy;
@@ -9,25 +8,21 @@ use super::TomlValue;
 use super::model_providers::field_is_writable;
 use super::model_providers::has_external_auth;
 use super::model_providers::summarize_provider;
-use super::model_providers::supported_fields;
 use super::model_providers::valid_endpoint;
 use super::model_providers::writable_user_layer;
-use codex_app_server_protocol::BedrockProviderId;
 use codex_app_server_protocol::ConfigBatchWriteParams;
+use codex_app_server_protocol::ConfigEdit as ApiConfigEdit;
 use codex_app_server_protocol::ConfigWriteErrorCode;
 use codex_app_server_protocol::CustomGatewaySettingsParams;
-use codex_app_server_protocol::GcpProviderId;
 use codex_app_server_protocol::ModelProviderConfigWriteParams;
 use codex_app_server_protocol::ModelProviderConfigWriteResponse;
 use codex_app_server_protocol::ProviderSettingsPatch;
 use codex_config::ConfigLayerStack;
 use codex_config::LoaderOverrides;
-use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
-use codex_model_provider_info::AMAZON_BEDROCK_RUNTIME_PROVIDER_ID;
-use codex_model_provider_info::GCP_PROVIDER_ID;
 use codex_model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::built_in_model_providers;
+use codex_model_provider_info::is_removed_cloud_provider_id;
 use codex_model_provider_info::uses_builtin_auth;
 use std::collections::HashMap;
 
@@ -36,13 +31,18 @@ impl ConfigManager {
         &self,
         params: ModelProviderConfigWriteParams,
     ) -> Result<ModelProviderConfigWriteResponse, ConfigManagerError> {
+        let ProviderSettingsPatch::CustomGateway(patch) = &params.settings else {
+            return Err(invalid(
+                "Native cloud provider settings are not supported in ASM.",
+            ));
+        };
         let layers = self
             .load_thread_agnostic_config()
             .await
             .map_err(|err| ConfigManagerError::io("failed to read providers", err))?;
         let builtins = built_in_model_providers(/*openai_base_url*/ None);
         let (provider_id, edits) =
-            provider_edits(&params, &layers, self.loader_overrides(), &builtins)?;
+            provider_edits(patch, &layers, self.loader_overrides(), &builtins)?;
         let response = self
             .batch_write(ConfigBatchWriteParams {
                 edits,
@@ -67,7 +67,7 @@ impl ConfigManager {
             effective
                 .get("model_providers")
                 .and_then(|providers| providers.get(&provider_id)),
-            builtins.get(&provider_id),
+            /*builtin*/ None,
             &effective,
             &saved,
             writable_user_layer(&saved, self.loader_overrides()),
@@ -77,95 +77,60 @@ impl ConfigManager {
 }
 
 fn provider_edits(
-    params: &ModelProviderConfigWriteParams,
+    patch: &CustomGatewaySettingsParams,
     layers: &ConfigLayerStack,
     overrides: &LoaderOverrides,
     builtins: &HashMap<String, ModelProviderInfo>,
 ) -> Result<(String, Vec<ApiConfigEdit>), ConfigManagerError> {
     let effective = layers.effective_config();
     let configured = effective.get("model_providers");
-    let (provider_id, mut fields) = match &params.settings {
-        ProviderSettingsPatch::CustomGateway(patch) => {
-            let target = patch.provider_id.as_deref();
-            if target
-                .is_some_and(|id| builtins.contains_key(id) || id == LEGACY_OLLAMA_CHAT_PROVIDER_ID)
-            {
-                return Err(invalid(
-                    "A custom provider or gateway cannot use a built-in provider ID.",
-                ));
-            }
-            let existing = target.and_then(|id| configured?.get(id));
-            if target.is_some() && existing.is_none() {
-                return Err(ConfigManagerError::write(
-                    ConfigWriteErrorCode::ConfigPathNotFound,
-                    "Unknown provider ID.",
-                ));
-            }
-            let name = validate_custom_patch(patch, existing)?;
-            let id = if let Some(id) = target {
-                id.to_owned()
-            } else {
-                if patch.base_url.as_ref().and_then(Option::as_deref).is_none() {
-                    return Err(invalid(
-                        "A base URL is required to create a custom provider.",
-                    ));
-                }
-                let default_id = layers
-                    .required_model_provider()
-                    .or_else(|| effective.get("model_provider")?.as_str());
-                allocate_custom_id(name, |id| {
-                    builtins.contains_key(id)
-                        || configured.is_some_and(|table| table.get(id).is_some())
-                        || default_id == Some(id)
-                })
-            };
-            let mut fields =
-                patch_fields([("base_url", &patch.base_url), ("env_key", &patch.env_key)]);
-            if patch.name.is_some() {
-                fields.push(("name", Some(name)));
-            }
-            (id, fields)
+    let target = patch.provider_id.as_deref();
+    if target.is_some_and(is_removed_cloud_provider_id) {
+        return Err(invalid(
+            "Retired cloud provider IDs cannot be edited in ASM.",
+        ));
+    }
+    if target.is_some_and(|id| builtins.contains_key(id) || id == LEGACY_OLLAMA_CHAT_PROVIDER_ID) {
+        return Err(invalid(
+            "A custom provider or gateway cannot use a built-in provider ID.",
+        ));
+    }
+    let existing = target.and_then(|id| configured?.get(id));
+    if target.is_some() && existing.is_none() {
+        return Err(ConfigManagerError::write(
+            ConfigWriteErrorCode::ConfigPathNotFound,
+            "Unknown provider ID.",
+        ));
+    }
+    let name = validate_custom_patch(patch, existing)?;
+    let provider_id = if let Some(id) = target {
+        id.to_owned()
+    } else {
+        if patch.base_url.as_ref().and_then(Option::as_deref).is_none() {
+            return Err(invalid(
+                "A base URL is required to create a custom provider.",
+            ));
         }
-        ProviderSettingsPatch::Bedrock(patch) => {
-            let id = match patch.provider_id {
-                BedrockProviderId::AmazonBedrock => AMAZON_BEDROCK_PROVIDER_ID,
-                BedrockProviderId::AmazonBedrockRuntime => AMAZON_BEDROCK_RUNTIME_PROVIDER_ID,
-            };
-            (
-                id.to_owned(),
-                patch_fields([
-                    ("aws.profile", &patch.profile),
-                    ("aws.region", &patch.region),
-                ]),
-            )
-        }
-        ProviderSettingsPatch::Gcp(patch) => {
-            let GcpProviderId::Gcp = patch.provider_id;
-            (
-                GCP_PROVIDER_ID.to_owned(),
-                patch_fields([
-                    ("project_id", &patch.project_id),
-                    ("location", &patch.location),
-                    ("credential_file", &patch.credential_file),
-                ]),
-            )
-        }
+        let default_id = layers
+            .required_model_provider()
+            .or_else(|| effective.get("model_provider")?.as_str());
+        allocate_custom_id(name, |id| {
+            builtins.contains_key(id)
+                || configured.is_some_and(|table| table.get(id).is_some())
+                || default_id == Some(id)
+        })
     };
+    let mut fields = patch_fields([("base_url", &patch.base_url), ("env_key", &patch.env_key)]);
+    if patch.name.is_some() {
+        fields.push(("name", Some(name)));
+    }
     if fields.iter().any(|(_, value)| *value == Some("")) {
         return Err(invalid(
             "Configuration values must not be empty; use null to clear a field.",
         ));
     }
-    let existing = configured.and_then(|providers| providers.get(&provider_id));
-    let builtin = builtins.get(&provider_id);
     let user_layer = writable_user_layer(layers, overrides);
-    let supported = supported_fields(&provider_id, existing, builtin);
     for (field, _) in &fields {
-        if !supported.contains(field) {
-            return Err(invalid(
-                "A supplied field is not editable for this provider.",
-            ));
-        }
         if !field_is_writable(layers, user_layer, &provider_id, field) {
             return Err(ConfigManagerError::write(
                 ConfigWriteErrorCode::ConfigLayerReadonly,
@@ -176,8 +141,7 @@ fn provider_edits(
     // Custom override tables require a name, but clearing an absent leaf needs no table.
     let user_provider =
         user_layer.and_then(|layer| layer.config.get("model_providers")?.get(&provider_id));
-    if builtin.is_none()
-        && !fields.is_empty()
+    if !fields.is_empty()
         && !fields.iter().any(|(field, _)| *field == "name")
         && (user_provider.is_some() || fields.iter().any(|(_, value)| value.is_some()))
         && user_provider
@@ -187,7 +151,7 @@ fn provider_edits(
     {
         fields.push(("name", Some(name)));
     }
-    if builtin.is_none() && existing.is_none() {
+    if existing.is_none() {
         fields.push(("wire_api", Some("responses")));
     }
     let escaped_id = provider_id.replace('\\', "\\\\").replace('"', "\\\"");
@@ -279,7 +243,8 @@ fn allocate_custom_id(name: &str, is_taken: impl Fn(&str) -> bool) -> String {
     let stem = if slug.is_empty() { "custom" } else { &slug };
     let mut id = stem.to_owned();
     let mut suffix = 2;
-    while id == LEGACY_OLLAMA_CHAT_PROVIDER_ID || is_taken(&id) {
+    while id == LEGACY_OLLAMA_CHAT_PROVIDER_ID || is_removed_cloud_provider_id(&id) || is_taken(&id)
+    {
         id = format!("{stem}-{suffix}");
         suffix += 1;
     }
