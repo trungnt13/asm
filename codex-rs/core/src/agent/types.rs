@@ -3,11 +3,14 @@
 
 use crate::context::MultiAgentRoleInstructions;
 use crate::environment_selection::TurnEnvironmentSnapshot;
+use codex_history::InitialHistory;
+use codex_history::ResponseItemEnvelope;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::AgentStatus;
 use codex_protocol::turn_input::CyberAccessProgram;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Registry identity shared by loaded and unloaded agents.
 /// Registered agents have an `agent_id`; a reserved spawn can still be awaiting its ID.
@@ -22,6 +25,15 @@ pub struct AgentMetadata {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SpawnAgentForkMode {
     FullHistory,
+}
+
+#[derive(Clone, Debug)]
+pub enum NativeForkCut {
+    Rollout(InitialHistory),
+    LivePrefix {
+        items: Arc<Vec<ResponseItemEnvelope>>,
+        len: usize,
+    },
 }
 
 /// Whether a spawn program was chosen for the child or copied from its parent turn.
@@ -40,7 +52,7 @@ pub struct SpawnAgentOptions {
     pub request_country: codex_protocol::RequestCountry,
     pub fork_parent_spawn_call_id: Option<String>,
     pub fork_mode: Option<SpawnAgentForkMode>,
-    pub native_fork_cut: Option<codex_history::InitialHistory>,
+    pub native_fork_cut: Option<NativeForkCut>,
     pub parent_thread_id: Option<ThreadId>,
     pub parent_turn_id: Option<String>,
     /// Attribute delegated usage to the turn that initiated it.

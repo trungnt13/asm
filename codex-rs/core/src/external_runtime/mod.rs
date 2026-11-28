@@ -846,6 +846,8 @@ async fn run_conversation(
             baseline.cursor_submitted = baseline.rendered.clone();
             turn.extension_data
                 .insert(CursorMailbox::new(runtime.checkpoint.input_count));
+            turn.extension_data
+                .insert(active_handoff::CursorHandoffCapture::default());
         }
         let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(/*buffer*/ 32);
         let mut stream = events::MessageStream::default();

@@ -34,6 +34,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use super::active_handoff::CursorHandoffInvocation;
 use super::active_handoff::HandoffInvocation;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
@@ -526,6 +527,18 @@ async fn invoke_message_tool(
         step.extension_data.insert(HandoffInvocation {
             tool_use_id: tool_use_id.to_owned(),
             tool_name: format!("mcp__asm__{name}"),
+            active,
+        });
+        Some(lease)
+    } else if native_runtime == NativeRuntime::CursorAgent
+        && let Some(tool_use_id) = params["nativeToolUseId"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+    {
+        let active = turn.cancel.child_token();
+        let lease = active.clone().drop_guard();
+        step.extension_data.insert(CursorHandoffInvocation {
+            tool_use_id: tool_use_id.to_owned(),
             active,
         });
         Some(lease)

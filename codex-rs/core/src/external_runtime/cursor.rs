@@ -30,7 +30,24 @@ pub(super) async fn record_cursor_frame(
 ) -> anyhow::Result<Option<String>> {
     let kind = frame["type"].as_str();
     match kind {
-        Some("assistant_end") => return complete_cursor_message(session, turn, stream).await,
+        Some("assistant_end") => {
+            let message = complete_cursor_message(session, turn, stream).await?;
+            if let Some(call_id) = frame["cursorToolCallId"].as_str()
+                && let Some(capture) = turn
+                    .extension_data
+                    .get::<super::active_handoff::CursorHandoffCapture>()
+            {
+                let count = session.shared_history_items().await.len();
+                capture.send_modify(|cuts| {
+                    // Retain recent boundaries without storing a copy of the history per call.
+                    if cuts.len() == 32 {
+                        cuts.pop_front();
+                    }
+                    cuts.push_back((call_id.to_owned(), count));
+                });
+            }
+            return Ok(message);
+        }
         Some("thinking_end") => {
             complete_cursor_thinking(session, turn, stream).await;
             return Ok(None);

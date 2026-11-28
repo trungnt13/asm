@@ -40,10 +40,18 @@ pub(crate) fn project(
         |context_ids| ContextManager::new(context_ids, /*retention*/ None),
         TruncationPolicy::Bytes(0),
     );
+    project_items(&reconstructed.history, max_history_bytes, retain)
+}
+
+pub(crate) fn project_items(
+    items: &[ResponseItemEnvelope],
+    max_history_bytes: usize,
+    retain: impl Fn(&ResponseItemEnvelope) -> bool,
+) -> Result<Vec<ResponseItemEnvelope>, CodexErr> {
     let mut candidates = Vec::new();
     let mut last_source_turn = None;
     let mut turn_id = crate::session::new_submission_id();
-    for envelope in reconstructed.history.iter().filter(|item| retain(item)) {
+    for envelope in items.iter().filter(|item| retain(item)) {
         let ResponseItem::Message {
             role,
             content,

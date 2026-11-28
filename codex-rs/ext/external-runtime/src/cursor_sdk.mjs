@@ -200,7 +200,6 @@ async function prompt(frame, turn) {
       }
     }
 
-    let messageOpen = false;
     let displayedText = false;
     const run = await agent.send({ text: text.join("\n\n"), images }, {
       model: selection,
@@ -208,14 +207,13 @@ async function prompt(frame, turn) {
       onDelta({ update }) {
         if (update.type === "text-delta" && update.text) {
           emit({ type: "assistant_delta", text: update.text });
-          messageOpen = displayedText = true;
+          displayedText = true;
         } else if (update.type === "thinking-delta" && update.text) {
           emit({ type: "thinking_delta", text: update.text });
         } else if (update.type === "thinking-completed") {
           emit({ type: "thinking_end" });
-        } else if (update.type === "tool-call-started" && messageOpen) {
-          emit({ type: "assistant_end" });
-          messageOpen = false;
+        } else if (update.type === "tool-call-started") {
+          emit({ type: "assistant_end", cursorToolCallId: update.callId });
         }
       },
     });
