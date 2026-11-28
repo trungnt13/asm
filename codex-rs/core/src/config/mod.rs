@@ -115,6 +115,7 @@ use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_model_provider_info::WireApi;
 use codex_model_provider_info::built_in_model_providers;
 use codex_model_provider_info::merge_configured_model_providers;
+use codex_models_manager::ExternalModels;
 use codex_models_manager::ModelsManagerConfig;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::MemoryVersion;
@@ -1196,6 +1197,9 @@ pub struct Config {
 
     pub load_external_models_json: bool,
 
+    /// Trusted external model routes for this configuration.
+    pub external_models: Arc<ExternalModels>,
+
     /// Optional verbosity control for GPT-5 models (Responses API `text.verbosity`).
     pub model_verbosity: Option<Verbosity>,
 
@@ -1743,21 +1747,30 @@ impl ConfigBuilder {
     pub async fn build(self) -> std::io::Result<Config> {
         // Keep the large config-loading future off small runtime thread stacks.
         // Avoid an additional async frame for ordinary config loads.
-        Box::pin(self.build_inner(|_, _, _| Ok(()))).await
+        Box::pin(self.build_inner(|_, _, _, _| Ok(()))).await
     }
 
-    /// Validates the same loaded configuration that will be materialized, before provider
-    /// selection or initialization. Validation cannot alter the loaded configuration.
-    pub async fn build_with_validation(
+    /// Resolves thread overrides against the loaded configuration before provider selection.
+    pub async fn build_with_override_resolution(
         self,
-        validate: impl FnOnce(&ConfigToml, &ConfigOverrides, &ConfigLayerStack) -> std::io::Result<()>,
+        resolve_overrides: impl FnOnce(
+            &ConfigToml,
+            &mut ConfigOverrides,
+            &ConfigLayerStack,
+            &ExternalModels,
+        ) -> std::io::Result<()>,
     ) -> std::io::Result<Config> {
-        Box::pin(self.build_inner(validate)).await
+        Box::pin(self.build_inner(resolve_overrides)).await
     }
 
     async fn build_inner(
         self,
-        validate: impl FnOnce(&ConfigToml, &ConfigOverrides, &ConfigLayerStack) -> std::io::Result<()>,
+        resolve_overrides: impl FnOnce(
+            &ConfigToml,
+            &mut ConfigOverrides,
+            &ConfigLayerStack,
+            &ExternalModels,
+        ) -> std::io::Result<()>,
     ) -> std::io::Result<Config> {
         let Self {
             codex_home,
@@ -1803,13 +1816,20 @@ impl ConfigBuilder {
         )
         .await?;
         let config_toml = config_toml_from_layers(&config_layer_stack).await?;
-        validate(&config_toml, &harness_overrides, &config_layer_stack)?;
-        Config::load_config_with_layer_stack(
+        let external_models = external_models_from_config(&config_toml)?;
+        resolve_overrides(
+            &config_toml,
+            &mut harness_overrides,
+            &config_layer_stack,
+            &external_models,
+        )?;
+        Config::materialize_config(
             LOCAL_FS.as_ref(),
             config_toml,
             harness_overrides,
             codex_home,
             config_layer_stack,
+            Some(external_models),
         )
         .await
     }
@@ -1818,6 +1838,12 @@ impl ConfigBuilder {
     pub(crate) fn without_managed_config_for_tests() -> Self {
         Self::default().loader_overrides(LoaderOverrides::without_managed_config_for_tests())
     }
+}
+
+fn external_models_from_config(config: &ConfigToml) -> std::io::Result<Arc<ExternalModels>> {
+    ExternalModels::from_config(&config.external_models)
+        .map(Arc::new)
+        .map_err(|message| std::io::Error::new(ErrorKind::InvalidData, message))
 }
 
 async fn config_toml_from_layers(layers: &ConfigLayerStack) -> std::io::Result<ConfigToml> {
@@ -3644,10 +3670,28 @@ impl Config {
 
     pub(crate) fn load_config_with_layer_stack(
         fs: &dyn ExecutorFileSystem,
+        cfg: ConfigToml,
+        overrides: ConfigOverrides,
+        codex_home: AbsolutePathBuf,
+        config_layer_stack: ConfigLayerStack,
+    ) -> BoxFuture<'_, std::io::Result<Self>> {
+        Self::materialize_config(
+            fs,
+            cfg,
+            overrides,
+            codex_home,
+            config_layer_stack,
+            /*external_models*/ None,
+        )
+    }
+
+    fn materialize_config(
+        fs: &dyn ExecutorFileSystem,
         mut cfg: ConfigToml,
         overrides: ConfigOverrides,
         codex_home: AbsolutePathBuf,
         config_layer_stack: ConfigLayerStack,
+        external_models: Option<Arc<ExternalModels>>,
     ) -> BoxFuture<'_, std::io::Result<Self>> {
         // Keep the large future off small test thread stacks and share its poll code across callers.
         async move {
@@ -3661,6 +3705,10 @@ impl Config {
 
         validate_model_providers(&cfg.model_providers)
             .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
+        let external_models = match external_models {
+            Some(external_models) => external_models,
+            None => external_models_from_config(&cfg)?,
+        };
         let subagent_model_context_windows = cfg.subagent_model_context_windows
             .iter()
             .map(|(model, tokens)| {
@@ -4590,7 +4638,7 @@ impl Config {
             .as_deref()
             .is_some_and(|model| {
                 codex_protocol::openai_models::is_native_runtime_model(
-                    codex_models_manager::canonical_model(model).unwrap_or(model),
+                    external_models.canonical_model(model).unwrap_or(model),
                 )
             });
         let session_overrides_service_tier = config_layer_stack.layers_high_to_low().any(|layer| {
@@ -4747,6 +4795,21 @@ impl Config {
 
         let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(true);
         let model_catalog = load_model_catalog(cfg.model_catalog_json.clone())?;
+        if let Some(model) = model_catalog
+            .as_ref()
+            .into_iter()
+            .flat_map(|catalog| &catalog.models)
+            .find(|model| {
+                external_models
+                    .canonical_model(&model.slug)
+                    .is_some_and(|canonical| external_models.is_configured(canonical))
+            })
+        {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidData,
+                format!("External model alias {:?} collides with a model ID in model_catalog_json", model.slug),
+            ));
+        }
 
         let log_dir = cfg
             .log_dir
@@ -5158,6 +5221,7 @@ impl Config {
             model_reasoning_summary: cfg.model_reasoning_summary,
             model_catalog,
             load_external_models_json: cfg.load_external_models_json.unwrap_or(true),
+            external_models,
             continue_when_model_at_capacity: cfg.continue_when_model_at_capacity.unwrap_or(false),
             native_runtimes: cfg.native_runtimes,
             handoff: cfg.handoff,

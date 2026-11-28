@@ -1664,6 +1664,11 @@ impl CodexThread {
         self.session.get_config().await
     }
 
+    /// Capture the config with the live model selection, which may differ from its default.
+    pub async fn config_and_model(&self) -> (Arc<crate::config::Config>, String) {
+        self.session.config_and_model().await
+    }
+
     /// List the thread's current hook declarations, including its selected, ready environments.
     pub fn list_hooks(&self) -> codex_hooks::HookListOutcome {
         let environments = self.session.services.turn_environments.snapshot_now();

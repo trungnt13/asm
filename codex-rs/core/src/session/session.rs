@@ -428,6 +428,9 @@ impl SessionConfiguration {
                 .original_config_do_not_use
                 .config_layer_stack
                 .requirements(),
+            external_models: &self.original_config_do_not_use.external_models,
+            model_provider_id: &self.original_config_do_not_use.model_provider_id,
+            session_source: &self.session_source,
             guardian_approval_enabled: self
                 .original_config_do_not_use
                 .features
@@ -1990,6 +1993,7 @@ impl Session {
                 crate::cyber_access_program::ApiKeyCyberAccessPrograms::from_config(&config),
                 config.continue_when_model_at_capacity,
                 required_cyber_access_programs,
+                Arc::clone(&config.external_models),
             );
             // Once tracing starts, startup cleanup must own the session before the next await.
             let rollout_thread_trace = if !config.diagnostic_log_capture {

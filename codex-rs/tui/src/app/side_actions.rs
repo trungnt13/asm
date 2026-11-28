@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::app_event::SideConversationAction;
+use crate::app_server_session::ForkModelProvider;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
@@ -246,6 +247,7 @@ impl App {
                         &self.local_settings,
                         config,
                         Some(self.chat_widget.session_workspace_roots()),
+                        ForkModelProvider::Retain,
                         thread_id,
                         /*last_turn_id*/ None,
                         /*before_turn_id*/ None,

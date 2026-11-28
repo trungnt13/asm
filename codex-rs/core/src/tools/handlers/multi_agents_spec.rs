@@ -554,43 +554,47 @@ fn spawn_agent_models_description(
         return "No picker-visible model overrides are currently loaded.".to_string();
     }
 
-    let model_descriptions = visible_models
-        .into_iter()
-        .map(|model| {
-            let default_reasoning_effort = &model.default_reasoning_effort;
-            let efforts = model
-                .supported_reasoning_efforts
-                .iter()
-                .map(|preset| {
-                    let effort = preset.effort.as_str();
-                    let effort = match effort
-                        .char_indices()
-                        .nth(MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION)
-                    {
-                        Some((index, _)) => &effort[..index],
-                        None => effort,
-                    };
-                    if &preset.effort == default_reasoning_effort {
-                        format!("{effort} (default)")
-                    } else {
-                        effort.to_string()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            let reasoning_efforts_suffix = if efforts.is_empty() {
-                String::new()
-            } else {
-                format!(" Reasoning efforts: {efforts}.")
-            };
-            let model_slug = &model.model;
-            let description = &model.description;
-            let window = context_window_label(windows, model_slug);
-            format!("- `{model_slug}`: {description}{reasoning_efforts_suffix} {window}")
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!("{heading}:\n{CONTEXT_WINDOW_SCOPE}\n{model_descriptions}")
+    const MAX_RENDERED_BYTES: usize = 1_000;
+    const OMITTED_NOTICE: &str = "\nAdditional model choices omitted.";
+    let mut catalog = format!("{heading}:\n{CONTEXT_WINDOW_SCOPE}");
+    for model in visible_models {
+        let default_reasoning_effort = &model.default_reasoning_effort;
+        let efforts = model
+            .supported_reasoning_efforts
+            .iter()
+            .map(|preset| {
+                let effort = preset.effort.as_str();
+                let effort = match effort
+                    .char_indices()
+                    .nth(MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION)
+                {
+                    Some((index, _)) => &effort[..index],
+                    None => effort,
+                };
+                if &preset.effort == default_reasoning_effort {
+                    format!("{effort} (default)")
+                } else {
+                    effort.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let reasoning_efforts_suffix = if efforts.is_empty() {
+            String::new()
+        } else {
+            format!(" Reasoning efforts: {efforts}.")
+        };
+        let model_slug = &model.model;
+        let description = &model.description;
+        let window = context_window_label(windows, model_slug);
+        let line = format!("\n- `{model_slug}`: {description}{reasoning_efforts_suffix} {window}");
+        if catalog.len() + line.len() + OMITTED_NOTICE.len() > MAX_RENDERED_BYTES {
+            catalog.push_str(OMITTED_NOTICE);
+            break;
+        }
+        catalog.push_str(&line);
+    }
+    catalog
 }
 
 fn wait_agent_tool_parameters_v2(options: WaitAgentTimeoutOptions) -> JsonSchema {

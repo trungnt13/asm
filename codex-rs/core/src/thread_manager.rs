@@ -949,6 +949,7 @@ impl ThreadManager {
                     )),
                     /*api_key_model_discovery_default*/ false,
                     /*load_external_models_json*/ true,
+                    Arc::default(),
                     codex_model_provider::ProviderAuthContext {
                         credentials: Arc::clone(&auth_manager),
                         runtime_auth: None,
@@ -1190,6 +1191,7 @@ impl ThreadManager {
             config.features.enabled(Feature::ApiKeyModelDiscovery),
         );
         manager.set_load_external_models_json(config.load_external_models_json);
+        manager.set_external_models(Arc::clone(&config.external_models));
         manager
     }
 
@@ -1211,6 +1213,13 @@ impl ThreadManager {
             ));
         }
         let (source, _) = options.effective_sources(&self.state.session_source);
+        let mut config = options.config.clone();
+        crate::session::prepare_external_model_route(
+            &mut config,
+            &options.initial_history,
+            &source,
+        )?;
+        self.state.check_external_alias_collision(&config).await?;
         let originator = self
             .state
             .effective_originator(
@@ -1225,15 +1234,15 @@ impl ThreadManager {
         let manager = self
             .state
             .models_for_thread(
-                &options.config,
-                &self.catalog_auth_context(&options.config),
+                &config,
+                &self.catalog_auth_context(&config),
                 &originator,
                 &source,
             )
             .await;
         let (_, info) = Session::resolve_startup_model(
             manager.as_ref(),
-            &options.config,
+            &config,
             &source,
             options.allow_provider_model_fallback,
         )
@@ -1990,6 +1999,29 @@ impl ThreadManager {
                 .filter(|meta| Some(meta.id) == source_thread_id)
                 .and_then(|meta| meta.model_provider.as_deref())
         });
+        options.config.apply_external_model_provider()?;
+        if let Some(source_model) = crate::session::recorded_history_models(&history).next_back() {
+            let catalog = &options.config.external_models;
+            let source_alias = catalog.canonical_model(source_model);
+            let inherits_model = options
+                .config
+                .model
+                .as_deref()
+                .is_none_or(|target| target == source_model || Some(target) == source_alias);
+            if inherits_model
+                && (source_alias.is_some()
+                    || source_provider.is_some_and(|saved| {
+                        catalog
+                            .provider_for_model(source_model)
+                            .is_some_and(|provider| provider != saved)
+                    }))
+            {
+                return Err(CodexErr::InvalidRequest(
+                    "The saved model route has changed; choose a different model or start a fresh thread"
+                        .to_string(),
+                ));
+            }
+        }
         let native_source = crate::session::history_native_model(&history);
         let native_target = options
             .config
@@ -2168,6 +2200,29 @@ impl ThreadManager {
 }
 
 impl ThreadManagerState {
+    async fn check_external_alias_collision(&self, config: &Config) -> CodexResult<()> {
+        let Some(alias) = config
+            .model
+            .as_deref()
+            .and_then(|model| config.external_models.model_alias(model))
+        else {
+            return Ok(());
+        };
+        // A client may already have normalized the selector. Check the startup catalog's
+        // current snapshot so a refresh can't replace the evidence of a known collision.
+        if self
+            .model_catalog
+            .manager
+            .catalog_contains_model(alias)
+            .await
+        {
+            return Err(CodexErr::InvalidRequest(format!(
+                "Model selector `{alias}` is both a configured alias and a catalog model ID. Rename the alias in user config."
+            )));
+        }
+        Ok(())
+    }
+
     pub(crate) fn models_manager_for_config(&self, config: &Config) -> SharedModelsManager {
         let credentials = Arc::clone(&self.auth_manager);
         let runtime = crate::runtime_auth::runtime_for_config(
@@ -2834,7 +2889,14 @@ impl ThreadManagerState {
         let native_runtime = config
             .model
             .as_deref()
-            .and_then(NativeRuntime::for_model)
+            .and_then(|model| {
+                NativeRuntime::for_model(
+                    config
+                        .external_models
+                        .canonical_model(model)
+                        .unwrap_or(model),
+                )
+            })
             .map(|(runtime, _)| runtime);
         if native_runtime == Some(NativeRuntime::CursorAgent)
             && (side || config.ephemeral && matches!(initial_history, InitialHistory::Forked(_)))
@@ -2980,6 +3042,12 @@ impl ThreadManagerState {
                 thread.session.services.mcp_runtime.revoke_ema();
             }
         }
+        crate::session::prepare_external_model_route(
+            &mut config,
+            &initial_history,
+            &session_source,
+        )?;
+        self.check_external_alias_collision(&config).await?;
         if matches!(
             &session_source,
             SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })

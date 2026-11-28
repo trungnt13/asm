@@ -1,4 +1,5 @@
 use super::cache::FileModelsCache;
+use crate::ExternalModels;
 use crate::ModelCatalogOriginator;
 use crate::cache::ModelsCache;
 use crate::cache::ModelsCacheEntry;
@@ -29,6 +30,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -46,7 +48,7 @@ const DEFAULT_MODEL_CACHE_TTL: Duration = Duration::from_secs(300);
 
 // The embedded catalog cannot change during this process. Preserve the existing empty fallback
 // on parse failure, and share the parsed data until a caller needs an owned catalog to mutate.
-static BUNDLED_MODELS: LazyLock<Vec<ModelInfo>> =
+pub(crate) static BUNDLED_MODELS: LazyLock<Vec<ModelInfo>> =
     LazyLock::new(|| load_remote_models_from_file().unwrap_or_default());
 
 /// Remote endpoint used by the OpenAI-compatible model manager.
@@ -214,6 +216,9 @@ pub trait ModelsManager: fmt::Debug + Send + Sync {
     /// Set startup external-model visibility. Explicit catalogs ignore this setting.
     fn set_load_external_models_json(&self, _enabled: bool) {}
 
+    /// Publish routes before sharing the manager that selects bundled models by provider.
+    fn set_external_models(&self, _models: Arc<ExternalModels>) {}
+
     /// List all available models, refreshing according to the specified strategy.
     ///
     /// Returns model presets sorted by priority and filtered by auth mode and visibility.
@@ -261,6 +266,9 @@ pub trait ModelsManager: fmt::Debug + Send + Sync {
         refresh_strategy: RefreshStrategy,
         http_client_factory: HttpClientFactory,
     ) -> ModelsManagerFuture<'_, Vec<CatalogModel>>;
+
+    /// Check exact membership without refreshing the catalog.
+    fn catalog_contains_model<'a>(&'a self, model: &'a str) -> ModelsManagerFuture<'a, bool>;
 
     /// Best-effort refresh when the in-memory catalog belongs to different credentials.
     /// Static catalogs need no refresh. Failures follow the catalog's fallback policy.
@@ -445,10 +453,21 @@ pub struct OpenAiModelsManager {
 /// Static model manager backed by an authoritative in-process catalog.
 #[derive(Debug)]
 pub struct StaticModelsManager {
-    remote_models: Vec<ModelInfo>,
+    source: StaticCatalogSource,
     load_external_models_json: Option<AtomicBool>,
     auth_manager: Option<Arc<AuthManager>>,
-    origin: ModelOrigin,
+}
+
+#[derive(Debug)]
+enum StaticCatalogSource {
+    Supplied {
+        models: Vec<ModelInfo>,
+        origin: ModelOrigin,
+    },
+    BoundProvider {
+        provider: String,
+        routes: OnceLock<Arc<ExternalModels>>,
+    },
 }
 
 impl OpenAiModelsManager {
@@ -532,17 +551,14 @@ impl OpenAiModelsManager {
 impl StaticModelsManager {
     /// Use local catalog entries bound to a provider without probing a remote endpoint.
     pub fn for_bundled_provider(provider: &str) -> Self {
-        let models = crate::external_models::models()
-            .filter(|model| {
-                crate::external_models::provider_for_model(&model.slug) == Some(provider)
-            })
-            .cloned()
-            .collect();
-        Self::new(
-            /*auth_manager*/ None,
-            ModelsResponse { models },
-            ModelOrigin::Bundled,
-        )
+        Self {
+            source: StaticCatalogSource::BoundProvider {
+                provider: provider.to_owned(),
+                routes: OnceLock::new(),
+            },
+            load_external_models_json: None,
+            auth_manager: None,
+        }
     }
 
     /// Construct a static model manager with the source of its supplied catalog.
@@ -552,10 +568,12 @@ impl StaticModelsManager {
         origin: ModelOrigin,
     ) -> Self {
         Self {
-            remote_models: model_catalog.models,
+            source: StaticCatalogSource::Supplied {
+                models: model_catalog.models,
+                origin,
+            },
             load_external_models_json: None,
             auth_manager,
-            origin,
         }
     }
 
@@ -566,24 +584,44 @@ impl StaticModelsManager {
     }
 
     fn models(&self) -> Vec<ModelInfo> {
-        let mut models = self.remote_models.clone();
-        if self
-            .load_external_models_json
+        match &self.source {
+            StaticCatalogSource::Supplied { models, .. } => {
+                let mut combined = models.clone();
+                if self.supplements_bundled_models() {
+                    combined.extend(
+                        crate::external_models::models()
+                            .filter(|entry| !models.iter().any(|model| model.slug == entry.slug))
+                            .cloned(),
+                    );
+                }
+                combined
+            }
+            StaticCatalogSource::BoundProvider { provider, routes } => {
+                crate::external_models::models()
+                    .filter(|model| bundled_model_is_bound(&model.slug, provider, routes))
+                    .cloned()
+                    .collect()
+            }
+        }
+    }
+
+    fn supplements_bundled_models(&self) -> bool {
+        self.load_external_models_json
             .as_ref()
             .is_some_and(|enabled| enabled.load(Ordering::SeqCst))
-        {
-            models.extend(
-                crate::external_models::models()
-                    .filter(|external| {
-                        !self
-                            .remote_models
-                            .iter()
-                            .any(|model| model.slug == external.slug)
-                    })
-                    .cloned(),
-            );
+    }
+
+    fn model_origin(&self, slug: &str) -> ModelOrigin {
+        match &self.source {
+            StaticCatalogSource::Supplied { models, origin }
+                if models.iter().any(|entry| entry.slug == slug) =>
+            {
+                *origin
+            }
+            StaticCatalogSource::Supplied { .. } | StaticCatalogSource::BoundProvider { .. } => {
+                ModelOrigin::Bundled
+            }
         }
-        models
     }
 }
 
@@ -685,6 +723,19 @@ impl ModelsManager for OpenAiModelsManager {
         })
     }
 
+    fn catalog_contains_model<'a>(&'a self, model: &'a str) -> ModelsManagerFuture<'a, bool> {
+        Box::pin(async move {
+            let state = self.remote_models.read().await;
+            self.select_catalog(&state.entry)
+                .into_models()
+                .iter()
+                .any(|entry| entry.slug == model)
+                || (matches!(self.catalog_source, CatalogSource::Default)
+                    && self.load_external_models_json.load(Ordering::SeqCst)
+                    && crate::external_models::bundled_model(model).is_some())
+        })
+    }
+
     fn for_originator(&self, originator: &str) -> Option<SharedModelsManager> {
         let originator = ModelCatalogOriginator::from_originator(originator)?;
         let mut managers = self
@@ -781,15 +832,31 @@ impl ModelsManager for OpenAiModelsManager {
         Box::pin(async move {
             let remote = {
                 let entry = self.remote_models.read().await;
-                let selected = self.models_for_entry(&entry.entry);
+                let selected = self.select_catalog(&entry.entry);
                 let models = match &selected {
                     SelectedCatalog::CurrentSnapshot(models)
                     | SelectedCatalog::Fallback(models) => models,
                 };
                 let model = match &self.catalog_source {
-                    CatalogSource::Default => crate::external_models::bundled_provider_model(model)
-                        .map(|(_, info)| info.clone())
-                        .or_else(|| find_model_from_candidates(model, models)),
+                    CatalogSource::Default => {
+                        let include_bundled = self.load_external_models_json.load(Ordering::SeqCst);
+                        let bundled = if include_bundled {
+                            crate::external_models::bundled_model(model)
+                        } else {
+                            crate::external_models::bundled_provider_model(model)
+                                .map(|(_, info)| info)
+                        };
+                        bundled
+                            .or_else(|| models.iter().find(|entry| entry.slug == model))
+                            .cloned()
+                            .or_else(|| {
+                                let mut candidates = Cow::Borrowed(models.as_ref());
+                                if include_bundled {
+                                    replace_with_bundled_external_models(&mut candidates);
+                                }
+                                find_model_from_candidates(model, &candidates)
+                            })
+                    }
                     CatalogSource::ExplicitProvider(_) => models
                         .iter()
                         .find(|candidate| candidate.slug == model)
@@ -839,8 +906,8 @@ impl OpenAiModelsManager {
     }
 
     /// Selects the catalog available under the current provider and auth identity.
-    fn models_for_entry<'a>(&self, entry: &'a ModelsCacheEntry) -> SelectedCatalog<'a> {
-        let mut selected = if !self.api_key_discovery_disabled()
+    fn select_catalog<'a>(&self, entry: &'a ModelsCacheEntry) -> SelectedCatalog<'a> {
+        if !self.api_key_discovery_disabled()
             && entry.identity.is_some()
             && entry.identity == self.endpoint_client.identity()
         {
@@ -849,19 +916,20 @@ impl OpenAiModelsManager {
             SelectedCatalog::Fallback(Cow::Borrowed(
                 self.catalog_source.fallback_models().unwrap_or_default(),
             ))
-        };
+        }
+    }
+
+    fn models_for_entry<'a>(&self, entry: &'a ModelsCacheEntry) -> SelectedCatalog<'a> {
+        let mut selected = self.select_catalog(entry);
         if matches!(self.catalog_source, CatalogSource::Default)
             && self.load_external_models_json.load(Ordering::SeqCst)
         {
             let models = match &mut selected {
                 SelectedCatalog::CurrentSnapshot(models) | SelectedCatalog::Fallback(models) => {
-                    models.to_mut()
+                    models
                 }
             };
-            models.retain(|model| {
-                !crate::external_models::models().any(|external| external.slug == model.slug)
-            });
-            models.extend(crate::external_models::models().cloned());
+            replace_with_bundled_external_models(models);
         }
         selected
     }
@@ -1216,6 +1284,18 @@ impl ModelsManager for StaticModelsManager {
         }
     }
 
+    fn set_external_models(&self, models: Arc<ExternalModels>) {
+        if let StaticCatalogSource::BoundProvider { routes, .. } = &self.source
+            && let Err(models) = routes.set(models)
+        {
+            assert_eq!(
+                routes.get(),
+                Some(&models),
+                "external model routes are immutable"
+            );
+        }
+    }
+
     fn ensure_initialized(
         &self,
         _http_client_factory: HttpClientFactory,
@@ -1232,15 +1312,7 @@ impl ModelsManager for StaticModelsManager {
             self.models()
                 .into_iter()
                 .map(|model| {
-                    let origin = if self
-                        .remote_models
-                        .iter()
-                        .any(|entry| entry.slug == model.slug)
-                    {
-                        self.origin
-                    } else {
-                        ModelOrigin::Bundled
-                    };
+                    let origin = self.model_origin(&model.slug);
                     CatalogModel {
                         model: model.into(),
                         origin,
@@ -1250,6 +1322,21 @@ impl ModelsManager for StaticModelsManager {
         })
     }
 
+    fn catalog_contains_model<'a>(&'a self, model: &'a str) -> ModelsManagerFuture<'a, bool> {
+        let contains = match &self.source {
+            StaticCatalogSource::Supplied { models, .. } => {
+                models.iter().any(|entry| entry.slug == model)
+                    || (self.supplements_bundled_models()
+                        && crate::external_models::bundled_model(model).is_some())
+            }
+            StaticCatalogSource::BoundProvider { provider, routes } => {
+                crate::external_models::bundled_model(model).is_some()
+                    && bundled_model_is_bound(model, provider, routes)
+            }
+        };
+        Box::pin(std::future::ready(contains))
+    }
+
     #[tracing::instrument(skip_all, fields(model = model))]
     fn get_model_info<'a>(
         &'a self,
@@ -1257,22 +1344,19 @@ impl ModelsManager for StaticModelsManager {
         config: &'a ModelsManagerConfig,
     ) -> ModelsManagerFuture<'a, CatalogModel> {
         Box::pin(async move {
-            let models = self.models();
-            let remote = find_model_from_candidates(model, &models).map(|model| {
-                let origin = if self
-                    .remote_models
-                    .iter()
-                    .any(|entry| entry.slug == model.slug)
-                {
-                    self.origin
-                } else {
-                    ModelOrigin::Bundled
-                };
-                CatalogModel {
-                    model: model.into(),
-                    origin,
+            let exact = match &self.source {
+                StaticCatalogSource::Supplied { models, .. } => {
+                    models.iter().find(|entry| entry.slug == model)
                 }
-            });
+                StaticCatalogSource::BoundProvider { .. } => None,
+            };
+            let remote = exact
+                .cloned()
+                .or_else(|| find_model_from_candidates(model, &self.models()))
+                .map(|model| CatalogModel {
+                    origin: self.model_origin(&model.slug),
+                    model: model.into(),
+                });
             construct_model_info(model, remote, config)
         })
     }
@@ -1336,6 +1420,24 @@ impl ModelsManager for StaticModelsManager {
     ) -> ModelsManagerFuture<'_, ()> {
         Box::pin(async {})
     }
+}
+
+fn bundled_model_is_bound(
+    model: &str,
+    provider: &str,
+    routes: &OnceLock<Arc<ExternalModels>>,
+) -> bool {
+    let bound = match routes.get() {
+        Some(routes) => routes.provider_for_model(model),
+        None => crate::external_models::provider_for_model(model),
+    };
+    bound == Some(provider)
+}
+
+fn replace_with_bundled_external_models(models: &mut Cow<'_, [ModelInfo]>) {
+    let models = models.to_mut();
+    models.retain(|model| crate::external_models::bundled_model(&model.slug).is_none());
+    models.extend(crate::external_models::models().cloned());
 }
 
 fn load_remote_models_from_file() -> Result<Vec<ModelInfo>, std::io::Error> {

@@ -97,6 +97,8 @@ impl ModelCatalog {
             if config.model_provider_id != state.config.model_provider_id
                 || config.model_provider != state.config.model_provider
                 || config.model_catalog != state.config.model_catalog
+                || config.external_models != state.config.external_models
+                || config.load_external_models_json != state.config.load_external_models_json
                 || config.features.enabled(Feature::RuntimeAgentInstances)
                     != state
                         .config
@@ -152,6 +154,20 @@ impl ModelCatalog {
         let catalog = models_manager
             .model_catalog_with_origins(refresh_strategy, config.http_client_factory())
             .await;
+        if let Some(entry) = catalog.iter().find(|entry| {
+            config
+                .external_models
+                .canonical_model(&entry.slug)
+                .is_some()
+        }) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Model selector `{}` is both a configured alias and a catalog model ID. Rename the alias in user config.",
+                    entry.slug
+                ),
+            ));
+        }
         // Preserve first-party display order ahead of bundled entries, which keep
         // the manager's priority order. Configured and third-party catalogs use priority.
         let use_catalog_order = config.model_provider_id == OPENAI_PROVIDER_ID
@@ -170,6 +186,22 @@ impl ModelCatalog {
             .map(|entry| Arc::unwrap_or_clone(entry.model))
             .collect();
         let mut presets = models_manager.build_available_models(models);
+        if let Some(default) = presets.iter().find(|preset| preset.is_default)
+            && !config.allows_implicit_model(&default.model)
+        {
+            let mut eligible = presets
+                .iter()
+                .enumerate()
+                .filter(|(_, preset)| config.allows_implicit_model(&preset.model));
+            let default_index = eligible
+                .clone()
+                .find(|(_, preset)| preset.show_in_picker)
+                .or_else(|| eligible.next())
+                .map(|(index, _)| index);
+            for (index, preset) in presets.iter_mut().enumerate() {
+                preset.is_default = Some(index) == default_index;
+            }
+        }
         if config.model_provider.wire_api != WireApi::Responses {
             for preset in &mut presets {
                 preset.input_modalities = vec![InputModality::Text];

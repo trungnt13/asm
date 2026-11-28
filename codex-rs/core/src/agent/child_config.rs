@@ -100,7 +100,7 @@ pub(crate) async fn prepare_agent_spawn_config(
     if let Some(model) = config
         .model
         .as_deref()
-        .and_then(codex_models_manager::canonical_model)
+        .and_then(|model| config.external_models.canonical_model(model))
     {
         config.model = Some(model.to_owned());
     }
@@ -108,9 +108,12 @@ pub(crate) async fn prepare_agent_spawn_config(
         && !has_requested_reasoning_effort
         && role_reasoning_effort.is_none()
         && config.model.as_deref()
-            != model_before_role
-                .as_deref()
-                .map(|model| codex_models_manager::canonical_model(model).unwrap_or(model))
+            != model_before_role.as_deref().map(|model| {
+                config
+                    .external_models
+                    .canonical_model(model)
+                    .unwrap_or(model)
+            })
         && let Some(model) = config.model.as_deref()
         && crate::external_runtime::is_native_model(model)
     {
@@ -135,13 +138,13 @@ pub(crate) async fn prepare_agent_spawn_config(
     {
         config.model_reasoning_effort = Some(reasoning_effort.clone());
     }
-    validate_spawn_agent_config_effort(session, &config).await?;
     config
         .apply_external_model_provider()
         .map_err(|err| err.to_string())?;
     config
         .validate_external_subagent_model()
         .map_err(|err| err.to_string())?;
+    validate_spawn_agent_config_effort(session, &config).await?;
     if turn.multi_agent_version != MultiAgentVersion::V2
         && options.full_history_fork
         && config.model_provider_id != turn.config.model_provider_id
@@ -330,12 +333,17 @@ async fn apply_requested_spawn_agent_model_overrides(
     }
 
     if let Some(requested_model) = requested_model {
-        let requested_model =
-            codex_models_manager::canonical_model(requested_model).unwrap_or(requested_model);
+        let requested_model = config
+            .external_models
+            .canonical_model(requested_model)
+            .unwrap_or(requested_model);
         let native_model = crate::external_runtime::is_native_model(requested_model);
         let catalog_bound_model = config.model_catalog.is_none()
             && config.model_provider.model_catalog_url.is_none()
-            && codex_models_manager::provider_for_model(requested_model).is_some();
+            && config
+                .external_models
+                .provider_for_model(requested_model)
+                .is_some();
         let selected_model_name = if native_model || catalog_bound_model {
             requested_model.to_string()
         } else {
@@ -356,7 +364,15 @@ async fn apply_requested_spawn_agent_model_overrides(
             .get_model_info(&selected_model_name, &config.to_models_manager_config())
             .await;
 
-        config.model = Some(selected_model_name.clone());
+        if catalog_bound_model
+            && turn.multi_agent_version == MultiAgentVersion::V2
+            && selected_model_info.multi_agent_version == Some(MultiAgentVersion::Disabled)
+        {
+            return Err(format!(
+                "Model `{selected_model_name}` does not support spawning."
+            ));
+        }
+        config.model = Some(selected_model_name);
         if let Some(reasoning_effort) = requested_reasoning_effort {
             config.model_reasoning_effort = Some(reasoning_effort);
         } else {

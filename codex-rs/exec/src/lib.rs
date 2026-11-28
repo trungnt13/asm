@@ -1073,6 +1073,48 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         })
         .transpose()?;
 
+    // Keep raw invocation choices separate from defaults and catalog routing projections.
+    let invocation_override = |key: &str| {
+        in_process_start_args
+            .cli_overrides
+            .iter()
+            .rev()
+            .find(|(name, _)| name == key)
+            .and_then(|(_, value)| value.as_str())
+            .or_else(|| {
+                config
+                    .config_layer_stack
+                    .layers_high_to_low()
+                    .filter(|layer| layer.name != ConfigLayerSource::SessionFlags)
+                    .find(|layer| layer.config.get(key).is_some())
+                    .filter(|layer| {
+                        matches!(
+                            layer.name,
+                            ConfigLayerSource::User {
+                                profile: Some(_),
+                                ..
+                            }
+                        )
+                    })
+                    .and_then(|layer| layer.config.get(key)?.as_str())
+            })
+    };
+    let requested_model = overrides
+        .model
+        .as_deref()
+        .or_else(|| invocation_override("model"))
+        .map(str::to_owned);
+    let requested_provider = overrides
+        .model_provider
+        .as_deref()
+        .or_else(|| invocation_override("model_provider"))
+        .map(|provider| {
+            config
+                .config_layer_stack
+                .required_model_provider()
+                .unwrap_or(provider)
+                .to_owned()
+        });
     let mut request_ids = RequestIdSequencer::new();
     let client = AppServerClient::InProcess(
         InProcessAppServerClient::start(in_process_start_args)
@@ -1097,7 +1139,11 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                 &client,
                 ClientRequest::ThreadResume {
                     request_id: request_ids.next(),
-                    params: thread_resume_params_from_config(&config, thread_id, &overrides)?,
+                    params: ThreadResumeParams {
+                        model: requested_model.and_then(|_| config.model.clone()),
+                        model_provider: requested_provider,
+                        ..thread_resume_params_from_config(&config, thread_id, &overrides)?
+                    },
                 },
                 "thread/resume",
             )
@@ -1176,8 +1222,8 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                 request_id: request_ids.next(),
                 params: ThreadForkParams {
                     thread_id: source_thread_id,
-                    model: config.model.clone(),
-                    model_provider: Some(config.model_provider_id.clone()),
+                    model: requested_model,
+                    model_provider: requested_provider,
                     cwd: Some(config.cwd.to_string_lossy().to_string()),
                     runtime_workspace_roots: Some(LegacyAppPathString::from_abs_paths(
                         &config.workspace_roots,
@@ -1738,8 +1784,6 @@ fn thread_resume_params_from_config(
     } = inherited_thread_permissions(config, overrides)?;
     Ok(ThreadResumeParams {
         thread_id,
-        model: config.model.clone(),
-        model_provider: Some(config.model_provider_id.clone()),
         cwd: (overrides.cwd.is_some() || runtime_workspace_roots.is_some())
             .then(|| config.cwd.to_string_lossy().into_owned()),
         runtime_workspace_roots,

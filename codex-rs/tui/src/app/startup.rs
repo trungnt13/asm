@@ -583,9 +583,14 @@ impl App {
             tracing::warn!(%error, "TUI task delegation is unavailable without its MCP server");
         }
         let mut provider_writes = HashMap::new();
+        let external_models = startup_try!(
+            app_server
+                .external_model_routes(startup_config.as_ref().map(|response| &response.config))
+        );
         let model_catalog = Arc::new(
             ModelCatalog::new(available_models.clone(), bootstrap.catalog_provider)
                 .for_backend(app_server.backend_id(), &mut provider_writes)
+                .with_external_models(external_models)
                 .with_collaboration_modes(bootstrap.collaboration_modes),
         );
         let feedback_audience = bootstrap.feedback_audience;

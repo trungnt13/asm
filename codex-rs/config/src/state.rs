@@ -940,6 +940,17 @@ pub(crate) fn validate_enabled_config_layers<'a>(
     layers: impl IntoIterator<Item = &'a ConfigLayerEntry>,
 ) -> std::io::Result<()> {
     for layer in layers.into_iter().filter(|layer| !layer.is_disabled()) {
+        if layer.config.get("external_models").is_some()
+            && !matches!(layer.name, ConfigLayerSource::User { .. })
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "external_models can only be defined in user configuration, not {}",
+                    format_config_layer_source(&layer.name, CONFIG_TOML_FILE)
+                ),
+            ));
+        }
         if layer.config.get("system1").is_some() && layer.config.get("adaptive_reasoning").is_some()
         {
             return Err(std::io::Error::new(

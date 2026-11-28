@@ -5,6 +5,7 @@ use super::child_config::model_supports_multi_agent_backend;
 use crate::config::Config;
 use codex_model_provider_info::GEMINI_PROVIDER_ID;
 use codex_model_provider_info::WireApi;
+use codex_models_manager::bundled_model;
 use codex_models_manager::manager::ModelsManager;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
@@ -107,7 +108,8 @@ fn resolved_context_window_label(
     id: &str,
     active_windows: &HashMap<String, Option<i64>>,
 ) -> String {
-    let model = codex_models_manager::canonical_model(id).unwrap_or(id);
+    let external = &config.external_models;
+    let model = external.canonical_model(id).unwrap_or(id);
     match NativeRuntime::for_model(model) {
         Some((NativeRuntime::ClaudeCode, _)) => config
             .subagent_model_context_windows
@@ -119,9 +121,7 @@ fn resolved_context_window_label(
         Some((NativeRuntime::CursorAgent, _)) => "Context: runtime-managed.".to_string(),
         None => {
             let active_window = active_windows.get(model).copied().flatten();
-            let tokens = if let Some((provider_id, bundled)) =
-                codex_models_manager::bundled_provider_model(model)
-            {
+            let tokens = if let Some(provider_id) = external.provider_for_model(model) {
                 config
                     .model_providers
                     .get(provider_id)
@@ -136,21 +136,25 @@ fn resolved_context_window_label(
                                 .is_some_and(|required| required != provider_id);
                         if unsupported {
                             None
-                        } else if config.model_catalog.is_some() {
+                        } else if provider_id == config.model_provider_id
+                            || config.model_catalog.is_some()
+                        {
                             active_window
                         } else if (provider.wire_api == WireApi::GeminiInteractions
                             && provider_id == GEMINI_PROVIDER_ID)
                             || (provider.wire_api != WireApi::GeminiInteractions
                                 && provider.model_catalog_url.is_none())
                         {
-                            bundled.usable_context_window_with_override(configured_window(
-                                config, model,
-                            ))
+                            bundled_model(model).and_then(|metadata| {
+                                metadata.usable_context_window_with_override(configured_window(
+                                    config, model,
+                                ))
+                            })
                         } else {
                             None
                         }
                     })
-            } else if codex_models_manager::provider_has_model_bindings(&config.model_provider_id) {
+            } else if external.provider_has_model_bindings(&config.model_provider_id) {
                 None
             } else {
                 active_window

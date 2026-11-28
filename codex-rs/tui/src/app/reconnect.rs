@@ -27,6 +27,7 @@ pub(super) struct ReconnectState {
 pub(super) struct Reconnected {
     pub(super) session: AppServerSession,
     bootstrap: AppServerBootstrap,
+    external_models: Arc<codex_models_manager::ExternalModels>,
     thread: Option<AppServerStartedThread>,
     archived_thread: Option<ThreadId>,
 }
@@ -81,6 +82,7 @@ pub(super) async fn reconnect(
                 .with_thread_tool_transport(task_tools.clone());
             stage = "loading session settings";
             let bootstrap = session.bootstrap(&config).await?;
+            let external_models = session.read_external_model_routes().await?;
             let (thread, archived_thread) = if let Some(thread_id) = thread_id {
                 stage = "resuming the conversation";
                 match session
@@ -139,6 +141,7 @@ pub(super) async fn reconnect(
             Ok::<_, color_eyre::Report>(Reconnected {
                 session,
                 bootstrap,
+                external_models,
                 thread,
                 archived_thread,
             })
@@ -443,6 +446,7 @@ impl App {
         let Reconnected {
             mut session,
             bootstrap,
+            external_models,
             thread,
             archived_thread,
         } = connected;
@@ -526,6 +530,7 @@ impl App {
         self.model_catalog = Arc::new(
             ModelCatalog::new(bootstrap.available_models, bootstrap.catalog_provider)
                 .for_backend(app_server.backend_id(), &mut self.provider_writes)
+                .with_external_models(external_models)
                 .with_collaboration_modes(bootstrap.collaboration_modes),
         );
         self.pending_app_server_requests.clear();

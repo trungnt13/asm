@@ -98,6 +98,7 @@ async fn starts_and_forks_use_server_provider_unless_explicitly_selected() -> Re
             &local_settings,
             server_config,
             /*workspace_roots*/ None,
+            ForkModelProvider::Retain,
             parent,
             /*last_turn_id*/ None,
             /*before_turn_id*/ None,

@@ -11,7 +11,15 @@ use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::ModelListResponse;
 use codex_app_server_protocol::RequestId;
+use codex_models_manager::ExternalModels;
+use codex_protocol::config_types::ExternalModelRoute;
 use codex_protocol::openai_models::ModelPreset;
+use serde::Deserialize;
+use serde_json::Map;
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::path::Path;
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Default)]
@@ -78,6 +86,44 @@ async fn startup_catalog_provider(
 }
 
 impl AppServerSession {
+    pub(crate) fn external_model_routes(
+        &self,
+        config: Option<&codex_app_server_protocol::Config>,
+    ) -> color_eyre::Result<Arc<ExternalModels>> {
+        if self.thread_params_mode != ThreadParamsMode::Remote {
+            return Ok(Arc::default());
+        }
+        let Some(models) = config.and_then(|config| config.additional.get("external_models"))
+        else {
+            return Ok(Arc::default());
+        };
+        let routes = BTreeMap::<String, Map<String, Value>>::deserialize(models)?
+            .into_iter()
+            .map(|(model, mut fields)| {
+                // Older servers may still return metadata fields alongside routes.
+                fields.retain(|key, _| matches!(key.as_str(), "alias" | "model_provider"));
+                ExternalModelRoute::deserialize(Value::Object(fields)).map(|route| (model, route))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        ExternalModels::from_config(&routes)
+            .map(Arc::new)
+            .map_err(|error| color_eyre::eyre::eyre!("Could not read server model routes: {error}"))
+    }
+
+    pub(crate) async fn read_external_model_routes(
+        &self,
+    ) -> color_eyre::Result<Arc<ExternalModels>> {
+        if self.thread_params_mode != ThreadParamsMode::Remote {
+            return Ok(Arc::default());
+        }
+        let response = crate::config_update::read_effective_config_if_supported(
+            self.request_handle(),
+            self.remote_cwd_override().unwrap_or(Path::new(".")),
+        )
+        .await?;
+        self.external_model_routes(response.as_ref().map(|response| &response.config))
+    }
+
     pub(crate) fn set_available_models(&mut self, models: Vec<ModelPreset>) {
         if let Some(default) = models
             .iter()

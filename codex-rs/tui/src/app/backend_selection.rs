@@ -366,6 +366,12 @@ impl App {
         let destination_thread = started.session.thread_id;
         let outgoing_has_queue = self.chat_widget.has_queued_follow_up_messages();
         if switching_backend {
+            let external_models =
+                if destination.thread_params_mode() == crate::ThreadParamsMode::Remote {
+                    Arc::clone(&config.external_models)
+                } else {
+                    Arc::default()
+                };
             self.switch_backend_context(
                 backends,
                 slot,
@@ -373,6 +379,7 @@ impl App {
                 settings.target,
                 config.cwd.to_path_buf(),
                 bootstrap,
+                external_models,
             )
             .await;
         }
@@ -504,6 +511,7 @@ impl App {
         target: AppServerTarget,
         cwd: PathBuf,
         bootstrap: AppServerBootstrap,
+        external_models: Arc<codex_models_manager::ExternalModels>,
     ) {
         let outgoing = backends.displayed_owner();
         self.saved_openings.abandon();
@@ -548,6 +556,7 @@ impl App {
         self.model_catalog = Arc::new(
             ModelCatalog::new(bootstrap.available_models, bootstrap.catalog_provider)
                 .for_backend(destination.backend_id(), &mut self.provider_writes)
+                .with_external_models(external_models)
                 .with_collaboration_modes(bootstrap.collaboration_modes),
         );
         self.feedback_audience = bootstrap.feedback_audience;
@@ -634,11 +643,15 @@ impl App {
             };
             let destination = backends.session_at_mut(destination_slot);
             self.cancel_cloud_inventory_refresh(destination).await;
-            let bootstrap = match self
-                .wait_for_opening_task(tui, destination.bootstrap(&settings.config))
+            let (bootstrap, external_models) = match self
+                .wait_for_opening_task(tui, async {
+                    let bootstrap = destination.bootstrap(&settings.config).await?;
+                    let external_models = destination.read_external_model_routes().await?;
+                    Ok::<_, color_eyre::eyre::Report>((bootstrap, external_models))
+                })
                 .await
             {
-                Ok(bootstrap) => bootstrap,
+                Ok(prepared) => prepared,
                 Err(error) => {
                     let message = format!("Failed to prepare the conversation: {error}");
                     self.add_session_picker_error(message);
@@ -663,6 +676,7 @@ impl App {
                 settings.target,
                 prepared.config.cwd.to_path_buf(),
                 bootstrap,
+                external_models,
             )
             .await;
             backends.switch_displayed(destination_slot, &mut self.agents_overview.input_states);

@@ -215,6 +215,7 @@ stream_max_retries = 0
                         &local_settings,
                         session_config.clone(),
                         Some(chat.session_workspace_roots()),
+                        ForkModelProvider::Retain,
                         thread_id,
                         /*last_turn_id*/ None,
                         /*before_turn_id*/ None,

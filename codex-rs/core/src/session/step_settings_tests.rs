@@ -312,8 +312,13 @@ fn configured_settings() -> StepSettings {
 }
 
 fn step_settings_constraints(requirements: &ConfigRequirements) -> StepSettingsConstraints<'_> {
+    static EXTERNAL_MODELS: std::sync::LazyLock<codex_models_manager::ExternalModels> =
+        std::sync::LazyLock::new(codex_models_manager::ExternalModels::default);
     StepSettingsConstraints {
         requirements,
+        external_models: &EXTERNAL_MODELS,
+        model_provider_id: codex_model_provider_info::OPENAI_PROVIDER_ID,
+        session_source: &SessionSource::Cli,
         guardian_approval_enabled: false,
         trusted_guardian_reviewer: false,
         has_full_disk_write_access: false,

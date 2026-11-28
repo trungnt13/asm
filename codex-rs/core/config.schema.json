@@ -2002,6 +2002,19 @@
       },
       "type": "object"
     },
+    "ExternalModelRoute": {
+      "additionalProperties": false,
+      "description": "Routes a canonical model ID without changing its catalog metadata.",
+      "properties": {
+        "alias": {
+          "type": "string"
+        },
+        "model_provider": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "FeatureToggleToml": {
       "additionalProperties": false,
       "description": "Optional enablement of a configured feature.",
@@ -8704,6 +8717,13 @@
     },
     "experimental_use_unified_exec_tool": {
       "type": "boolean"
+    },
+    "external_models": {
+      "additionalProperties": {
+        "$ref": "#/definitions/ExternalModelRoute"
+      },
+      "description": "Route external models by canonical model ID. Accepted only in user configuration. Use `model_catalog_json` to supply complete model metadata for a custom catalog.",
+      "type": "object"
     },
     "features": {
       "additionalProperties": false,

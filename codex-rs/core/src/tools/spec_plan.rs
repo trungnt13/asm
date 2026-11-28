@@ -1407,59 +1407,59 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
 fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistry) {
     let turn_context = context.turn_context;
     if collab_tools_enabled(turn_context, context.model_info) {
-        let external_model_aliases = if turn_context.config.load_external_models_json {
-            let models = if turn_context.multi_agent_version == MultiAgentVersion::V2
-                && turn_context
-                    .config
-                    .multi_agent_v2
-                    .subagent_model_list
-                    .is_some()
-            {
-                crate::agent::model_catalog::advertised_models(
-                    &turn_context.available_models,
-                    turn_context.multi_agent_version,
-                    turn_context
-                        .config
-                        .multi_agent_v2
-                        .subagent_model_list
-                        .as_deref(),
-                )
-                .unwrap_or_default()
-            } else {
-                turn_context
-                    .available_models
-                    .iter()
-                    .filter(|model| model.show_in_picker)
-                    .collect()
-            };
-            models
-                .into_iter()
-                .filter(|model| {
-                    crate::agent::child_config::model_supports_multi_agent_backend(
-                        model,
-                        turn_context.multi_agent_version,
-                    )
-                })
-                .filter(|model| {
-                    crate::external_runtime::is_native_model(&model.model)
-                        || codex_models_manager::provider_for_model(&model.model).is_some_and(
-                            |provider| {
-                                turn_context.config.model_providers.contains_key(provider)
-                                    && turn_context
-                                        .config
-                                        .config_layer_stack
-                                        .required_model_provider()
-                                        .is_none_or(|required| required == provider)
-                            },
-                        )
-                })
-                .filter_map(|model| codex_models_manager::model_alias(&model.model))
-                .map(str::to_owned)
-                .collect()
-        } else {
-            Vec::new()
-        };
         if multi_agent_v2_enabled(turn_context) {
+            let config = &turn_context.config;
+            let expose_spawn_agent_model_overrides =
+                config.multi_agent_v2.expose_spawn_agent_model_overrides;
+            let external_model_aliases = if expose_spawn_agent_model_overrides {
+                let models = if let Some(configured) = &config.multi_agent_v2.subagent_model_list {
+                    crate::agent::model_catalog::advertised_models(
+                        &turn_context.available_models,
+                        turn_context.multi_agent_version,
+                        Some(configured),
+                    )
+                    .unwrap_or_default()
+                } else {
+                    turn_context
+                        .available_models
+                        .iter()
+                        .filter(|model| model.show_in_picker)
+                        .collect()
+                };
+                // Reserve room for the heading and usage text in the rendered alias block.
+                let mut alias_budget = 750usize;
+                models
+                    .into_iter()
+                    .filter_map(|model| {
+                        if !crate::agent::child_config::model_supports_multi_agent_backend(
+                            model,
+                            turn_context.multi_agent_version,
+                        ) || (!config.load_external_models_json
+                            && !config.external_models.is_configured(&model.model))
+                        {
+                            return None;
+                        }
+                        if !crate::external_runtime::is_native_model(&model.model) {
+                            let provider =
+                                config.external_models.provider_for_model(&model.model)?;
+                            if !config.model_providers.contains_key(provider)
+                                || config
+                                    .config_layer_stack
+                                    .required_model_provider()
+                                    .is_some_and(|required| required != provider)
+                            {
+                                return None;
+                            }
+                        }
+                        let alias = config.external_models.model_alias(&model.model)?;
+                        alias_budget = alias_budget.checked_sub(alias.len().saturating_add(3))?;
+                        Some(alias.to_owned())
+                    })
+                    .take(crate::agent::child_config::MAX_SPAWN_AGENT_MODEL_OVERRIDES)
+                    .collect()
+            } else {
+                Vec::new()
+            };
             let model_messages = ResolvedModelMessages::from_model(context.model_info);
             let spawn_agent_description =
                 model_messages.multi_agent_tool_description_override("spawn_agent");
@@ -1492,10 +1492,6 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                 .config
                 .features
                 .enabled(Feature::ModelCatalogInContext);
-            let expose_spawn_agent_model_overrides = turn_context
-                .config
-                .multi_agent_v2
-                .expose_spawn_agent_model_overrides;
             registry.register_trusted_with_native_review(
                 multi_agent_v2_handler(
                     SpawnAgentHandlerV2::new(
@@ -1507,11 +1503,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                                 .multi_agent_v2
                                 .subagent_model_list
                                 .clone(),
-                            external_model_aliases: if expose_spawn_agent_model_overrides {
-                                external_model_aliases
-                            } else {
-                                Vec::new()
-                            },
+                            external_model_aliases,
                             multi_agent_version: turn_context.multi_agent_version,
                             include_model_catalog_in_spawn_agent_list,
                             model_catalog_in_context,

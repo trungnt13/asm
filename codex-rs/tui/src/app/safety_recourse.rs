@@ -3,6 +3,7 @@
 use super::session_lifecycle::ThreadAttachPresentation;
 use super::*;
 use crate::app_server_session::ForkGoalContinuation;
+use crate::app_server_session::ForkModelProvider;
 use color_eyre::eyre::OptionExt;
 use color_eyre::eyre::ensure;
 
@@ -61,6 +62,7 @@ pub(super) async fn continue_with_rewrite(
                 &app.local_settings,
                 config.clone(),
                 Some(app.chat_widget.session_workspace_roots()),
+                ForkModelProvider::Retain,
                 thread_id,
                 /*last_turn_id*/ None,
                 /*before_turn_id*/ Some(turn_id.clone()),

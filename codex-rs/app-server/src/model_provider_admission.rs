@@ -1,11 +1,28 @@
-use codex_models_manager::canonical_model;
-use codex_models_manager::provider_for_model;
-use codex_protocol::openai_models::is_native_runtime_model;
+use codex_models_manager::ExternalModels;
+use std::io;
 
-pub(super) fn model_selects_provider(model: Option<&str>, provider: &str) -> bool {
-    let Some(model) = model else {
-        return false;
-    };
-    let model = canonical_model(model).unwrap_or(model);
-    is_native_runtime_model(model) || provider_for_model(model) == Some(provider)
+pub(crate) fn validate_saved_model_provider(
+    external_models: &ExternalModels,
+    model: &str,
+    provider: &str,
+) -> io::Result<()> {
+    if let Some(canonical) = external_models.canonical_model(model) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "Saved model `{model}` is now an alias for `{canonical}`. Restore its model ID or start a new thread."
+            ),
+        ));
+    }
+    if let Some(bound_provider) = external_models.provider_for_model(model)
+        && bound_provider != provider
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "Saved model `{model}` uses provider `{provider}` but is now bound to `{bound_provider}`. Restore its provider binding or start a new thread."
+            ),
+        ));
+    }
+    Ok(())
 }
