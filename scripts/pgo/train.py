@@ -49,6 +49,7 @@ async def session(index, turns, children, sandbox, raw):
         "model_catalog_json": str(R / "cheap-model-catalog.json"),
         "subagent_model_list": ["gpt-6-luna"],
         "subagent_tools.collaboration": False,
+        "features.multi_agent_v2.max_concurrent_threads_per_session": children + 1,
         "features.multi_agent_v2.default_wait_timeout_ms": 30000,
         "features.multi_agent_v2.max_wait_timeout_ms": 30000,
         "notify": [],
@@ -147,6 +148,15 @@ async def session(index, turns, children, sandbox, raw):
                 raise RuntimeError(
                     f"Training requires the session-local {key}; check managed settings"
                 )
+        active_limit = (
+            effective.get("features", {})
+            .get("multi_agent_v2", {})
+            .get("max_concurrent_threads_per_session")
+        )
+        if active_limit != children + 1:
+            raise RuntimeError(
+                "Training needs one active thread for the root and each child"
+            )
         thread = (
             await rpc(
                 "thread/start",
