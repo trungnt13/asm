@@ -110,6 +110,15 @@ Use Linux with working Bubblewrap mount and PID namespaces. Use Python 3.11+,
 authorized Codex sign-in, and a musl-instrumented CLI with its matching helper.
 Profiles generated from a small local smoke can verify the instrumentation and
 consumption pipeline but are not a substitute for a release workload.
+Add `-Cprofile-generate=<private profile directory>` and
+`-Cllvm-args=-pgo-instr-select=false` to the musl Rust flags. Rust 1.99 can
+otherwise emit corrupt counters for select instructions. Set
+`CFLAGS_x86_64_unknown_linux_musl=-fno-profile-generate` and
+`CXXFLAGS_x86_64_unknown_linux_musl=-fno-profile-generate` for training so
+`cc` does not mix Zig's instrumentation format with Rust's profiling runtime.
+`setup.py` keeps the Rust counter setting and disables C/C++ profile use for
+musl consumers. Merge with the training toolchain’s `llvm-profdata` and reject
+any unreadable raw profile.
 Set `CODEX_HOME` to the source home and `PGO_INSTRUMENTED_BIN` to the CLI.
 Set `PGO_TRAINING_DIR` to an empty, private directory outside tracked sources.
 Run `python3 scripts/pgo/train.py`. Do not run it in release CI.
