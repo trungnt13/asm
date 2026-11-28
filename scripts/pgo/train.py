@@ -160,7 +160,21 @@ async def session(index, turns, children, sandbox, raw):
         for turn in range(1, turns + 1):
             prompt = f"Isolated coding exercise, session {index}, user turn {turn}/{turns}. Work only in {w}. Preserve sorted JSON output. "
             if turn in [1, (turns + 1) // 2, turns]:
-                prompt += f"Spawn exactly {children} new default-role subagents in PARALLEL, model gpt-6-luna, reasoning_effort low, fork_turns none, distinct task_names prefixed wave{turn}_. Launch every child before waiting. Give them different bounded read-only audits or real shell checks of this fixture and accumulated scenario files; no recursive spawning or edits. Do not attempt direct messaging, followup_task, or direct app-server input: those are disabled. Collect all results via list_agents/wait_agent. "
+                prompt += (
+                    f"Start this wave before doing your own work. Spawn exactly {children} "
+                    "new default-role subagents, using gpt-6-luna, low effort and fork_turns none. "
+                    f"Allocate each one slot 1 to {children}, with distinct task_names "
+                    f"wave{turn}_1 through wave{turn}_{children}. In every child prompt include: "
+                    f"'Your first action is to run python3 pgo_wave.py {turn} SLOT {children}, "
+                    "replacing SLOT with your assigned integer. Wait for its exit if the shell "
+                    "returns a running session. After it succeeds, perform "
+                    "your assigned read-only audit and report the result.' Give each slot a "
+                    "different bounded, useful audit of this fixture or prior scenarios. "
+                    "Spawn all slots before waiting. Collect a completed result from every "
+                    "child via list_agents/wait_agent before proceeding, even if a wait "
+                    "returns only some results. Do not interrupt children, use direct messaging, "
+                    "send followups, or ask children to spawn agents or edit the fixture. "
+                )
             else:
                 prompt += "Do not spawn agents this turn; the next parallel audit batch is scheduled later in this session. "
             if turn == 1:
